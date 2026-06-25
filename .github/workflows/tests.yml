@@ -20,7 +20,7 @@ jobs:
         run: |
           python3 -m pip install --upgrade pip
           pip install .
-          pip install flake8 flake8-print
+          pip install pytest flake8 flake8-print
       - name: Run linting
         run: flake8 --select=T201 src/styne
       - name: Run integration tests
