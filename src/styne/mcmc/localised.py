@@ -1,0 +1,201 @@
+from styne.statistics.measure import ProbabilityMeasure
+from typing import Optional
+import numpy as np
+
+from styne.statistics.interface import DensityInterface
+from styne.statistics.gaussian import Gaussian
+from styne.statistics.dirac import DiracMeasure
+from styne.statistics.covariance import (
+    DiagonalCovarianceMatrix, IIDCovarianceMatrix
+)
+from styne.statistics.radonnikodym import RadonNikodym
+from styne.parameter.parameter import Parameter
+from styne.mcmc.metropolishastings import MetropolisHastings
+from styne.mcmc.surrogate import SurrogateTransitionMeasure
+from styne.utility.densityarithmetic import LogScalingWrapper, ProductWrapper
+from styne.parameter.vector import Vector
+
+
+class LocalisedSurrogateDensity(RadonNikodym):
+    """
+    Surrogate density localised to a point x in R^d.
+
+    The log-density is
+
+        theta * log pi_k(u) - gamma/2 * ||u - x||^2
+
+    Parameters
+    ----------
+    regularisation : float
+        Regularisation strength gamma (positive).
+    tempering : float
+        Tempering parameter theta in (0, 1].
+    surrogateDensity : DensityInterface
+        The surrogate density pi_k.
+    temperFullDensity : bool, optional
+        If True, temper the full surrogate density (including reference/prior).
+        If False (default), temper only the Radon-Nikodym derivative.
+    spectralWeights : ndarray, optional
+        Per-mode weights for physical-space regularisation. When
+        provided, the penalty becomes gamma/2 * ||W(u - x)||^2
+        where W = diag(spectralWeights). When None, uses ||u - x||^2.
+    """
+
+    def __init__(self,
+        regularisation: float,
+        tempering: float,
+        surrogateDensity: DensityInterface,
+        spectralWeights=None,
+        temperFullDensity: bool = False
+    ) -> None:
+
+        self._surrogateDensity = surrogateDensity
+
+        if regularisation <= 0:
+            raise ValueError("Regularisation must be positive.")
+        if tempering <= 0. or 1. < tempering:
+            raise ValueError("Tempering must be in (0, 1].")
+
+        self._reg = regularisation
+        self._tempering = tempering
+        self._spectralWeights = spectralWeights
+        self._temperFullDensity = temperFullDensity
+
+        regCov = self._build_reg_covariance(
+            surrogateDensity.domainDimension, spectralWeights
+        )
+        self._regGaussian = Gaussian(regCov)
+        
+        # Use a clone of the surrogate's mean to preserve domainType (e.g. Function vs Vector)
+        if hasattr(surrogateDensity, 'reference'):
+            self._regGaussian.mean =  surrogateDensity.reference.mean.clone()
+        else:
+            self._regGaussian.mean = Vector(np.zeros(surrogateDensity.domainDimension))
+        
+        self._regGaussian.mean.coordinate = np.zeros(surrogateDensity.domainDimension)
+
+        # if the surrogate density is itself a Radon-Nikodym density, there is a
+        # choice in which to consider the reference measure. We choose the
+        # inherent reference measure of the surrogate density. Typically this will
+        # be the prior in a Bayesian model. Important for preconditioned MCMCs.
+        if isinstance(surrogateDensity, RadonNikodym):
+            scaledDerivative = LogScalingWrapper(surrogateDensity.derivative, tempering)
+
+            if temperFullDensity:
+                scaledCov = surrogateDensity.reference.covariance.clone()
+                scaledCov.scaling = scaledCov.scaling / tempering
+                reference = Gaussian(scaledCov, surrogateDensity.reference.mean)
+                
+                self._surrogateComponent = ProductWrapper([
+                    LogScalingWrapper(surrogateDensity.reference.density, tempering),
+                    scaledDerivative
+                ])
+            else:
+                reference = surrogateDensity.reference
+                self._surrogateComponent = ProductWrapper([
+                    surrogateDensity.reference.density,
+                    scaledDerivative
+                ])
+
+            derivative = ProductWrapper([
+                self._regGaussian.density,
+                scaledDerivative
+            ])
+
+        else:
+            reference = self._regGaussian
+            derivative = LogScalingWrapper(surrogateDensity, tempering)
+            self._surrogateComponent = LogScalingWrapper(surrogateDensity, tempering)
+
+        super().__init__(reference, derivative)
+
+    def evaluate_log_surrogate(self, y: Parameter) -> float:
+        """Log-density of the tempered surrogate, excluding regularisation.
+
+        In the DART acceptance ratio, the regularisation terms cancel by
+        symmetry. Only this component contributes to the outer MH ratio.
+        """
+        return self._surrogateComponent.evaluate_log(y)
+
+    @property
+    def location(self) -> Parameter:
+        return self._regGaussian.mean
+
+    @location.setter
+    def location(self, location: Parameter):
+        self._regGaussian.mean = location
+
+    @property
+    def regularisation(self) -> float:
+        return self._reg
+
+    @property
+    def tempering(self) -> float:
+        return self._tempering
+
+    @property
+    def spectralWeights(self):
+        return self._spectralWeights
+
+    def _build_reg_covariance(self, dimension, spectralWeights):
+        if spectralWeights is not None:
+            return DiagonalCovarianceMatrix(
+                1.0 / np.clip(self._reg * spectralWeights**2, 1e-30, None)
+            )
+        return IIDCovarianceMatrix(dimension, 1.0 / self._reg)
+
+    def sync_weights(self, weights):
+        """Rebuild regularisation covariance from updated spectral weights."""
+        if weights is None:
+            return
+        self._spectralWeights = weights
+        self._regGaussian.covariance = DiagonalCovarianceMatrix(
+            1.0 / np.clip(self._reg * weights**2, 1e-30, None)
+        )
+
+
+
+class LocalisedSurrogateTransitionMeasure(SurrogateTransitionMeasure):
+    """
+    Surrogate transition measure whose target is a localised density.
+
+    On each draw, the localisation centre and the Dirac initial measure
+    are both moved to the current fine-level state before running the
+    surrogate chain.
+
+    Parameters
+    ----------
+    surrogateChain : MetropolisHastings
+        Must target a 'LocalisedSurrogateDensity'.
+    nChain : int
+        Length of each surrogate chain run.
+    """
+
+    def __init__(self,
+        surrogateChain: MetropolisHastings,
+        nChain: int,
+        initialMeasure: Optional[ProbabilityMeasure] = None
+    ):
+
+        if not isinstance(surrogateChain.target, LocalisedSurrogateDensity):
+            raise TypeError("surrogateChain target must be a "
+                            "LocalisedSurrogateDensity instance.")
+
+        super().__init__(surrogateChain, nChain, initialMeasure)
+
+    @property
+    def location(self) -> Parameter:
+        return self._mcmc.target.location
+
+    @location.setter
+    def location(self, location: Parameter):
+        self._initialMeasure.location = location
+        self._mcmc.target.location = location
+
+    @property
+    def regularisation(self) -> float:
+        return self.density.regularisation
+
+    @property
+    def tempering(self) -> float:
+        return self.density.tempering

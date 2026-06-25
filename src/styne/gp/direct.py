@@ -1,0 +1,223 @@
+import numpy as np
+from scipy.linalg import solve_triangular
+from scipy.spatial.distance import cdist
+from styne.gp.engine import GPEngine, GPState
+from styne.model.representation.expansion import Expansion
+from styne.statistics.interface import CovarianceFunctionInterface, Predictor
+from styne.statistics.covariance import CovarianceMatrix, DenseCovarianceMatrix, IIDCovarianceMatrix
+from styne.statistics.stationary import matern_covariance
+from styne.utility.grid import Grid
+from styne.utility.interpolation import Interpolation1D
+
+
+class DirectRealisation(Expansion):
+    """
+    A Gaussian process parametrisation where the coordinates directly correspond
+    to the values of the realisation at the grid points.
+    """
+
+    def __init__(self, grid: Grid, dimension: int):
+
+        self._dim = dimension
+        self._grid = grid
+        self._coeff = None
+
+    @property
+    def dimension(self) -> int:
+        return self._dim
+
+    @property
+    def coefficient(self) -> np.ndarray:
+
+        if self._coeff is None:
+            raise ValueError("DirectRealisation has no coefficient set.")
+
+        return self._coeff.copy()
+
+    @coefficient.setter
+    def coefficient(self, coeff: np.ndarray) -> None:
+        self.project(self.validate(coeff))
+
+    def validate(self, coeff: np.ndarray) -> np.ndarray:
+
+        coeff = np.asarray(coeff, dtype=float)
+
+        if coeff.size != self._dim:
+            raise ValueError(
+                f"Expected {self._dim} values, got {coeff.size}.")
+
+        return coeff
+
+    def project(self, coeff: np.ndarray) -> None:
+
+        if coeff.size != self._dim:
+            raise ValueError(
+                f"Expected {self._dim} values, got {coeff.size}.")
+
+        self._coeff = coeff
+
+    def evaluate(self, queryGrid: Grid) -> np.ndarray:
+
+        if self._grid.dimension != 1:
+            raise NotImplementedError(
+                "DirectRealisation does not support evaluate() in 2D."
+            )
+
+        gridArr = self._grid.to_array().ravel()
+
+        return Interpolation1D(gridArr, self._coeff, degree=1).evaluate(queryGrid)
+
+    def clone(self) -> 'DirectRealisation':
+        result = DirectRealisation(self._grid, self._dim)
+        if self._coeff is not None:
+            result._coeff = self._coeff.copy()
+        return result
+
+
+class DirectGPEngine(GPEngine):
+    """
+    GPEngine for the direct (whitened) GP parametrisation.
+
+    The parameter θ = z̃ lives in N(0, I). The field at the sites is
+    u = L @ z̃, where L is the Cholesky factor of K(sites, sites).
+    Changing the sites requires rebuilding the covariance.
+    """
+
+    def __init__(self, grid: Grid, nugget: float = 0.0):
+        self._grid = grid
+        self._nugget = nugget
+        self._shapeCovariance = None
+
+    @property
+    def grid(self) -> Grid:
+        return self._grid
+
+    @property
+    def spatialDimension(self) -> int:
+        return self._grid.dimension
+
+    def requires_covariance_rebuild(self) -> bool:
+        return True
+
+    def set_sites(self, sites: Grid) -> None:
+
+        if sites is not None:
+            self._grid = sites
+
+    def build_realisation(self) -> DirectRealisation:
+        return DirectRealisation(self._grid, len(self._grid))
+
+    def build_covariance(
+            self, covarianceFunction: CovarianceFunctionInterface
+    ) -> CovarianceMatrix:
+
+        covarianceMatrix = covarianceFunction.evaluate_covariance(self._grid, self._grid)
+
+        if not isinstance(covarianceMatrix, CovarianceMatrix):
+            covarianceMatrix = 0.5 * (covarianceMatrix + covarianceMatrix.T)
+            if self._nugget > 0.:
+                covarianceMatrix = covarianceMatrix + \
+                    self._nugget * np.eye(len(self._grid))
+
+        self._shapeCovariance = covarianceMatrix if \
+            isinstance(covarianceMatrix, CovarianceMatrix) \
+            else DenseCovarianceMatrix(covarianceMatrix)
+        
+        return IIDCovarianceMatrix(len(self._grid), 1.0)
+
+    def at_sites(self, realisation, sites: Grid) -> np.ndarray:
+        return self._shapeCovariance.apply_chol_factor(realisation.coefficient)
+
+    def apply_jacobian(
+            self, v: np.ndarray, covariance: CovarianceMatrix) -> np.ndarray:
+        return self._shapeCovariance.apply_chol_factor(v)
+
+    def apply_adjoint_jacobian(
+            self, w: np.ndarray, covariance: CovarianceMatrix) -> np.ndarray:
+        return self._shapeCovariance.apply_chol_factor_transpose(w)
+
+    def evaluate_exact_conditional(self, queryGrid: Grid, state, covFcn: CovarianceFunctionInterface) -> np.ndarray:
+        """ Exact conditional mean projection for Direct engine. """
+        from scipy.linalg import cholesky, cho_solve
+        
+        # Determine coordinate (handle both Expansion and Function)
+        z = state.coordinate if hasattr(state, 'coordinate') else state.coefficient
+        
+        kStar = covFcn.evaluate_covariance(queryGrid, self._grid)
+        kStarArr = kStar.to_dense() if isinstance(kStar, DenseCovarianceMatrix) else np.asarray(kStar)
+        
+        if isinstance(self._shapeCovariance, DenseCovarianceMatrix):
+            L = self._shapeCovariance._cholFactor
+            LT_inv_z = solve_triangular(L.T, z, lower=False)
+            return kStarArr @ LT_inv_z
+        else:
+            raise NotImplementedError("Exact conditional only supported for DenseCovarianceMatrix shape covariance.")
+
+    def evaluate_hyper_gradient(self, state: Expansion, zTilde: np.ndarray, covFcn: CovarianceFunctionInterface) -> dict:
+        if not hasattr(covFcn, 'evaluate_covariance_gradient'):
+            raise NotImplementedError("Exact gradients not implemented for this covariance.")
+        
+        gradK = covFcn.evaluate_covariance_gradient(self._grid, self._grid)
+        
+        if not isinstance(self._shapeCovariance, DenseCovarianceMatrix):
+             raise NotImplementedError("Hyper gradient requires dense covariance matrix.")
+             
+        L = self._shapeCovariance._cholFactor
+        z = state.coefficient
+        result = {}
+        for paramName, dK in gradK.items():
+            dKArr = dK.to_dense() if isinstance(dK, DenseCovarianceMatrix) else np.asarray(dK)
+            
+            temp = solve_triangular(L, dKArr, lower=True)
+            M = solve_triangular(L, temp.T, lower=True).T
+            
+            X = np.tril(M)
+            np.fill_diagonal(X, 0.5 * np.diag(M))
+            
+            du = L @ (X @ z)
+            result[paramName] = float(np.dot(zTilde, du))
+            
+        return result
+
+    def create_predictor(self, gpState: GPState, queryGrid: Grid) -> Predictor:
+        return DirectGPPredictor(gpState, self, queryGrid)
+
+
+class DirectGPPredictor(Predictor):
+    def __init__(
+        self, gpState: GPState, engine: DirectGPEngine,
+        queryGrid: Grid
+    ):
+        self._gpState = gpState
+        self._engine = engine
+        self._distanceMatrix = self._compute_distances(
+            engine, queryGrid
+        )
+
+    def _compute_distances(self, engine, queryGrid):
+        queryArr = queryGrid.to_array()
+        gridArr = engine.grid.to_array()
+        if queryArr.ndim == 1:
+            queryArr = queryArr[:, np.newaxis]
+        if gridArr.ndim == 1:
+            gridArr = gridArr[:, np.newaxis]
+        return cdist(queryArr, gridArr)
+
+    def mean(self) -> np.ndarray:
+        covFcn = self._gpState.covarianceFunction
+        kStarArr = matern_covariance(
+            self._distanceMatrix,
+            covFcn._lengthScale,
+            covFcn._smoothness,
+            covFcn._marginalVariance
+        )
+        z = self._gpState.parameter.coordinate
+        shapeCov = self._engine._shapeCovariance
+        if not isinstance(shapeCov, DenseCovarianceMatrix):
+            raise NotImplementedError(
+                "Only DenseCovarianceMatrix is supported."
+            )
+        L = shapeCov._cholFactor
+        return kStarArr @ solve_triangular(
+            L.T, z, lower=False
+        )

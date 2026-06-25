@@ -1,0 +1,46 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "styne"
+version = "0.1.0"
+description = ""
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "MIT"}
+authors = [
+    {name = "Robert Kutri", email = "r.kutri@gmail.com"},
+]
+dependencies = [
+    "numpy>=1.24.4",
+    "scipy>=1.10.1",
+    "tqdm>=4.65.0",
+]
+
+[project.optional-dependencies]
+plotting = [
+    "matplotlib>=3.7.0",
+]
+reproducibility = [
+    "joblib>=1.4.2",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.2.2",
+    "flake8>=6.0.0",
+    "flake8-print>=5.0.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/rkutri/styne"
+Repository = "https://github.com/rkutri/styne"
+
+[tool.hatch.build]
+exclude = [
+    "/reproducibility",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/styne"]

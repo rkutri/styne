@@ -1,0 +1,15 @@
+# Matplotlib style sheet for manuscript figures
+font.family: serif
+font.size: 22
+axes.labelsize: 22
+axes.titlesize: 22
+xtick.labelsize: 18
+ytick.labelsize: 18
+legend.fontsize: 22
+legend.framealpha: 0.6
+lines.linewidth: 3.0
+lines.markersize: 8
+text.usetex: False
+figure.dpi: 300
+pdf.fonttype: 42
+ps.fonttype: 42

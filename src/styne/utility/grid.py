@@ -1,0 +1,182 @@
+"""
+Thin wrappers around a list of numpy point arrays. Mainly
+in order to be able to discern between sets of points and
+uniform grids.
+"""
+import numpy as np
+
+from typing import Iterable, Sequence, Union, Iterator
+
+
+class Grid:
+
+    def __init__(self, points: Iterable[Union[np.ndarray, Sequence[float]]]):
+
+        self._points = [np.asarray(p, dtype=float).ravel() for p in points]
+
+        if len(self._points) == 0:
+            self._dimension = 0
+
+        else:
+
+            d = int(self._points[0].shape[0])
+            for p in self._points:
+                if int(p.shape[0]) != d:
+                    raise ValueError("all points must have the same dimension")
+
+            self._dimension = d
+
+    @property
+    def dimension(self) -> int:
+        return self._dimension
+
+    def __len__(self) -> int:
+        return len(self._points)
+
+    def __getitem__(self, idx):
+
+        if isinstance(idx, slice):
+            return self.to_array()[idx]
+
+        if isinstance(idx, int):
+            return self._points[idx].copy()
+
+        raise TypeError("index must be int or slice")
+
+    def __iter__(self) -> Iterator[np.ndarray]:
+        for p in self._points:
+            yield p.copy()
+
+    def to_array(self) -> np.ndarray:
+
+        if len(self._points) == 0:
+            return np.empty((0, 0))
+
+        return np.vstack(self._points)
+
+    def __repr__(self) -> str:
+        return f"Grid(n_points={len(self)}, dimension={self.dimension})"
+
+
+class UniformGrid(Grid):
+    """Uniform grid. 1D wraps `np.linspace`, 2D stores two axes.
+
+    Constructor signatures:
+    - `UniformGrid(start, stop, num)` for 1D
+    - `UniformGrid((x0, x1, nx), (y0, y1, ny))` for 2D
+    """
+
+    def __init__(self, *args):
+        
+        # 1D
+        if len(args) == 3 and isinstance(args[2], int):
+
+            start, stop, num = args
+            self._xAxis = np.linspace(float(start), float(stop), int(num), dtype=float)
+            self._is2d = False
+            self._nX = self._xAxis.size
+            self._dimension = 1
+
+            return
+
+        # 2D
+        if len(args) == 2 and all(isinstance(a, (list, tuple)) and len(a) == 3 for a in args):
+
+            (x0, x1, nx), (y0, y1, ny) = args
+            self._xAxis = np.linspace(float(x0), float(x1), int(nx), dtype=float)
+            self._yAxis = np.linspace(float(y0), float(y1), int(ny), dtype=float)
+            self._is2d = True
+            self._nX = self._xAxis.size
+            self._nY = self._yAxis.size
+            self._dimension = 2
+
+            return
+
+        raise TypeError(
+            "UniformGrid expects (start, stop, num) for 1D or ((x0,x1,nx),(y0,y1,ny)) for 2D"
+        )
+
+    @property
+    def dimension(self) -> int:
+        return self._dimension
+
+    def __len__(self) -> int:
+        return int(self._nX if not self._is2d else self._nX * self._nY)
+
+    def __getitem__(self, idx):
+
+        if self._is2d:
+
+            # tuple indexing (ix, iy)
+            if isinstance(idx, tuple):
+
+                if len(idx) != 2:
+                    raise IndexError("tuple index must be length 2")
+
+                ix, iy = idx
+                return np.array([self._xAxis[int(ix)], self._yAxis[int(iy)]], dtype=float)
+
+            # flattened integer indexing
+            if isinstance(idx, int):
+                
+                n = int(idx)
+                if n < 0:
+                    n += len(self)
+
+                if n < 0 or n >= len(self):
+                    raise IndexError("index out of range")
+
+                ix = n // self._nY
+                iy = n % self._nY
+
+                return np.array([self._xAxis[ix], self._yAxis[iy]], dtype=float)
+
+            if isinstance(idx, slice):
+                return self.to_array()[idx]
+
+            raise TypeError("index must be int, slice, or tuple")
+
+        # 1D
+        if isinstance(idx, int):
+
+            n = int(idx)
+            if n < 0:
+                n += len(self)
+            return np.array([self._xAxis[n]], dtype=float)
+
+        if isinstance(idx, slice):
+            return self.to_array()[idx]
+        raise TypeError("index must be int or slice for 1D UniformGrid")
+
+    def __iter__(self) -> Iterator[np.ndarray]:
+        for row in self.to_array():
+            yield row
+
+    @property
+    def axis(self) -> np.ndarray:
+        if self._is2d:
+            raise AttributeError(
+                "axis is only available for 1D UniformGrid; use xAxis/yAxis")
+        return self._xAxis.copy()
+
+    @property
+    def xAxis(self) -> np.ndarray:
+        return self._xAxis.copy()
+
+    @property
+    def yAxis(self) -> np.ndarray:
+        if not self._is2d:
+            raise AttributeError(
+                "yAxis is only available for 2D UniformGrid")
+        return self._yAxis.copy()
+
+    def to_array(self) -> np.ndarray:
+
+        if self._is2d:
+
+            xs = np.repeat(self._xAxis, self._nY)
+            ys = np.tile(self._yAxis, self._nX)
+
+            return np.column_stack((xs, ys))
+
+        return self._xAxis.reshape(-1, 1).copy()
