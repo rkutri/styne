@@ -489,7 +489,7 @@ def plot_fidelity(perSmoothness, figuresDirectory):
     grid = UniformGrid((0., 1., resolution), (0., 1., resolution))
     gridX, gridY = np.meshgrid(grid.xAxis, grid.yAxis, indexing='ij')
 
-    figure, axes = plt.subplots(len(keys), 4, figsize=(21.5, 4.5 * len(keys)))
+    figure, axes = plt.subplots(len(keys), 3, figsize=(16, 4.5 * len(keys)))
     if len(keys) == 1:
         axes = axes[None, :]
     for row, key in enumerate(keys):
@@ -497,12 +497,10 @@ def plot_fidelity(perSmoothness, figuresDirectory):
         truthField = summary['truthField']
         postMean = summary['postMean']
         postStd = summary['postStd']
-        absoluteError = np.abs(postMean - truthField)
         shared = np.linspace(
             min(truthField.min(), postMean.min()),
             max(truthField.max(), postMean.max()), 25)
-        errorScale = max(float(postStd.max()), float(absoluteError.max()))
-        uncertaintyLevels = np.linspace(0.0, errorScale, 25)
+        uncertaintyLevels = np.linspace(0.0, float(postStd.max()), 25)
 
         imageTruth = axes[row, 0].contourf(
             gridX, gridY, truthField, levels=shared, cmap='RdBu_r')
@@ -519,12 +517,7 @@ def plot_fidelity(perSmoothness, figuresDirectory):
             gridX, gridY, postStd, levels=uncertaintyLevels, cmap='viridis')
         plt.colorbar(imageStd, ax=axes[row, 2])
         axes[row, 2].set_title('Posterior std. dev.')
-        imageError = axes[row, 3].contourf(
-            gridX, gridY, absoluteError, levels=uncertaintyLevels,
-            cmap='viridis')
-        plt.colorbar(imageError, ax=axes[row, 3])
-        axes[row, 3].set_title('Absolute error')
-        for column in range(4):
+        for column in range(3):
             _style_axes(axes[row, column])
     plt.tight_layout()
     plt.savefig(
