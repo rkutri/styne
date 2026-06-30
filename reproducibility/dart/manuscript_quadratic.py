@@ -13,21 +13,12 @@ preconditioning, and the condition number reduces to (0.25n + alpha) / alpha,
 independent of the spectrum of the design matrix. With n and alpha fixed,
 the gradient-Lipschitz constant L = 0.25 n + alpha and the condition
 number kappa = L / alpha are the same at every dimension.
-
-Two configurations are provided via the PRODUCTION flag below:
-  PRODUCTION = True   smooth, publication-quality curves (overnight run)
-  PRODUCTION = False  fast turnaround for debugging logic and plotting
-The dominant cost is the ESS sweep, which scales as
-nRunsESS * kStepsESS * nGamma * len(sweepDimensions). Raise kStepsESS
-first if panel (b) is not smooth enough; long chains estimate the
-integrated autocorrelation time more cleanly than many short ones.
 """
 
 import numpy as np
 from scipy.special import expit
 from pathlib import Path
 
-# pyrefly: ignore [missing-import]
 from manuscript_boilerplate import (
     hasMatplotlib, hasJoblib, plt, joblib
 )
@@ -62,23 +53,19 @@ convergenceDimension = 16
 sweepDimensions = [2, 4, 8, 16]
 mldaSubSteps = 10
 
-# Initialise every chain from an independent prior draw. The convergence
-# panel then averages over initialisations rather than tracking a single
-# fixed start.
 deterministicStart = False
 
-# True for the smooth overnight run, False for fast debugging.
 PRODUCTION = True
 
 if PRODUCTION:
     nConvergenceRuns = 500
     nEssRuns = 8
     nConvergenceSteps = 3_500
-    nEssSteps = 500_000      # dominant cost; raise for tighter tail ESS
+    nEssSteps = 500_000
     nAcceptanceBurnin = 5_000
     nAcceptanceRepeats = 100
     nAcceptanceSteps = 5_000
-    nGammaPoints = 16        # trimmed range is smooth, so fewer points suffice
+    nGammaPoints = 16
 else:
     nConvergenceRuns = 20
     nEssRuns = 4
@@ -92,8 +79,6 @@ else:
 CACHE = Path(__file__).parent / 'joblib_caches' / f"{Path(__file__).stem}.joblib"
 if hasJoblib:
     CACHE.parent.mkdir(parents=True, exist_ok=True)
-# Recompute when PARAMS change; reuse the cache otherwise. Set True to
-# force a fresh run regardless of the cache (e.g. the production run).
 FORCE = False
 
 PARAMS = dict(
@@ -153,13 +138,6 @@ def get_acceptance_rate(factory, start, nBurnin, nSteps):
 def setup_model(randomGenerator, d):
     """
     Setup preconditioned posterior for logistic regression.
-
-    Generates data from the logistic model with true parameter theta* = 1_d
-    and Rademacher covariates. The prior is N(0, (alpha * Sigma_X)^{-1}),
-    where Sigma_X = (1/n) C^T C. All quantities are returned in the
-    preconditioned coordinate system phi = Sigma_X^{1/2} theta, in which
-    the prior becomes N(0, alpha^{-1} I) and the condition number is
-    (0.25n + alpha) / alpha.
     """
     covariates = randomGenerator.choice([-1.0, 1.0], size=(nObservations, d))
     covariates = covariates / np.linalg.norm(covariates, axis=1, keepdims=True)
@@ -203,10 +181,6 @@ def setup_model(randomGenerator, d):
 
 def main():
     randomGenerator = np.random.default_rng(randomSeed)
-    # Separate persistent generator for the chains. DirectDART otherwise falls
-    # through to an unseeded default_rng(), making the figure irreproducible.
-    # One shared seeded generator threaded through every chain gives a single
-    # reproducible stream partitioned across samplers, which run sequentially.
     samplerGenerator = np.random.default_rng(randomSeed + 1)
 
     if hasMatplotlib:
@@ -332,21 +306,10 @@ def main():
             surrogateCovariance = DenseCovarianceMatrix(inversePrecision)
             surrogate = Gaussian(surrogateCovariance, mean=mapState)
 
-            # Fixed gamma/L grid, identical across dimensions (L is the same
-            # at every d), so the panel-(b) and (c) curves share an x-axis.
-            # Trimmed to [0.01, 10]: beyond gamma/L ~ 10 the slowest direction
-            # is frozen, where ESS ~ 1/N is neither estimable nor informative.
             gammas = np.logspace(-2, 1, nGammaPoints) * smoothness
 
-            # Slowest target direction (softest Hessian eigenvector). eigh
-            # returns ascending eigenvalues, so column 0 is the mixing
-            # bottleneck of the localised proposal at every gamma.
             softVec = eigenvectors[:, 0]
 
-            # Common random numbers across gamma: draw one set of prior-draw
-            # starts per dimension and reuse them at every gamma, so the
-            # curves move together instead of jittering point to point. The
-            # runs remain independent of one another, so averaging is intact.
             acceptanceStarts = [prior.generate_realisation(rng=randomGenerator)
                          for _ in range(nAcceptanceRepeats)]
             essStarts = [prior.generate_realisation(rng=randomGenerator)
