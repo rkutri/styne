@@ -157,16 +157,3 @@ def multichain_ess_per_iter(chains):
             break
         tau += 2.0 * pair
     return 1.0 / max(tau, 1.0)
-
-
-def extract_samples(chainOrArray, burnin: int, thinning=None) -> np.ndarray:
-    """Extract thinned samples from a Chain or a raw trajectory array."""
-    states = np.asarray(
-        chainOrArray.trajectory
-        if hasattr(chainOrArray, 'trajectory')
-        else chainOrArray
-    )
-    if thinning is None:
-        iat = integrated_autocorrelation(states[burnin:])
-        thinning = max(1, int(iat)) if np.isfinite(iat) else 1
-    return (states[burnin::thinning].copy(), thinning)

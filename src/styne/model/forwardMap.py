@@ -1,1 +1,0 @@
-# TODO: is it worth having a dedicated forward map class?

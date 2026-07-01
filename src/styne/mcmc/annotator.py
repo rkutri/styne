@@ -37,25 +37,3 @@ class Annotator(ABC):
             Scalar annotation to be stored in 'Chain.annotations'.
         """
         ...
-
-
-class BaseDensityAnnotator(Annotator):
-    """Annotates each state with the log-evaluation of a base density.
-
-    Used by 'ConstantBridgeCorrection' to record 'log pi_k(state)' at
-    every surrogate sub-chain step, avoiding post-hoc re-evaluation.
-
-    Parameters
-    ----------
-    baseDensity : DensityInterface
-        Density whose 'evaluate_log' is called at each step.
-    """
-
-    def __init__(self, baseDensity: DensityInterface) -> None:
-        if not isinstance(baseDensity, DensityInterface):
-            raise TypeError(
-                "baseDensity must implement DensityInterface.")
-        self._baseDensity = baseDensity
-
-    def annotate(self, state: Parameter) -> float:
-        return float(self._baseDensity.evaluate_log(state))
