@@ -1,10 +1,7 @@
 #!/usr/bin/env python3
 """
-1D Geometric Mismatch Experiment (Figure A).
-
 Good-surrogate regime. Four methods compared on ACF, IAT bars,
-and posterior mean. Claims 1-3.
-IAT bars averaged over nAvg independent MCMC runs.
+and posterior mean. Claims 1-3. IAT bars averaged over nAverages independent MCMC runs.
 """
 
 import numpy as np
@@ -35,7 +32,6 @@ from styne.mcmc.method.dart import DARTFactory
 from styne.mcmc.method.mlda import MLDAFactory
 from styne.mcmc.method.mala import MALAFactory
 from styne.utility.tuning import PCNTuner, RWTunerConfig, MALATuner, LangevinTunerConfig
-# pyrefly: ignore [missing-import]
 from manuscript_style import METHOD_COLORS
 from styne.utility.grid import Grid, UniformGrid
 from styne.utility.postprocessing import (
@@ -51,31 +47,26 @@ import re
 if hasMatplotlib:
     from matplotlib.lines import Line2D
 
-# Parameters
 lengthScale = 0.1
 smoothness = 2.5
 variance = 1.25
 meanIntercept = 1.5
 nObservations = 100
 nDoFTruth = 500
-nDofFine = 100
+nDoFFine = 100
 nDoFCoarse = 20
 nSubSteps = 25
 tempering = 0.75
-gamma = 0.25
+gamma = 0.1
 choleskyNugget = 1e-6
 randomSeed = 42
 nIatLocations = 50
 
-# True for the production figure, False for fast debugging. At the debug
-# length the chain is far shorter than the slow IATs (N is not >> tau),
-# so the IAT estimates carry ~100% relative error and the bar ordering is
-# noise. Any quantitative claim must come from a PRODUCTION run.
 PRODUCTION = True
 if PRODUCTION:
-    nSteps = 150_000
+    nSteps = 250_000
     nBurninSteps = 50_000
-    nAverages = 3
+    nAverages = 8
     nCrankUpSteps = 5000
 else:
     nSteps = 11_000
@@ -89,8 +80,6 @@ if hasMatplotlib:
 CACHE = Path(__file__).parent / 'joblib_caches' / f"{Path(__file__).stem}.joblib"
 if hasJoblib:
     CACHE.parent.mkdir(parents=True, exist_ok=True)
-# Recompute when PARAMS change; reuse the cache otherwise. Set True to
-# force a fresh run regardless of the cache.
 FORCE = False
 
 PARAMS = dict(
@@ -100,7 +89,7 @@ PARAMS = dict(
     meanIntercept=meanIntercept,
     nObservations=nObservations,
     nDoFTruth=nDoFTruth,
-    nDofFine=nDofFine,
+    nDofFine=nDoFFine,
     nDoFCoarse=nDoFCoarse,
     nSubSteps=nSubSteps,
     tempering=tempering,
@@ -127,15 +116,14 @@ def style_axes(axis):
 
 
 def log_cholesky_conditioning(observationSites):
-    """Condition number of the Matern-5/2 Gram matrix at the observation
-    sites (with nugget). A check that Cholesky(MALA) is limited by the
-    parametrisation rather than by an ill-conditioned covariance, which
-    would weaken the 'attributable to the parametrisation' reading."""
+    """Check for suitable nugget in Cholesky factorisation."""
     s = observationSites.to_array().ravel()
     r = np.abs(s[:, None] - s[None, :])
+
     scaled = np.sqrt(5.0) * r / lengthScale
     gram = variance * (1.0 + scaled + scaled ** 2 / 3.0) * np.exp(-scaled)
     gram = gram + choleskyNugget * np.eye(len(s))
+
     print(
         f"  [Cholesky] Matern Gram condition number "
         f"(nugget={choleskyNugget:g}): {np.linalg.cond(gram):.3e}"
@@ -144,23 +132,29 @@ def log_cholesky_conditioning(observationSites):
 
 def generate_shared_ground_truth(rng):
     """Generate the GP realisation and observation sites once."""
+
     covarianceFunction = MaternCovariance1D(lengthScale, smoothness, variance)
     trueGaussianProcess = GaussianProcess.dna(
         covarianceFunction, q=nDoFTruth, d=1
     )
+
     trueRealisation = trueGaussianProcess.sampler.generate_realisation(rng=rng)
     observationSites = Grid(np.sort(rng.uniform(0.0, 1.0, nObservations)))
+
     return trueRealisation, observationSites
 
 
 def compute_observations(rng, trueRealisation, observationSites, trend):
-    """Compute Poisson observations for a given trend."""
-    latentAtObs = (
+    """Generate Poisson observations for a given trend."""
+
+    latentAtObservations = (
         trueRealisation.function.evaluate(observationSites) + trend.evaluate(observationSites)
     )
-    measurements = PoissonResponse().simulate(latentAtObs, rng=rng)
+
+    measurements = PoissonResponse().simulate(latentAtObservations, rng=rng)
     data = Data(1, observationSites.to_array())
     data.measurement = measurements.coordinate.reshape(-1, 1)
+
     return data
 
 
@@ -173,32 +167,40 @@ def tune_mala(factory, initialValue, acceptanceGoal=0.5):
 
 
 def get_sampler_name(mcmc):
-    clsName = mcmc.__class__.__name__
-    if clsName == "MetropolisAdjustedLangevinAlgorithm":
+
+    className = mcmc.__class__.__name__
+
+    if className == "MetropolisAdjustedLangevinAlgorithm":
         return "MALA"
-    elif clsName == "PreconditionedCrankNicolson":
+    elif className == "PreconditionedCrankNicolson":
         return "pCN"
 
-    elif clsName == "MultilevelDelayedAcceptanceMCMC":
+    elif className == "MultilevelDelayedAcceptanceMCMC":
         return "MLDA"
-    elif clsName == "DART":
+    elif className == "DART":
         return "DART"
-    return clsName
+
+    return className
 
 
 def get_parametrisation_name(gp):
+
     if isinstance(gp.engine, DirectGPEngine):
         return "Cholesky"
     elif isinstance(gp.engine, DNAFourierEngine):
         return "DNA"
+
     return "Unknown"
 
 
 
 
 
-def run_mcmc_chain_online(sampler, initialState, predictor, evalPredictor, iatIndices):
+def run_mcmc_chain_online(
+    sampler, initialState, predictor, evaluationPredictor, iatIndices
+):
     """Run MCMC without storing chain, track IAT traces and posterior mean online."""
+
     sampler.storeChain = False
     
     iatTraces = np.empty((nSteps - nBurninSteps, nIatLocations))
@@ -206,14 +208,17 @@ def run_mcmc_chain_online(sampler, initialState, predictor, evalPredictor, iatIn
     
     for stepIndex, state in enumerate(
         sampler.stream_run(
-            nSteps, initialState, progress=True, description=f"Sampling {get_sampler_name(sampler)}"
+            nSteps,
+            initialState,
+            progress=True,
+            description=f"Sampling {get_sampler_name(sampler)}",
         )
     ):
         if stepIndex >= nBurninSteps:
             predictor.reset()
             predictor.interpolate(state)
             
-            fieldEvaluations = evalPredictor.mean()
+            fieldEvaluations = evaluationPredictor.mean()
             welford.update(fieldEvaluations)
             
             iatFieldEvaluations = fieldEvaluations[iatIndices]
@@ -224,10 +229,11 @@ def run_mcmc_chain_online(sampler, initialState, predictor, evalPredictor, iatIn
 
 def iat_summary_over_traces(tracesList):
     """Compute spatial IAT summary averaged over multiple runs from online traces."""
+
     nRuns = len(tracesList)
     bests = np.empty(nRuns)
     worsts = np.empty(nRuns)
-    avgs = np.empty(nRuns)
+    averages = np.empty(nRuns)
     worstIndices = np.empty(nRuns, dtype=int)
     bestIndices = np.empty(nRuns, dtype=int)
 
@@ -237,11 +243,14 @@ def iat_summary_over_traces(tracesList):
         integratedAutocorrelationTimes = np.empty(nIatLocations)
         for i in range(nIatLocations):
             iat = integrated_autocorrelation(traces[:, i])
-            integratedAutocorrelationTimes[i] = iat if np.isfinite(iat) and iat > 0 else np.nan
+            if np.isfinite(iat) and iat > 0:
+                integratedAutocorrelationTimes[i] = iat
+            else:
+                integratedAutocorrelationTimes[i] = np.nan
             
         bests[runIndex] = np.nanmin(integratedAutocorrelationTimes)
         worsts[runIndex] = np.nanmax(integratedAutocorrelationTimes)
-        avgs[runIndex] = np.nanmean(integratedAutocorrelationTimes)
+        averages[runIndex] = np.nanmean(integratedAutocorrelationTimes)
         worstIndices[runIndex] = int(np.nanargmax(integratedAutocorrelationTimes))
         bestIndices[runIndex] = int(np.nanargmin(integratedAutocorrelationTimes))
 
@@ -251,7 +260,7 @@ def iat_summary_over_traces(tracesList):
     return {
         'best': (np.mean(bests), np.std(bests) / np.sqrt(nRuns)),
         'worst': (np.mean(worsts), np.std(worsts) / np.sqrt(nRuns)),
-        'avg': (np.mean(avgs), np.std(avgs) / np.sqrt(nRuns)),
+        'avg': (np.mean(averages), np.std(averages) / np.sqrt(nRuns)),
         'worst_location': xValues[worstIndices[medianWorstRunIndex]],
         'best_location': xValues[bestIndices[medianBestRunIndex]],
         'worst_index': worstIndices[medianWorstRunIndex],
@@ -263,12 +272,14 @@ def iat_summary_over_traces(tracesList):
 
 def seed_chain(runIndex, methodIndex):
     """Deterministic seed for each MCMC run."""
+
     chainSeed = randomSeed + 10_000 * (runIndex + 1) + 1_000 * methodIndex
     np.random.seed(chainSeed)
 
 
-def run_figure_a(rng, trueRealisation, observationSites):
-    """Four methods on a smooth field (no spike), nAvg runs each."""
+def run_experiment(rng, trueRealisation, observationSites):
+    """Four methods on a smooth field, nAverages runs each."""
+
     trend = ConstantTrend(meanIntercept)
     covarianceFunction = MaternCovariance1D(lengthScale, smoothness, variance)
     data = compute_observations(rng, trueRealisation, observationSites, trend)
@@ -278,11 +289,12 @@ def run_figure_a(rng, trueRealisation, observationSites):
         trueRealisation.function.evaluate(fineGrid) + trend.evaluate(fineGrid)
     )
 
-    # --- Build GPs and targets (shared across runs) ---
     choleskyGaussianProcess = GaussianProcess.direct(
         observationSites, covarianceFunction, nugget=choleskyNugget
     )
+
     log_cholesky_conditioning(observationSites)
+
     choleskyPredictor = SGLMM(choleskyGaussianProcess, observationSites, trend=trend)
     choleskyTarget = UnnormalisedPosterior(
         choleskyGaussianProcess.measure,
@@ -290,7 +302,7 @@ def run_figure_a(rng, trueRealisation, observationSites):
     )
 
     dnaGaussianProcess = GaussianProcess.dna(
-        covarianceFunction, q=nDofFine, d=1
+        covarianceFunction, q=nDoFFine, d=1
     )
     dnaPredictor = SGLMM(dnaGaussianProcess, observationSites, trend=trend)
     dnaTarget = UnnormalisedPosterior(
@@ -310,6 +322,7 @@ def run_figure_a(rng, trueRealisation, observationSites):
             PoissonResponse()
         ),
     )
+
     partition = DNACoarseFinePartition(
         dnaGaussianProcess, qC=nDoFCoarse, d=1
     )
@@ -320,84 +333,118 @@ def run_figure_a(rng, trueRealisation, observationSites):
     xValues = np.linspace(0.0, 1.0, nIatLocations)
     iatIndices = [int(np.argmin(np.abs(gridArray - x))) for x in xValues]
     
-    choleskyEvalPredictor = choleskyPredictor.create_predictor(evaluationGrid)
-    dnaEvalPredictor = dnaPredictor.create_predictor(evaluationGrid)
+    choleskyEvaluationPredictor = choleskyPredictor.create_predictor(evaluationGrid)
+    dnaEvaluationPredictor = dnaPredictor.create_predictor(evaluationGrid)
 
     results = {}
 
-    # -- Cholesky + MALA --
     print("  [Cholesky + MALA]")
     tracesList = []
     welfordsList = []
-    # Dynamic label discovery
-    factory_test = MALAFactory()
-    factory_test.target = choleskyTarget
-    mcmc_test = tune_mala(factory_test, choleskyGaussianProcess.measure.mean)
-    paramName = get_parametrisation_name(choleskyGaussianProcess)
-    samplerName = get_sampler_name(mcmc_test)
-    legend_label = f"{paramName}({samplerName})"
 
-    for iRun in range(nAverages):
-        print(f"    Run {iRun + 1}/{nAverages}")
-        seed_chain(iRun, 0)
+    testFactory = MALAFactory()
+    testFactory.target = choleskyTarget
+    testMcmc = tune_mala(testFactory, choleskyGaussianProcess.measure.mean)
+    paramName = get_parametrisation_name(choleskyGaussianProcess)
+    samplerName = get_sampler_name(testMcmc)
+    legendLabel = f"{paramName}({samplerName})"
+
+    for runIndex in range(nAverages):
+
+        print(f"    Run {runIndex + 1}/{nAverages}")
+
+        seed_chain(runIndex, 0)
+
         factory = MALAFactory()
         factory.target = choleskyTarget
+
         mcmc = tune_mala(factory, choleskyGaussianProcess.measure.mean)
+
         print(f"      tuned MALA step size: {getattr(mcmc, 'stepSize', float('nan')):.3e}")
+
         iatTraces, welford = run_mcmc_chain_online(
-            mcmc, choleskyGaussianProcess.measure.mean.clone(), choleskyPredictor, choleskyEvalPredictor, iatIndices
+            mcmc,
+            choleskyGaussianProcess.measure.mean.clone(),
+            choleskyPredictor,
+            choleskyEvaluationPredictor,
+            iatIndices,
         )
+
         tracesList.append(iatTraces)
         welfordsList.append(welford)
-    results["Cholesky"] = {"traces": tracesList, "welfords": welfordsList, "legend_label": legend_label}
 
-    # -- DNA + MALA --
+    results["Cholesky"] = {
+        "traces": tracesList,
+        "welfords": welfordsList,
+        "legend_label": legendLabel,
+    }
+
     print("  [DNA + MALA]")
+
     tracesList = []
     welfordsList = []
-    # Dynamic label discovery
-    factory_test = MALAFactory()
-    factory_test.target = dnaTarget
-    mcmc_test = tune_mala(factory_test, dnaGaussianProcess.measure.mean)
-    paramName = get_parametrisation_name(dnaGaussianProcess)
-    samplerName = get_sampler_name(mcmc_test)
-    legend_label = f"{paramName}({samplerName})"
 
-    for iRun in range(nAverages):
-        print(f"    Run {iRun + 1}/{nAverages}")
-        seed_chain(iRun, 1)
+    testFactory = MALAFactory()
+    testFactory.target = dnaTarget
+    testMcmc = tune_mala(testFactory, dnaGaussianProcess.measure.mean)
+    paramName = get_parametrisation_name(dnaGaussianProcess)
+    samplerName = get_sampler_name(testMcmc)
+    legendLabel = f"{paramName}({samplerName})"
+
+    for runIndex in range(nAverages):
+
+        print(f"    Run {runIndex + 1}/{nAverages}")
+
+        seed_chain(runIndex, 1)
+
         factory = MALAFactory()
         factory.target = dnaTarget
+
         mcmc = tune_mala(factory, dnaGaussianProcess.measure.mean)
+
         print(f"      tuned MALA step size: {getattr(mcmc, 'stepSize', float('nan')):.3e}")
+
         iatTraces, welford = run_mcmc_chain_online(
-            mcmc, dnaGaussianProcess.measure.mean.clone(), dnaPredictor, dnaEvalPredictor, iatIndices
+            mcmc,
+            dnaGaussianProcess.measure.mean.clone(),
+            dnaPredictor,
+            dnaEvaluationPredictor,
+            iatIndices,
         )
+
         tracesList.append(iatTraces)
         welfordsList.append(welford)
-    results["DNA"] = {"traces": tracesList, "welfords": welfordsList, "legend_label": legend_label}
 
-    # -- DNA + MLDA --
+    results["DNA"] = {
+        "traces": tracesList,
+        "welfords": welfordsList,
+        "legend_label": legendLabel,
+    }
+
     print("  [DNA + MLDA]")
+
     tracesList = []
     welfordsList = []
-    # Dynamic label discovery
-    factory_test = MLDAFactory("mala")
-    factory_test.target = dnaTarget
-    factory_test.surrogate = [coarseTarget]
-    factory_test.partition = partition
-    factory_test.finePrior = finePrior
-    factory_test.nChain = [nSubSteps]
-    factory_test.surrogateCrankUp = nCrankUpSteps
-    factory_test.crankUpInitialState = dnaGaussianProcess.measure.mean.clone()
-    mcmc_test = factory_test.create()
-    paramName = get_parametrisation_name(dnaGaussianProcess)
-    samplerName = get_sampler_name(mcmc_test)
-    legend_label = f"{paramName}({samplerName})"
 
-    for iRun in range(nAverages):
-        print(f"    Run {iRun + 1}/{nAverages}")
-        seed_chain(iRun, 2)
+    testFactory = MLDAFactory("mala")
+    testFactory.target = dnaTarget
+    testFactory.surrogate = [coarseTarget]
+    testFactory.partition = partition
+    testFactory.finePrior = finePrior
+    testFactory.nChain = [nSubSteps]
+    testFactory.surrogateCrankUp = nCrankUpSteps
+    testFactory.crankUpInitialState = dnaGaussianProcess.measure.mean.clone()
+    testMcmc = testFactory.create()
+    paramName = get_parametrisation_name(dnaGaussianProcess)
+    samplerName = get_sampler_name(testMcmc)
+    legendLabel = f"{paramName}({samplerName})"
+
+    for runIndex in range(nAverages):
+
+        print(f"    Run {runIndex + 1}/{nAverages}")
+
+        seed_chain(runIndex, 2)
+
         factory = MLDAFactory("mala")
         factory.target = dnaTarget
         factory.surrogate = [coarseTarget]
@@ -406,37 +453,52 @@ def run_figure_a(rng, trueRealisation, observationSites):
         factory.nChain = [nSubSteps]
         factory.surrogateCrankUp = nCrankUpSteps
         factory.crankUpInitialState = dnaGaussianProcess.measure.mean.clone()
+
         mcmc = factory.create()
+
         iatTraces, welford = run_mcmc_chain_online(
-            mcmc, dnaGaussianProcess.measure.mean.clone(), dnaPredictor, dnaEvalPredictor, iatIndices
+            mcmc,
+            dnaGaussianProcess.measure.mean.clone(),
+            dnaPredictor,
+            dnaEvaluationPredictor,
+            iatIndices,
         )
+
         tracesList.append(iatTraces)
         welfordsList.append(welford)
-    results["MLDA"] = {"traces": tracesList, "welfords": welfordsList, "legend_label": legend_label}
 
-    # -- DNA + DART --
+    results["MLDA"] = {
+        "traces": tracesList,
+        "welfords": welfordsList,
+        "legend_label": legendLabel,
+    }
+
     print("  [DNA + DART]")
+
     tracesList = []
     welfordsList = []
-    # Dynamic label discovery
-    factory_test = DARTFactory("mala")
-    factory_test.target = dnaTarget
-    factory_test.surrogate = [coarseTarget]
-    factory_test.partition = partition
-    factory_test.finePrior = finePrior
-    factory_test.regularisation = [gamma]
-    factory_test.tempering = [tempering]
-    factory_test.nChain = [nSubSteps]
-    factory_test.surrogateCrankUp = nCrankUpSteps
-    factory_test.crankUpInitialState = dnaGaussianProcess.measure.mean.clone()
-    mcmc_test = factory_test.create()
-    paramName = get_parametrisation_name(dnaGaussianProcess)
-    samplerName = get_sampler_name(mcmc_test)
-    legend_label = f"{paramName}({samplerName})"
 
-    for iRun in range(nAverages):
-        print(f"    Run {iRun + 1}/{nAverages}")
-        seed_chain(iRun, 3)
+    testFactory = DARTFactory("mala")
+    testFactory.target = dnaTarget
+    testFactory.surrogate = [coarseTarget]
+    testFactory.partition = partition
+    testFactory.finePrior = finePrior
+    testFactory.regularisation = [gamma]
+    testFactory.tempering = [tempering]
+    testFactory.nChain = [nSubSteps]
+    testFactory.surrogateCrankUp = nCrankUpSteps
+    testFactory.crankUpInitialState = dnaGaussianProcess.measure.mean.clone()
+    testMcmc = testFactory.create()
+    paramName = get_parametrisation_name(dnaGaussianProcess)
+    samplerName = get_sampler_name(testMcmc)
+    legendLabel = f"{paramName}({samplerName})"
+
+    for runIndex in range(nAverages):
+
+        print(f"    Run {runIndex + 1}/{nAverages}")
+
+        seed_chain(runIndex, 3)
+
         factory = DARTFactory("mala")
         factory.target = dnaTarget
         factory.surrogate = [coarseTarget]
@@ -449,11 +511,20 @@ def run_figure_a(rng, trueRealisation, observationSites):
         factory.crankUpInitialState = dnaGaussianProcess.measure.mean.clone()
         mcmc = factory.create()
         iatTraces, welford = run_mcmc_chain_online(
-            mcmc, dnaGaussianProcess.measure.mean.clone(), dnaPredictor, dnaEvalPredictor, iatIndices
+            mcmc,
+            dnaGaussianProcess.measure.mean.clone(),
+            dnaPredictor,
+            dnaEvaluationPredictor,
+            iatIndices,
         )
         tracesList.append(iatTraces)
         welfordsList.append(welford)
-    results["DART"] = {"traces": tracesList, "welfords": welfordsList, "legend_label": legend_label}
+
+    results["DART"] = {
+        "traces": tracesList,
+        "welfords": welfordsList,
+        "legend_label": legendLabel,
+    }
 
     return results, trueField, fineGrid, observationSites, data, trend
 
@@ -480,10 +551,10 @@ def plot_figure_a(results, trueField, fineGrid, observationSites, data, trend):
         observationSites, covarianceFunction, nugget=choleskyNugget
     )
     dnaGaussianProcess = GaussianProcess.dna(
-        covarianceFunction, q=nDofFine, d=1
+        covarianceFunction, q=nDoFFine, d=1
     )
 
-    gp_map = {
+    gpMap = {
         "Cholesky": choleskyGaussianProcess,
         "DNA": dnaGaussianProcess,
         "MLDA": dnaGaussianProcess,
@@ -603,7 +674,6 @@ def plot_figure_a(results, trueField, fineGrid, observationSites, data, trend):
     axis.set_title(f"Inference {legendLabel}")
     axis.legend(loc="upper left", bbox_to_anchor=(1.05, 1.0))
 
-    # Spatial coverage calculation
     trueInterp = interp1d(fineArray, trueField, kind='linear')(gridArray)
     inside = (trueInterp >= posteriorMean - 1.96 * posteriorStandardDeviation) & \
              (trueInterp <= posteriorMean + 1.96 * posteriorStandardDeviation)
@@ -617,9 +687,9 @@ def plot_figure_a(results, trueField, fineGrid, observationSites, data, trend):
     )
     figuresDir = Path(__file__).parent.parent / "figures"
     figuresDir.mkdir(parents=True, exist_ok=True)
-    figPath = figuresDir / "manuscript_1d_figA.pdf"
-    figure.savefig(figPath, bbox_inches="tight")
-    print(f"Saved {figPath}")
+    figurePath = figuresDir / "manuscript_1d_figA.pdf"
+    figure.savefig(figurePath, bbox_inches="tight")
+    print(f"Saved {figurePath}")
     plt.close(figure)
 
 
@@ -627,14 +697,14 @@ def main():
     enable_logging(logging.INFO)
     resultsA = None
     if hasJoblib and CACHE.exists() and not FORCE:
-        data_cache = joblib.load(CACHE)
-        if data_cache.get('params') == PARAMS:
-            resultsA = data_cache['resultsA']
-            trueFieldA = data_cache['trueFieldA']
-            fineGridA = data_cache['fineGridA']
-            observationSitesA = data_cache['observationSitesA']
-            dataA = data_cache['dataA']
-            trendA = data_cache['trendA']
+        dataCache = joblib.load(CACHE)
+        if dataCache.get('params') == PARAMS:
+            resultsA = dataCache['resultsA']
+            trueFieldA = dataCache['trueFieldA']
+            fineGridA = dataCache['fineGridA']
+            observationSitesA = dataCache['observationSitesA']
+            dataA = dataCache['dataA']
+            trendA = dataCache['trendA']
             print("Loaded results from cache.")
         else:
             print("Stale cache detected, recomputing...")
@@ -647,10 +717,10 @@ def main():
 
         print("=== Figure A: good-surrogate regime ===")
         resultsA, trueFieldA, fineGridA, observationSitesA, dataA, trendA = (
-            run_figure_a(rng, trueRealisation, observationSites)
+            run_experiment(rng, trueRealisation, observationSites)
         )
         if hasJoblib:
-            data_cache = {
+            dataCache = {
                 'params': PARAMS,
                 'resultsA': resultsA,
                 'trueFieldA': trueFieldA,
@@ -659,7 +729,7 @@ def main():
                 'dataA': dataA,
                 'trendA': trendA,
             }
-            joblib.dump(data_cache, CACHE, compress=3)
+            joblib.dump(dataCache, CACHE, compress=3)
 
     if hasMatplotlib:
         plot_figure_a(
