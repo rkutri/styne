@@ -86,12 +86,12 @@ class MetropolisedRandomWalk(MetropolisHastings):
                          acceptance=acceptance, rng=rng)
 
     @property
-    def proposal_covariance(self) -> CovarianceMatrix:
+    def proposalCovariance(self) -> CovarianceMatrix:
         """Current proposal covariance."""
         return self._proposalMethod.covariance
 
-    @proposal_covariance.setter
-    def proposal_covariance(self, cov: CovarianceMatrix):
+    @proposalCovariance.setter
+    def proposalCovariance(self, cov: CovarianceMatrix):
         """Replace the proposal covariance."""
         self._proposalMethod.covariance = cov
 
@@ -181,7 +181,7 @@ class RobbinsMonroMRW(MetropolisedRandomWalk):
         self._logVariance += gamma * (alpha - self._targetAcceptance)
         
         dimension = self._proposalMethod.covariance.dimension
-        self.proposal_covariance = IIDCovarianceMatrix(
+        self.proposalCovariance = IIDCovarianceMatrix(
             dimension, np.exp(self._logVariance))
         
         return nextState
@@ -191,7 +191,7 @@ class RobbinsMonroMRW(MetropolisedRandomWalk):
         self._stepCount = 0
         self._logVariance = self._initialLogVariance
         dimension = self._proposalMethod.covariance.dimension
-        self.proposal_covariance = IIDCovarianceMatrix(
+        self.proposalCovariance = IIDCovarianceMatrix(
             dimension, np.exp(self._logVariance))
 
 

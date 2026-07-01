@@ -27,7 +27,7 @@ class PartitionedProposalMixin:
         self._pFinePrior = finePrior
 
     @property
-    def is_partitioned(self) -> bool:
+    def isPartitioned(self) -> bool:
         return getattr(self, '_pPartition', None) is not None
 
     def _coarse_from(self, state: Parameter) -> Vector:

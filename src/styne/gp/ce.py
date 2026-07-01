@@ -45,7 +45,7 @@ class CirculantEmbeddingEngine(ProbabilityMeasure, ABC):
                  maxPadding: int = 512, tol: float = 1e-12):
 
         self._vertPerDim = vertPerDim
-        self._n_base = vertPerDim + 1
+        self._nBase = vertPerDim + 1
         self._domExt = domExt
         self._h = domExt / vertPerDim
         self._padding = padding
@@ -60,7 +60,7 @@ class CirculantEmbeddingEngine(ProbabilityMeasure, ABC):
         self._eigenvalues = self._compute_eigenvalues(cov_callable)
 
     def _n_ext(self) -> int:
-        return self._n_base + self._padding
+        return self._nBase + self._padding
 
     def _is_valid(self, eigenvalues: ndarray) -> bool:
         return eigenvalues.min() >= -self._tol

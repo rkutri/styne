@@ -11,6 +11,9 @@ from styne.statistics.covariance import (
 )
 from styne.utility.grid import Grid, UniformGrid
 
+_MATERN_MAX_SCALED_DISTANCE = 800.0
+_MATERN_MIN_SCALED_DISTANCE = 1e-8
+
 
 class StationaryCovariance1D(CovarianceFunctionInterface):
 
@@ -73,7 +76,7 @@ def matern_covariance(x, lengthScale, smoothness, variance):
         scaledDistance = np.where(scaledDistance == 0, 0.0, np.inf)
 
     # Avoid inf * 0 = nan when distance overflows
-    safeDist = np.minimum(scaledDistance, 800.0)
+    safeDist = np.minimum(scaledDistance, _MATERN_MAX_SCALED_DISTANCE)
 
     if isclose(smoothness, 1.5):
         return variance * (1. + safeDist) * np.exp(-safeDist)
@@ -84,8 +87,11 @@ def matern_covariance(x, lengthScale, smoothness, variance):
 
     covariance = np.zeros_like(scaledDistance)
 
-    validMask = (scaledDistance > 1e-8) & (scaledDistance < 800.0)
-    covariance[~validMask & (scaledDistance < 1e-8)] = variance
+    validMask = (
+        (scaledDistance > _MATERN_MIN_SCALED_DISTANCE)
+        & (scaledDistance < _MATERN_MAX_SCALED_DISTANCE)
+    )
+    covariance[~validMask & (scaledDistance < _MATERN_MIN_SCALED_DISTANCE)] = variance
     covariance[validMask] = (variance * (2. ** (1. - smoothness)) / gamma(smoothness)) * \
         (scaledDistance[validMask] ** smoothness) * kv(smoothness, scaledDistance[validMask])
 
@@ -108,7 +114,7 @@ def matern_log_rho_gradient(x, lengthScale, smoothness, variance):
         scaledDistance = np.where(scaledDistance == 0, 0.0, np.inf)
 
     # Avoid inf * 0 = nan when distance overflows
-    safeDist = np.minimum(scaledDistance, 800.0)
+    safeDist = np.minimum(scaledDistance, _MATERN_MAX_SCALED_DISTANCE)
 
     if isclose(smoothness, 1.5):
         return variance * (safeDist**2) * np.exp(-safeDist)
@@ -118,7 +124,10 @@ def matern_log_rho_gradient(x, lengthScale, smoothness, variance):
             np.exp(-safeDist)
 
     gradient = np.zeros_like(scaledDistance)
-    validMask = (scaledDistance > 1e-8) & (scaledDistance < 800.0)
+    validMask = (
+        (scaledDistance > _MATERN_MIN_SCALED_DISTANCE)
+        & (scaledDistance < _MATERN_MAX_SCALED_DISTANCE)
+    )
     gradient[validMask] = (variance * (2. ** (1. - smoothness)) / gamma(smoothness)) * \
         (scaledDistance[validMask] ** (smoothness + 1.)) * \
         kv(smoothness - 1., scaledDistance[validMask])
