@@ -39,23 +39,11 @@ def _as_axis_tuple(value, d):
 
 class DNAFourierComponentRealisation(Expansion):
     """
-    Realisation of one DNA Fourier component under a fixed boundary
-    condition.
+    Expansion for one DNA Fourier component with a fixed boundary condition.
 
-    The coefficient is the flat row-major array of spectral weights
-    $\xi_\mu$ for all modes $\mu$ in the BC block, indices 0..q
-    (NEUMANN) or 1..q (DIRICHLET) per axis, total length
-    `bc.block_size(q)`.
-
-    Parameters
-    ----------
-    bc : BoundaryCondition
-        Boundary condition for this component.
-    q : int | tuple
-        Resolution (interior degrees of freedom per axis). See flag 2
-        above, inferred from usage, not type-hinted in source.
-    alpha : int | tuple, default 1.0
-        Domain extent per axis. Same inference caveat as `q`.
+    Coefficient is the flat row-major array of spectral weights ξ_μ for all
+    modes μ in the BC block: indices 0..q (NEUMANN) or 1..q (DIRICHLET) per
+    axis, with total length bc.block_size(q).
     """
 
     def __init__(
@@ -124,14 +112,9 @@ class DNAFourierComponentRealisation(Expansion):
 
         if self._bc[0] == BC.NEUMANN:
              return cos_series(c, axis=-1, out=self._scratch)
-        
-        # Sine path: prepend zero manually into the buffer is handled by sin_series(..., out=...)
-        # We just need the coefficient part to be correct.
-        # But wait, sin_series logic with 'out' assumes a[..., 1:] is the input.
-        # Currently _coeff has size q. sin_series expects size q+1 with a[0]=0.
-        # Let's align: if Dirichlet, _coeff has size q. 
-        # We need a small temporary for the [0, coeff] concat if we don't have a specific sine buffer.
-        # Actually, let's keep it simple:
+
+        # Dirichlet (sine) path. _coeff has size q, but sin_series expects
+        # size q+1 with a[0]=0, so prepend the zero mode before synthesis.
         if self._coeff.ndim == 1:
             padded_coeff = np.concatenate([[0.], c])
         else:
@@ -180,19 +163,6 @@ class DNAFourierComponentRealisation(Expansion):
         return newObj
 
     def evaluate(self, queryGrid: Grid) -> np.ndarray:
-        """
-        Evaluate the component's native field on a query grid.
-
-        Parameters
-        ----------
-        queryGrid : Grid
-            Sites to evaluate the realisation at.
-
-        Returns
-        -------
-        np.ndarray
-            Field values at `queryGrid`.
-        """
         raise NotImplementedError(
             "DNAFourierComponentRealisation does not support arbitrary-site "
             "evaluation. Use DNAFourierEngine to evaluate at sites."
@@ -239,21 +209,10 @@ class DNAFourierComponentRealisation(Expansion):
 
 class DNAFourierRealisation(Expansion):
     """
-    Full DNA GRF realisation, averaging 2^d independent component
-    realisations. The coefficient is the flat concatenation of all
-    component spectral weights, managed via a `BlockParameter` of `Function`
-    objects, one per component, in `BoundaryCondition.all_combinations`
-    order.
-
-    Parameters
-    ----------
-    q : int | tuple
-        Resolution (interior degrees of freedom per axis). See flag 2
-        above, inferred from usage, not type-hinted in source.
-    d : int
-        Spatial dimension (1 or 2).
-    alpha : int | tuple, default 1.0
-        Domain extent per axis. Same inference caveat as `q`.
+    Expansion for the full DNA GRF, averaging 2^d independent component
+    realisations. The coefficient is the flat concatenation of all component
+    spectral weights, managed via a BlockParameter of Function objects
+    (one Function per component, in BoundaryCondition.all_combinations order).
     """
 
     def __init__(self, q, d: int, alpha=1.0):
@@ -353,20 +312,6 @@ class DNAFourierRealisation(Expansion):
         return newObj
 
     def evaluate(self, queryGrid: Grid) -> np.ndarray:
-        """
-        Evaluate the full DNA realisation on a query grid, averaged over all
-        boundary-condition components.
-
-        Parameters
-        ----------
-        queryGrid : Grid
-            Sites to evaluate the realisation at.
-
-        Returns
-        -------
-        np.ndarray
-            Field values at `queryGrid`.
-        """
         native = self.evaluate_native()
 
         if self._d == 1:
@@ -396,22 +341,11 @@ class DNAFourierRealisation(Expansion):
 
 class DNAFourierEngine(GPEngine):
     """
-    GPEngine for the full DNA GRF, the paper's core sampling method.
+    GPEngine for the full DNA GRF.
 
     Evaluates the spectral density once across all 2^d BC blocks in
-    `BoundaryCondition.all_combinations` order. The resulting
-    `DiagonalCovarianceMatrix` aligns with `DNAFourierRealisation`'s
-    `BlockParameter`.
-
-    Parameters
-    ----------
-    q : int | tuple
-        Resolution (interior degrees of freedom per axis). See flag 2
-        above, inferred from usage, not type-hinted in source.
-    d : int
-        Spatial dimension (1 or 2).
-    alpha : int | tuple, default 1.0
-        Domain extent per axis. Same inference caveat as `q`.
+    BoundaryCondition.all_combinations order. The resulting
+    DiagonalCovarianceMatrix aligns with DNAFourierRealisation's BlockParameter.
     """
 
     def __init__(self, q, d: int, alpha=1.0):
@@ -444,22 +378,27 @@ class DNAFourierEngine(GPEngine):
         )
 
     def build_realisation(self) -> DNAFourierRealisation:
-        """
-        Construct a new `DNAFourierRealisation` matching the engine's
-        resolution, dimension, and domain extent.
-
-        Returns
-        -------
-        DNAFourierRealisation
-            A fresh, uninitialised realisation.
-        """
         return DNAFourierRealisation(self._q, self._d, self._alpha)
 
     def build_covariance(
         self, covFcn: CovarianceFunctionInterface
     ) -> DiagonalCovarianceMatrix:
         """
-        Compute spectral densities, update internal weights, and return Identity.
+        Build the whitened covariance for the DNA GRF.
+
+        Under the whitening contract, the latent coefficients are standard
+        white noise, so the returned covariance operator is the identity.
+        The spectral square root is evaluated here and stored in 'self._weights'
+        instead, one weight per mode across all 2^d boundary-condition blocks in
+        'BoundaryCondition.all_combinations' order. 'apply_jacobian' multiplies by
+        these weights before synthesis. The weights carry the spectral density's
+        square root and a domain-extent factor 'prod(alpha) ** -0.5'.
+
+        Returns
+        -------
+        DiagonalCovarianceMatrix
+            The identity operator (an 'IIDCovarianceMatrix' with unit variance),
+            matching the whitened parametrisation.
         """
         from styne.statistics.covariance import IIDCovarianceMatrix
         q, alpha = self._q, self._alpha
@@ -741,31 +680,11 @@ class DNAFourierEngine(GPEngine):
 
 
 class DNAGPPredictor(Predictor):
-    """
-    Out-of-sample prediction for the DNA engine.
-
-    Parameters
-    ----------
-    gpState : GPState
-        Current GP state, exposes the parameter to predict from.
-    interpMat : np.ndarray
-        Sparse interpolation matrix mapping the native spectral evaluation
-        to the query sites.
-    """
-
     def __init__(self, gpState: GPState, interpMat: np.ndarray):
         self._gpState = gpState
         self._interpMat = interpMat
 
     def mean(self) -> np.ndarray:
-        """
-        Predictive mean at the query sites.
-
-        Returns
-        -------
-        np.ndarray
-            Predictive mean values at the query sites.
-        """
         native = self._gpState.parameter.function.evaluate_native()
         
         # Micro-optimization: interpMat is a CSR sparse matrix.

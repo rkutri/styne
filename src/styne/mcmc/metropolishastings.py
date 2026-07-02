@@ -20,6 +20,19 @@ class MetropolisHastings(MCMCSampler):
 
     Subclasses implement '_log_mh_ratio' to define the variant of the algorithm.
     This class handles accept/reject, diagnostics, and chain bookkeeping.
+
+    Parameters
+    ----------
+    targetDensity : DensityInterface
+        Target density to sample from.
+    proposalMethod : ProposalMethod
+        Proposal mechanism. Assembled by the concrete subclass constructor,
+        not passed through by most subclasses' own public constructors.
+    diagnostics : ChainDiagnostics
+        Tracks transition statistics.
+    acceptance : AcceptanceProbability, optional
+        Defaults to 'StandardAcceptance' if not given.
+    rng : Generator, optional
     """
 
     def __init__(

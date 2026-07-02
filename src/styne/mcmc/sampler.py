@@ -113,9 +113,11 @@ class MCMCSampler(ABC):
     def run(self, nSteps, initialState, progress=False, description=None):
         """Run a fresh chain for a fixed number of steps.
 
-        Each call clears the engine first (diagnostics, chain, last state, iteration
-        counter) and starts from 'initialState'. Use this for a long single run.
-        To run, pause, act, and resume without clearing, use 'continue_run'.
+        Each call clears sampler state first, last state, iteration counter,
+        and diagnostics, then starts from 'initialState'. Concrete samplers
+        also discard prior chain history as part of their own 'clear'. Use
+        this for a long single run. To run, pause, act, and resume without
+        clearing, use 'continue_run'.
         """
         for _ in self.stream_run(nSteps, initialState, progress, description):
             pass

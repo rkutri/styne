@@ -150,6 +150,12 @@ class DART(MetropolisHastings):
 class DARTFactory(MHFactory):
     """Factory for constructing DART chains.
 
+    Required configuration before 'create()', set via the matching setters,
+    'surrogate' (list of surrogate densities, coarsest first), 'regularisation'
+    (one gamma per level), and 'nChain' (one subchain length per level). The
+    three lists must be equal length. 'create()' raises if any is unset or the
+    lengths disagree.
+
     When a partition and fine prior are set, the root chain operates on
     the coarse subspace only; fine modes are proposed from the prior.
     Without partition, all behaviour is identical to the original.

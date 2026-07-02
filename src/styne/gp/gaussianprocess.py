@@ -17,21 +17,6 @@ from styne.gp.dna import DNAFourierEngine
 
 
 class GPSampler(ProbabilityMeasure):
-    """
-    Samples realisations of a `GaussianProcess`.
-
-    Wraps a Gaussian probability measure over an `Expansion`'s coefficient
-    space. Each draw samples a coefficient vector from the measure and
-    returns it as a `Function` parameter holding a freshly cloned
-    realisation.
-
-    Parameters
-    ----------
-    realisation : Expansion
-        Template realisation, cloned on every draw.
-    measure : Gaussian
-        Gaussian probability measure the coefficients are drawn from.
-    """
 
     def __init__(self, realisation: Expansion, measure: Gaussian):
 
@@ -39,20 +24,6 @@ class GPSampler(ProbabilityMeasure):
         self._measure = measure
 
     def draw(self, rng: Generator) -> Function:
-        """
-        Draw one realisation of the Gaussian process.
-
-        Parameters
-        ----------
-        rng : Generator
-            NumPy random generator used for the draw.
-
-        Returns
-        -------
-        Function
-            A `Function` parameter wrapping a freshly cloned realisation with
-            the drawn coefficients.
-        """
 
         sample = self._measure.draw(rng)
 
@@ -64,38 +35,27 @@ class GPSampler(ProbabilityMeasure):
 
 class GaussianProcess:
     """
-    A Gaussian process defined by a covariance function and a `GPEngine`.
+    A Gaussian process defined by a covariance function and a GPEngine.
 
     The engine handles the parametrisation. `parameter` exposes the
     current realisation as a `Function` parameter for use in forward models.
     `sampler` returns a `GPSampler` for drawing independent realisations.
-
-    Parameters
-    ----------
-    covFcn : CovarianceFunctionInterface
-        Covariance function defining the process.
-    engine : GPEngine
-        Parametrisation engine handling the GP's internal representation,
-        the basis, the sites, and the map between coefficients and field
-        values.
     """
 
     def __init__(self, covFcn: CovarianceFunctionInterface, engine: GPEngine):
 
         self._realisation = engine.build_realisation()
         self._param = Function(self._realisation)
-        
+
         self._measure = Gaussian(engine.build_covariance(covFcn))
         self._measure.mean = self._param.clone()
         self._measure.mean.coordinate = np.zeros(self._realisation.dimension)
 
-        if isinstance(engine, DNAFourierEngine):
+        if hasattr(engine, 'spectralWeights'):
             self._realisation.spectralWeights = engine.spectralWeights
 
         self._covFcn = covFcn
         self._engine = engine
-
-        self._param = Function(self._realisation)
 
         self._sites = None
 

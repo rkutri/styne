@@ -33,10 +33,12 @@ class RatioEstimator:
     thinning : int
         Keep every thinning-th sample after burnin.
     type : str
-        One of 'is', 'bridge', or 'cumulant'. Defaults to 'is'.
+        One of 'is', 'bridge', or 'cumulant'. Defaults to 'cumulant'.
         'cumulant' is a one-sided second-order CGF approximation;
         same cost as 'is', estimates the log-ratio directly, robust under large
         weight spread, but carries a bias that does not vanish with sample size.
+        The default is therefore biased-but-cheap by design; pass 'is' for an
+        unbiased (higher-variance) estimate.
     """
 
     def __init__(
