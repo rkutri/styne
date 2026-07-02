@@ -74,7 +74,6 @@ class MALAProposal(ProposalMethod):
 
 
 class MetropolisAdjustedLangevinAlgorithm(MetropolisHastings):
-    name = "MALA"
     """
     Metropolis-Adjusted Langevin Algorithm (MALA).
 
@@ -86,13 +85,14 @@ class MetropolisAdjustedLangevinAlgorithm(MetropolisHastings):
     targetDensity : DensityInterface
         Target density. Must provide an ``evaluate_log_gradient(state)``
         method returning the gradient of the log-density as an ndarray.
-        This is checked at construction time via duck typing — no specific
-        base class is required; any object with the method will work.
+        This is checked at construction time via duck typing, no specific
+        base class is required, any object with the method will work.
     stepSize : float
         Step size h (standard deviation of the isotropic noise).
     diagnostics : ChainDiagnostics
         Tracks transition statistics.
     """
+    name = "MALA"
 
     def __init__(self, targetDensity, stepSize, diagnostics,
                  acceptance: AcceptanceProbability = None,

@@ -2,6 +2,8 @@ import numpy as np
 
 
 class Chain:
+    """Trajectory and annotation storage for a single MCMC chain."""
+
     def __init__(self):
         self._trajectory = []
         self._annotations = None
@@ -29,6 +31,15 @@ class Chain:
             self._annotations = []
 
     def append(self, stateVector, annotation=None):
+        """Append a state to the trajectory, with an optional annotation.
+
+        Parameters
+        ----------
+        stateVector : np.ndarray
+            Coordinate vector to append.
+        annotation : object, optional
+            Attached only if `enable_annotations` has been called.
+        """
         self._trajectory.append(stateVector)
         if self._annotations is not None:
             self._annotations.append(annotation)
@@ -44,6 +55,11 @@ class GibbsChain:
 
     All blocks are appended atomically once per sweep, so they are always
     equal-length by construction.
+
+    Parameters
+    ----------
+    nBlocks : int
+        Number of blocks in the compound state.
     """
 
     def __init__(self, nBlocks: int):

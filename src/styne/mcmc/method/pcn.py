@@ -87,13 +87,12 @@ class PCNProposal(ProposalMethod):
 
 
 class PreconditionedCrankNicolson(MetropolisHastings):
-    name = "pCN"
     """
     Preconditioned Crank-Nicolson sampler.
 
     Since the pCN proposal preserves the reference measure, the log MH
     ratio reduces to the difference in the log Radon-Nikodym derivative
-    (i.e. the log-likelihood ratio).
+    (the log-likelihood ratio).
 
     Parameters
     ----------
@@ -104,6 +103,7 @@ class PreconditionedCrankNicolson(MetropolisHastings):
     diagnostics : ChainDiagnostics
         Tracks transition statistics.
     """
+    name = "pCN"
 
     def __init__(self, target, beta, diagnostics,
                  acceptance: AcceptanceProbability = None,

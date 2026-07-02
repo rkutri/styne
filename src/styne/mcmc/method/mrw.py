@@ -56,7 +56,6 @@ class MRWProposal(ProposalMethod):
 
 
 class MetropolisedRandomWalk(MetropolisHastings):
-    name = "MRW"
     """
     Metropolis-Hastings with a symmetric Gaussian random walk proposal.
 
@@ -72,6 +71,7 @@ class MetropolisedRandomWalk(MetropolisHastings):
     diagnostics : ChainDiagnostics
         Tracks transition statistics.
     """
+    name = "MRW"
 
     def __init__(
             self,
@@ -140,10 +140,25 @@ class MRWFactory(MHFactory):
 class RobbinsMonroMRW(MetropolisedRandomWalk):
     """
     Adaptive Metropolis-Hastings with a symmetric Gaussian random walk proposal.
-    
+
     Uses Robbins-Monro adaptation (Andrieu & Thoms 2008) to tune the proposal
     variance towards a target acceptance rate. The adaptation vanishes over time
     to preserve ergodicity.
+
+    Parameters
+    ----------
+    target : DensityInterface
+        Target density to sample from.
+    proposalCov : CovarianceMatrix
+        Initial covariance of the Gaussian proposal kernel.
+    diagnostics : ChainDiagnostics
+        Tracks transition statistics.
+    targetAcceptance : float, default 0.3
+        Acceptance rate the adaptation targets.
+    adaptOffset : int, default 100
+        Offset in the vanishing adaptation step-size schedule.
+    adaptDecay : float, default 0.6
+        Decay exponent in the vanishing adaptation step-size schedule.
     """
     def __init__(
             self,
@@ -187,6 +202,14 @@ class RobbinsMonroMRW(MetropolisedRandomWalk):
         return nextState
 
     def clear(self) -> None:
+        """
+        Reset the chain and revert the proposal covariance to its initial
+        variance, discarding all adaptation.
+
+        Returns
+        -------
+        None
+        """
         super().clear()
         self._stepCount = 0
         self._logVariance = self._initialLogVariance

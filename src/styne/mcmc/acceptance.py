@@ -4,6 +4,15 @@ from numpy import isnan, logaddexp
 
 
 class AcceptanceProbability(ABC):
+    """
+    Interface for mapping a log Metropolis-Hastings ratio to a log
+    acceptance probability.
+
+    Notes
+    -----
+    Subclasses implement `log_probability`, already fully documented there,
+    no separate note needed here.
+    """
 
     @abstractmethod
     def log_probability(self, logMHRatio: float) -> float:
@@ -25,10 +34,22 @@ class AcceptanceProbability(ABC):
 
 class StandardAcceptance(AcceptanceProbability):
     """
-    Standard Metropolis-Hastings acceptance: log alpha(logRatio) = min(0, logRatio).
+    Standard Metropolis-Hastings acceptance, $\log \alpha(r) = \min(0, r)$.
     """
 
     def log_probability(self, logMHRatio: float) -> float:
+        """
+        Log acceptance probability for a given log MH ratio.
+
+        Parameters
+        ----------
+        logMHRatio : float
+
+        Returns
+        -------
+        float
+            $\min(0, \text{logMHRatio})$.
+        """
         if isnan(logMHRatio):
             return float('-inf')
         return min(0., float(logMHRatio))
@@ -36,14 +57,24 @@ class StandardAcceptance(AcceptanceProbability):
 
 class BarkerAcceptance(AcceptanceProbability):
     """
-    Barker (1965) acceptance: log alpha_B(logRatio) = logRatio - logaddexp(0, logRatio).
+    Barker (1965) acceptance, $\log \alpha_B(r) = r - \text{logaddexp}(0, r)$.
 
-    Satisfies detailed balance via alpha_B(logRatio) / alpha_B(-logRatio) = exp(logRatio).
-    Numerically stable for all logRatio via numpy.logaddexp.
+    Satisfies detailed balance via $\alpha_B(r) / \alpha_B(-r) = \exp(r)$.
+    Numerically stable for all $r$ via `numpy.logaddexp`.
     """
 
     def log_probability(self, logMHRatio: float) -> float:
+        """
+        Log acceptance probability for a given log MH ratio.
 
+        Parameters
+        ----------
+        logMHRatio : float
+
+        Returns
+        -------
+        float
+        """
         if isnan(logMHRatio):
             return float('-inf')
 
