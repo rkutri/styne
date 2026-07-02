@@ -7,6 +7,9 @@ from styne.statistics.measure import ProbabilityMeasure
 
 
 class Poisson(ProbabilityMeasure):
+    """
+    Poisson probability measure.
+    """
 
     def __init__(self):
         self._rate = None
@@ -24,4 +27,15 @@ class Poisson(ProbabilityMeasure):
         return self._rate
 
     def draw(self, rng: Generator) -> Vector:
+        """
+        Draw a Poisson sample at the current rate.
+
+        Parameters
+        ----------
+        rng : Generator
+
+        Returns
+        -------
+        Vector
+        """
         return Vector(rng.poisson(self._rate).astype(float))

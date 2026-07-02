@@ -2,6 +2,10 @@ import numpy as np
 
 
 class WelfordAccumulator():
+    """
+    Online mean and variance accumulator using Welford's algorithm for
+    numerically stable single-pass updates.
+    """
 
     def __init__(self):
         self._dataSize = 0

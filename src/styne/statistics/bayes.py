@@ -44,8 +44,26 @@ class HierarchicalBayes(DensityInterface):
     Composite hierarchical Bayesian model.
 
     Holds one ConditionalMeasure per non-root block and an unconditional
-    root measure. Implements DensityInterface over the full joint BlockParameter
-    and provides access to configured block conditionals for Gibbs/MwG sampling.
+    root measure. Implements DensityInterface over the full joint
+    BlockParameter and provides access to configured block conditionals for
+    Gibbs/MwG sampling.
+
+    Notes
+    -----
+    `evaluate_log` (already documented in source, not changed here) sums the
+    root's and each conditional's log-density and states plainly it's
+    unnormalised. That's a design choice, not something this class docstring
+    should hedge on, I was wrong to write "depends on components" above
+    before checking the method body. The existing method docstring also
+    notes correctness holds only when conditionals contribute distinct,
+    non-overlapping factors, the standard 2-block case.
+
+    Parameters
+    ----------
+    conditionals : List[ConditionalMeasure]
+        One conditional per non-root block, in block order.
+    root : AbsolutelyContinuousProbabilityMeasure
+        Unconditional measure for the root block.
     """
 
     def __init__(
@@ -96,6 +114,12 @@ class HierarchicalBayes(DensityInterface):
 
 
 class HierarchicalBayesModelBuilder:
+    """
+    Fluent builder for `HierarchicalBayes` models.
+
+    Chain `set_root` and `add_conditional` calls, then `build` to construct
+    the model.
+    """
 
     def __init__(self):
         self._conditionals = []
@@ -114,6 +138,14 @@ class HierarchicalBayesModelBuilder:
         return self
 
     def build(self) -> HierarchicalBayes:
+        """
+        Construct the `HierarchicalBayes` model from the configured root and
+        conditionals.
+
+        Returns
+        -------
+        HierarchicalBayes
+        """
         if self._root is None:
             raise ValueError("Root measure not set.")
         return HierarchicalBayes(list(self._conditionals), self._root)

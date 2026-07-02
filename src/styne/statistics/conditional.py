@@ -51,6 +51,20 @@ class MetropolisWithinGibbsConditional(ConditionalMeasure):
         self._currentBlock = state.block(self._blockIdx)
 
     def draw(self, _rng) -> Parameter:
+        """
+        Warm-start the chain from the current state and run `nSteps`
+        transitions. See the class docstring for the continuity contract.
+
+        Parameters
+        ----------
+        rng
+            Unused directly, the sampler manages its own RNG.
+
+        Returns
+-------
+        Parameter
+            The chain's state after `nSteps` transitions.
+        """
         if _rng is not None:
             self._sampler._rng = _rng
         if not self._initialized:

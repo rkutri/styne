@@ -7,6 +7,14 @@ from styne.statistics.measure import ProbabilityMeasure
 
 
 class Binomial(ProbabilityMeasure):
+    """
+    Binomial probability measure.
+
+    Parameters
+    ----------
+    n : int
+        Number of trials.
+    """
 
     def __init__(self, n: int):
         self._n = n
@@ -21,4 +29,15 @@ class Binomial(ProbabilityMeasure):
         self._prob = np.asarray(prob, dtype=float)
 
     def draw(self, rng: Generator) -> Vector:
+        """
+        Draw a Binomial sample at the current success probability.
+
+        Parameters
+        ----------
+        rng : Generator
+
+        Returns
+        -------
+        Vector
+        """
         return Vector(rng.binomial(self._n, self._prob).astype(float))

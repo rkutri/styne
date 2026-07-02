@@ -16,6 +16,17 @@ _MATERN_MIN_SCALED_DISTANCE = 1e-8
 
 
 class StationaryCovariance1D(CovarianceFunctionInterface):
+    """
+    Base class wrapping a 1D stationary covariance function and its Fourier
+    transform as plain callables.
+
+    Parameters
+    ----------
+    statCovCallable : callable
+        Takes an array of distances, returns covariance values.
+    fourierCallable : callable
+        Takes an array of frequencies, returns spectral density values.
+    """
 
     def __init__(self, statCovCallable, fourierCallable):
 
@@ -176,6 +187,16 @@ def matern_fourier(f, lengthScale, smoothness, variance, d=1):
 
 
 class ExponentialCovariance1D(StationaryCovariance1D):
+    """
+    Exponential covariance function, $C(r) = \sigma^2 \exp(-\alpha |r|)$.
+
+    Parameters
+    ----------
+    alpha : float
+        Decay rate.
+    marginalVariance : float
+        Marginal variance $\sigma^2$.
+    """
 
     def __init__(self, alpha, marginalVariance):
         super().__init__(
@@ -185,6 +206,20 @@ class ExponentialCovariance1D(StationaryCovariance1D):
 
 
 class MaternCovariance1D(StationaryCovariance1D):
+    """
+    Matern covariance in 1D, arbitrary smoothness $\nu$. Closed-form fast
+    paths for $\nu \in \{0.5, 1.5, 2.5\}$, general Gamma-based evaluation
+    otherwise.
+
+    Parameters
+    ----------
+    lengthScale : float
+        Length scale.
+    smoothness : float
+        Smoothness parameter $\nu$, must be at least 0.5.
+    marginalVariance : float
+        Marginal variance $\sigma^2$.
+    """
 
     def __init__(self, lengthScale, smoothness, marginalVariance):
         super().__init__(
@@ -245,6 +280,20 @@ class Matern32Covariance1D(MaternCovariance1D):
 
 
 class MaternCovariance2D:
+    """
+    Matern covariance in 2D, arbitrary smoothness $\nu$. Standalone
+    implementation, not a `StationaryCovariance1D` subclass, see flag 1
+    above on its interface status.
+
+    Parameters
+    ----------
+    lengthScale : float
+        Length scale.
+    smoothness : float
+        Smoothness parameter $\nu$, must be at least 0.5.
+    marginalVariance : float
+        Marginal variance $\sigma^2$.
+    """
 
     def __init__(self, lengthScale, smoothness, marginalVariance):
         self._lengthScale = lengthScale
@@ -258,6 +307,21 @@ class MaternCovariance2D:
 
     def evaluate_covariance(self, pts1: np.ndarray,
                             pts2: np.ndarray) -> np.ndarray:
+        """
+        Evaluate the Matern covariance between two point sets.
+
+        Parameters
+        ----------
+        pts1 : np.ndarray
+            First set of points, or a `Grid`.
+        pts2 : np.ndarray
+            Second set of points, or a `Grid`.
+
+        Returns
+-------
+        np.ndarray
+            Pairwise covariance matrix.
+        """
         if isinstance(pts1, (Grid, UniformGrid)):
             pts1 = pts1.to_array()
         else:

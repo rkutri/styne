@@ -17,6 +17,19 @@ from styne.gp.dna import DNAFourierEngine
 class SGLMMHyperConditionalDensity(DensityInterface):
     """
     Log-density target for Metropolis Random Walk on log-hyperparameters.
+
+    Parameters
+    ----------
+    pcPrior : DensityInterface
+        Prior on the (untransformed) hyperparameters.
+    gp : GaussianProcess
+        GP whose covariance function is rebuilt at each evaluation.
+    model : SGLMM
+        Forward model evaluated at the current latent state.
+    likelihood : LikelihoodInterface
+        Likelihood the data are evaluated under.
+    latentState : Parameter
+        Latent field value the model is interpolated at.
     """
     def __init__(
             self,
@@ -70,6 +83,27 @@ class SGLMMHyperConditionalDensity(DensityInterface):
         self._cachedProposalLog = None
 
     def evaluate_log(self, parameter: Parameter, normalised: bool = False) -> float:
+        """
+        Log-posterior density on log-hyperparameters `(log rho, log sigma)`,
+        including the log-Jacobian of the log transform. Unnormalised overall,
+        sums a properly normalised prior term (`pcPrior.evaluate_log`) with an
+        unnormalised likelihood term (`response.log_likelihood`), so the total
+        carries whatever constant the likelihood side drops. Fine for a
+        Metropolis Random Walk target, not a properly normalised density.
+
+        Parameters
+        ----------
+        parameter : Parameter
+            Log-hyperparameters to evaluate at.
+        normalised : bool, default False
+            Unused, accepted for interface compatibility.
+
+        Returns
+        -------
+        float
+            `-inf` if the prior is zero, hyperparameters are extreme, or the
+            covariance factorisation fails.
+        """
         logHyperparameters = np.asarray(parameter.coordinate).ravel()
         hyperparameters = np.exp(logHyperparameters)
         lengthScale, sigma = hyperparameters[0], hyperparameters[1]
@@ -175,6 +209,31 @@ class SGLMMHyperConditionalDensity(DensityInterface):
 
 
 class SGLMMHyperConditional(ConditionalMeasure, DensityInterface):
+    """
+    Hyperparameter conditional block for SGLMM Gibbs sampling.
+
+    Constructs a fresh `SGLMMHyperConditionalDensity` on every
+    `condition_on` call, rebuilding the GP's covariance function at the
+    proposed hyperparameters.
+
+    Cannot be drawn from directly, sampling happens through `density` inside
+    a Metropolis sub-chain elsewhere. `draw` unconditionally raises
+    `NotImplementedError`. See flag 3 above.
+
+    Parameters
+    ----------
+    pcPrior : DensityInterface
+        Prior on the (untransformed) hyperparameters.
+    gp : GaussianProcess
+        GP whose covariance function is rebuilt at each `condition_on` call.
+    model : SGLMM
+        Forward model evaluated at the current latent state.
+    likelihood : LikelihoodInterface
+        Likelihood the data are evaluated under.
+    hyperIdx : int, default 1
+        Index of the hyperparameter block within the joint state.
+    """
+
     def __init__(
             self,
             pcPrior: DensityInterface,
@@ -212,6 +271,16 @@ class SGLMMHyperConditional(ConditionalMeasure, DensityInterface):
         return self.density.evaluate_log(parameter)
 
     def condition_on(self, state: Parameter):
+        """
+        Rebuild the GP covariance at the proposed hyperparameters and construct
+        a fresh `SGLMMHyperConditionalDensity` for `density`.
+
+        Parameters
+        ----------
+        state : Parameter
+            Full joint state. The latent block is `state.block(0)` unless
+            `hyperIdx` is 1, in which case it's `state.block(1)`.
+        """
         latentState = state.block(0) if self._hyperIdx == 1 else state.block(1)
         hyperState = state.block(self._hyperIdx)
 
@@ -244,8 +313,37 @@ class SGLMMHyperConditional(ConditionalMeasure, DensityInterface):
 
 class SGLMMLatentConditional(ConditionalMeasure, DensityInterface):
     """
-    Blocks latent evaluation until GP dependencies are synced to hyperparameters.
+    Blocks latent evaluation until GP dependencies are synced to
+    hyperparameters.
+
+    Proxies unset attributes to `target` via `__getattr__`, so attributes
+    like `derivative` and `reference` on a `RadonNikodym` target are
+    accessible directly on this wrapper.
+
+    Cannot be drawn from directly. `draw` unconditionally raises
+    `NotImplementedError`. See flag 3 above.
+
+    Parameters
+    ----------
+    target : DensityInterface
+        The wrapped density, evaluated once GP dependencies are synced.
+    gp : GaussianProcess
+        GP kept in sync with the current hyperparameter block.
+    coarseGP : GaussianProcess, optional
+        Coarse-resolution companion GP, kept in sync alongside `gp` if given.
+    partition : DNACoarseFinePartition, optional
+        Coarse/fine partition used to extract the fine-block prior variance.
+    finePrior : object, optional
+        Prior on the fine block, updated in place when `partition` is given.
+        Untyped in source, inferred from usage.
+    hyperIdx : int, default 1
+        Index of the hyperparameter block within the joint state.
+    localisedDensity : object, optional
+        Target with a `sync_weights` method, called with the coarse
+        engine's spectral weights when present. Untyped in source, inferred
+        from usage.
     """
+
     def __init__(
             self,
             target: DensityInterface,
@@ -294,6 +392,28 @@ class SGLMMLatentConditional(ConditionalMeasure, DensityInterface):
         return self._target.evaluate_log_gradient(parameter)
 
     def condition_on(self, state: BlockParameter) -> None:
+        """
+        Sync GP covariance functions to the current hyperparameter block, then
+        forward conditioning to `target`.
+
+        If the hyperparameter block is unchanged since the last call, the
+        rebuild is skipped. Otherwise, rebuilds `gp`'s covariance function at
+        the new hyperparameters, and `coarseGP`'s too if set. If `partition` and
+        `finePrior` are both set, also extracts the fine-block marginal variance
+        from `gp`'s covariance and rebuilds `finePrior` from it. If
+        `localisedDensity` is set, syncs its weights from `coarseGP`'s engine.
+
+        Forwarding to `target` happens on every call regardless of whether the
+        rebuild ran, this updates the likelihood and prior evaluation points for
+        the current hyperparameters, and is required even when the covariance
+        itself hasn't changed.
+
+        Parameters
+        ----------
+        state : BlockParameter
+            Full joint state. The hyperparameter block is
+            `state.block(self.hyperIdx)`, index 1 by default.
+        """
         # Finding 3: jointState accesses the hyper block via state.block(self._hyperIdx)
         # where _hyperIdx defaults to 1.
         hyperState = state.block(self._hyperIdx)

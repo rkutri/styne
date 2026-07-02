@@ -16,7 +16,7 @@ class GaussianDensity(DensityInterface):
 
     The mean must be set before evaluation. The unnormalised log-density is
 
-        -0.5 * (x - mu)^T Sigma^{-1} (x - mu)
+    $-\frac{1}{2}(x - \mu)^T \Sigma^{-1} (x - \mu)$
 
     Parameters
     ----------
