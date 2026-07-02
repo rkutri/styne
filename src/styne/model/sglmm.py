@@ -125,6 +125,23 @@ class SGLMM(Model):
             self._evaluation = self._evaluation + self._trendValues
 
     def directional_derivative(self, parameter: Parameter) -> np.ndarray:
+        """
+        Apply the model's Jacobian to a parameter direction.
+
+        Routes the latent-field block through the GP's own
+        `directional_derivative` and, when `features` is set, adds the
+        fixed-effect block's contribution via the design matrix directly.
+
+        Parameters
+        ----------
+        parameter : Parameter
+            Direction in parameter space, `Vector` or `BlockParameter`
+            depending on whether `features` was set at construction.
+
+        Returns
+        -------
+        np.ndarray
+        """
         if self._gp.sites is not self._obsSites:
             self._gp.sites = self._obsSites
 
@@ -136,6 +153,24 @@ class SGLMM(Model):
         return deriv
 
     def adjoint_directional_derivative(self, w: np.ndarray) -> np.ndarray:
+        """
+        Apply the adjoint of the model's Jacobian to `w`.
+
+        Splits the same way as `directional_derivative`, adjoint GP action for
+        the latent block, concatenated with `features.T @ w` for the
+        fixed-effect block when present.
+
+        Parameters
+        ----------
+        w : np.ndarray
+            Vector in observation space.
+
+        Returns
+        -------
+        np.ndarray
+            `Vector`-shaped if no fixed effects, otherwise concatenated with
+            the fixed-effect block's adjoint contribution.
+        """
         if self._gp.sites is not self._obsSites:
             self._gp.sites = self._obsSites
 
@@ -151,6 +186,21 @@ class SGLMM(Model):
         ])
 
     def create_predictor(self, queryGrid: Grid, features=None) -> 'SGLMMPredictor':
+        """
+        Build an out-of-sample predictor at new sites.
+
+        Parameters
+        ----------
+        queryGrid : Grid
+            Sites to predict at.
+        features : np.ndarray, optional
+            Design matrix at the query sites, required if the model was
+            constructed with fixed effects.
+
+        Returns
+        -------
+        SGLMMPredictor
+        """
         gpPredictor = self._gp.engine.create_predictor(self._gp, queryGrid)
         return SGLMMPredictor(self, gpPredictor, queryGrid, features)
 
@@ -179,6 +229,13 @@ class SGLMMPredictor(Predictor):
             self._features = None
 
     def mean(self) -> np.ndarray:
+        """
+        Predictive mean at the query sites.
+
+        Returns
+        -------
+        np.ndarray
+        """
         val = self._gpPredictor.mean()
         if self._trendValues is not None:
             val = val + self._trendValues
