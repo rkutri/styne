@@ -12,9 +12,17 @@ from typing import Protocol
 
 class GPState(Protocol):
     """
-    Protocol exposing the dynamically changing state of a Gaussian Process.
-    Used by predictors to access current parameters and covariance functions
-    during MCMC evaluation.
+    Protocol exposing the dynamically changing state of a Gaussian process.
+
+    Used by predictors to read the current parameter and covariance
+    function without depending on the concrete class that provides them.
+
+    Attributes
+    ----------
+    parameter : Function
+        The GP's current realisation.
+    covarianceFunction : CovarianceFunctionInterface
+        The GP's current covariance function.
     """
     @property
     def parameter(self) -> Function: ...

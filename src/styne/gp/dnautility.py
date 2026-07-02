@@ -291,12 +291,27 @@ def adj_sin_series_cols(m, q):
 
 
 class BC(Enum):
-    NEUMANN = 0    # cosine; b_i = 0 in paper
-    DIRICHLET = 1  # sine;   b_i = 1 in paper
+    """
+    Boundary condition type for one axis of a DNA Fourier component.
+
+    NEUMANN corresponds to a cosine expansion (b_i = 0 in the paper's
+    notation). DIRICHLET corresponds to a sine expansion (b_i = 1). Content
+    here was previously inline comments on the enum values, moved in per
+    your instruction to catch these.
+    """
+    NEUMANN = 0
+    DIRICHLET = 1
 
 
 class BoundaryCondition:
-    """Boundary condition vector b ∈ {BC}^d for a single DNA component."""
+    """
+    Boundary condition vector $b \in \{BC\}^d$ for a single DNA component.
+
+    Parameters
+    ----------
+    bcs : tuple
+        One `BC` value per spatial dimension.
+    """
 
     def __init__(self, bcs: tuple):
         self._bcs = tuple(bcs)
@@ -389,6 +404,17 @@ class DNACoarseFineSplit(PartitionRule):
 class DNACoarseFinePartition(Partition):
     """
     Partition object corresponding to the DNA coarse-fine mode split.
+
+    Parameters
+    ----------
+    dnaGP : GaussianProcess
+        Source GP the partition is built from. Duck-typed, not enforced by
+        `isinstance`, checked at construction only via `hasattr(dnaGP,
+        'resolution')`.
+    qC : int | tuple
+        Coarse resolution threshold, same inference caveat as `q` elsewhere.
+    d : int
+        Spatial dimension (1 or 2).
     """
 
     def __init__(self, dnaGP, qC, d: int):
