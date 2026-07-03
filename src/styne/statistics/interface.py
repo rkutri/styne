@@ -128,9 +128,10 @@ class CovarianceFunctionInterface(ABC):
 
     Notes
     -----
-    Subclasses implement `evaluate_covariance`. See flag 1 above,
-    `MaternCovariance2D` is curated but doesn't formally implement this
-    interface despite matching its contract.
+    Subclasses implement `evaluate_covariance`. `MaternCovariance2D` is
+    curated but does not formally implement this interface, despite
+    matching its contract structurally. `isinstance` checks against this
+    interface will fail for `MaternCovariance2D` instances.
     """
 
     @abstractmethod

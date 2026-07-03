@@ -221,8 +221,7 @@ class BSplineGPEngine(GPEngine):
     Parameters
     ----------
     expansion : BSpline1D | BSpline2D
-        The B-spline basis. Dimensionality is inferred from its type. See
-        flag 2 above, both are AUDIT non-curated, experimental types.
+        The B-spline basis. Dimensionality is inferred from its type.
     """
 
     def __init__(self, expansion):

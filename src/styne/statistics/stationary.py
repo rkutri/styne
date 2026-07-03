@@ -282,8 +282,9 @@ class Matern32Covariance1D(MaternCovariance1D):
 class MaternCovariance2D:
     """
     Matern covariance in 2D, arbitrary smoothness $\nu$. Standalone
-    implementation, not a `StationaryCovariance1D` subclass, see flag 1
-    above on its interface status.
+    implementation, not a `StationaryCovariance1D` subclass. Does not
+    formally implement `CovarianceFunctionInterface`, despite matching
+    its contract; `isinstance` checks against that interface will fail.
 
     Parameters
     ----------

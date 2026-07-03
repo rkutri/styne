@@ -13,8 +13,8 @@ class ProgressReporter(Protocol):
     Notes
     -----
     Implementations provide `update`, `close`, and context-manager support
-    (`__enter__`/`__exit__`). See flag 2 above on why the concrete classes
-    in this file don't explicitly inherit this Protocol.
+    (`__enter__`/`__exit__`). Structural typing, `NullProgress` and
+    `TqdmProgress` satisfy this Protocol without inheriting it.
     """
     def update(self, stepCount: int = 1, **postfix):
         ...

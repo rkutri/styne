@@ -46,9 +46,9 @@ class Cache(ABC):
 
         Base implementation checks membership in `self._keys`, which the only
         current subclass, `EvaluationCache`, doesn't populate, it overrides this
-        method with its own `id()`-based check instead. See flag 1 above. A new
-        subclass relying on the base implementation needs to populate `_keys`
-        itself, it isn't done automatically by `__init__`.
+        method with its own `id()`-based check instead. A new subclass relying
+        on the base implementation needs to populate `_keys` itself, it isn't
+        done automatically by `__init__`.
 
         Parameters
         ----------
@@ -77,8 +77,7 @@ class EvaluationCache(Cache):
     """
     Fixed-size evaluation cache, keyed by `id(parameter)` rather than value
     equality. Evicts the oldest entry (FIFO, not LRU) once `cacheSize` is
-    reached. Does not use the base `Cache`'s `_keys` mechanism, see flag 1
-    above.
+    reached. Does not use the base `Cache`'s `_keys` mechanism.
 
     Parameters
     ----------

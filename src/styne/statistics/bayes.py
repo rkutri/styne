@@ -50,13 +50,10 @@ class HierarchicalBayes(DensityInterface):
 
     Notes
     -----
-    `evaluate_log` (already documented in source, not changed here) sums the
-    root's and each conditional's log-density and states plainly it's
-    unnormalised. That's a design choice, not something this class docstring
-    should hedge on, I was wrong to write "depends on components" above
-    before checking the method body. The existing method docstring also
-    notes correctness holds only when conditionals contribute distinct,
-    non-overlapping factors, the standard 2-block case.
+    `evaluate_log` sums the root log-density and each conditional's
+    log-density; the result is unnormalised. Correctness holds only when
+    conditionals contribute distinct, non-overlapping factors, the
+    standard 2-block case.
 
     Parameters
     ----------
