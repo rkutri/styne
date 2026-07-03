@@ -10,6 +10,16 @@ class BlockParameter(Parameter):
     Direct sum of an ordered list of parameters, exposed as a single flat
     parameter. The blocking structure is fixed at construction. Supports batch 
     trajectory coordinates (nBatch, nTotal) by broadcasting along axis 0.
+
+    Parameters
+    ----------
+    blocks : list[Parameter]
+        Ordered list of component parameters. Block order is fixed at
+        construction and used for both flattening and un-flattening the
+        coordinate.
+    names : dict, optional
+        Maps names to block indices for `__getitem__` lookup by name
+        instead of position. Empty if not given.
     """
 
     def __init__(self, blocks: list[Parameter], names: dict = None):
@@ -22,6 +32,17 @@ class BlockParameter(Parameter):
         return len(self._blocks)
 
     def block(self, idx: int) -> Parameter:
+        """
+        The parameter at block index `idx`.
+
+        Parameters
+        ----------
+        idx : int
+
+        Returns
+        -------
+        Parameter
+        """
         return self._blocks[idx]
 
     def __getitem__(self, key):
@@ -41,6 +62,15 @@ class BlockParameter(Parameter):
 
     @property
     def coordinate(self) -> np.ndarray:
+        """
+        Flattened coordinate across all blocks.
+
+        If every block's own coordinate is 1D, this is a plain concatenation.
+        If any block is 2D (a batch of trajectories, shape `(nBatch, blockDim)`),
+        every block is broadcast to that batch size first, then concatenated
+        along axis 1, so a 1D block is tiled across the batch rather than
+        raising a shape error.
+        """
         # Check if any block has a 2D coordinate (batch)
         coords = [b.coordinate for b in self._blocks]
         isBatch = any(c.ndim == 2 for c in coords)
@@ -80,6 +110,13 @@ class BlockParameter(Parameter):
             offset += dim
 
     def clone(self) -> BlockParameter:
+        """
+        Return an independent copy, cloning every block.
+
+        Returns
+        -------
+        BlockParameter
+        """
         return BlockParameter(
             [b.clone() for b in self._blocks],
             dict(self._names)

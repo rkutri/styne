@@ -7,6 +7,10 @@ from styne.parameter.parameter import Parameter
 
 
 class Scalar(Parameter):
+    """
+    Scalar-valued parameter, a single float wrapped as a length-1
+    coordinate array.
+    """
 
     def __init__(self, coordinate):
         self._coordinate = self._as_scalar_array(coordinate)
@@ -28,10 +32,16 @@ class Scalar(Parameter):
 
     @property
     def dimension(self):
+        """
+        Always 1.
+        """
         return 1
 
     @property
     def coordinate(self) -> np.ndarray:
+        """
+        The scalar value as a length-1 array.
+        """
         return self._coordinate
 
     @coordinate.setter
@@ -47,4 +57,11 @@ class Scalar(Parameter):
         return NotImplemented
 
     def clone(self):
+        """
+        Return an independent copy with the same value.
+
+        Returns
+        -------
+        Scalar
+        """
         return Scalar(self._coordinate.copy())

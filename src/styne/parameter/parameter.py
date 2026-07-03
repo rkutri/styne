@@ -22,7 +22,6 @@ Built-in subclasses: 'Vector', 'Scalar', 'Function', 'BlockParameter'.
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import Any, Optional
 from numpy import ndarray, array_equal
 
 
@@ -77,7 +76,7 @@ class Parameter(ABC):
         return array_equal(self.coordinate, other.coordinate)
 
     @abstractmethod
-    def clone(self, memo: Optional[dict[int, Any]] = None) -> Parameter:
+    def clone(self) -> Parameter:
         """Return an independent copy with identical content.
 
         The clone must not share mutable state with the original;
