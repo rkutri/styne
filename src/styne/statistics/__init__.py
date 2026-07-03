@@ -2,6 +2,18 @@
 import importlib
 
 _SYMBOL_TO_MODULE = {
+    "DensityInterface": "styne.statistics.interface",
+    "LikelihoodInterface": "styne.statistics.interface",
+    "CovarianceFunctionInterface": "styne.statistics.interface",
+    "CovarianceOperatorInterface": "styne.statistics.interface",
+    "BayesianModelInterface": "styne.statistics.interface",
+    "Predictor": "styne.statistics.interface",
+    "DifferentiableDensity": "styne.statistics.interface",
+    "TwiceDifferentiableDensity": "styne.statistics.interface",
+    "ProbabilityMeasure": "styne.statistics.measure",
+    "AbsolutelyContinuousProbabilityMeasure": "styne.statistics.measure",
+    "ConditionalMeasure": "styne.statistics.measure",
+    "RadonNikodym": "styne.statistics.radonnikodym",
     "GaussianDensity": "styne.statistics.gaussian",
     "Gaussian": "styne.statistics.gaussian",
     "DiagonalCovarianceMatrix": "styne.statistics.covariance",

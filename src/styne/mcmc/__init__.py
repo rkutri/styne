@@ -2,6 +2,12 @@
 import importlib
 
 _SYMBOL_TO_MODULE = {
+    "MCMCSampler": "styne.mcmc.sampler",
+    "ProposalMethod": "styne.mcmc.proposal",
+    "MHFactory": "styne.mcmc.factory",
+    "Annotator": "styne.mcmc.annotator",
+    "AcceptanceProbability": "styne.mcmc.acceptance",
+    "ChainDiagnostics": "styne.mcmc.diagnostics",
     "Chain": "styne.mcmc.chain",
     "GibbsChain": "styne.mcmc.chain",
     "DART": "styne.mcmc.method.dart",

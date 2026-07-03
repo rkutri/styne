@@ -2,6 +2,7 @@
 import importlib
 
 _SYMBOL_TO_MODULE = {
+    "GPEngine": "styne.gp.engine",
     "GaussianProcess": "styne.gp.gaussianprocess",
     "GPSampler": "styne.gp.gaussianprocess",
     "DirectRealisation": "styne.gp.direct",
