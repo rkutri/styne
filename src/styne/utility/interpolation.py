@@ -8,6 +8,21 @@ from styne.utility.grid import Grid
 
 
 class Interpolation1D(GridFunctionInterface):
+    """
+    1D grid-function interpolation via `scipy.interpolate.make_interp_spline`.
+
+    Natural boundary conditions are used when `degree >= 3`, unconstrained
+    otherwise.
+
+    Parameters
+    ----------
+    grid : array_like
+        1D grid coordinates.
+    value : array_like
+        Values at `grid`.
+    degree : int, default 3
+        Spline degree.
+    """
 
     def __init__(self, grid, value, degree=3):
 
@@ -15,11 +30,34 @@ class Interpolation1D(GridFunctionInterface):
         self._interp = make_interp_spline(grid, value, degree, bc_type=bcType)
 
     def evaluate(self, grid: Grid) -> np.ndarray:
+        """
+        Evaluate the spline at a query grid's points.
+
+        Parameters
+        ----------
+        grid : Grid
+
+        Returns
+        -------
+        np.ndarray
+        """
         return self._interp(grid.to_array().ravel())
 
 
 class GridInterpolation2D(GridFunctionInterface):
-    """Bilinear interpolant on a regular 2D grid."""
+    """
+    Bilinear interpolant on a regular 2D grid.
+
+    Parameters
+    ----------
+    gridX : array_like
+        Strictly increasing x-coordinates.
+    gridY : array_like
+        Strictly increasing y-coordinates.
+    values : array_like, shape (len(gridX), len(gridY))
+        Grid values. Out-of-bounds queries extrapolate rather than raising,
+        `bounds_error=False` with no fixed fill value.
+    """
 
     def __init__(self, gridX, gridY, values):
 
@@ -31,16 +69,28 @@ class GridInterpolation2D(GridFunctionInterface):
         )
 
     def evaluate(self, grid: Grid) -> np.ndarray:
+        """
+        Evaluate the bilinear interpolant at a query grid's points.
+
+        Parameters
+        ----------
+        grid : Grid
+
+        Returns
+        -------
+        np.ndarray
+        """
         return self._interp(grid.to_array())
 
 
 def linear_interpolation_matrix(queryPoints, grid):
     """
-    Sparse linear interpolation matrix I in R^{N x nGrid} (CSR format).
+    Sparse linear interpolation matrix $I \in \mathbb{R}^{N \times n_{grid}}$
+    (CSR format).
 
     Maps values on a 1D grid to N arbitrary query points via linear
-    interpolation. Node ordering: node(i) = i, consistent with
-    evaluate_native() for d=1.
+    interpolation. Node ordering, $\text{node}(i) = i$, consistent with
+    `evaluate_native()` for $d=1$.
 
     Parameters
     ----------
@@ -84,16 +134,18 @@ def linear_interpolation_matrix(queryPoints, grid):
 
 def bilinear_interpolation_matrix(queryPoints, gridX, gridY):
     """
-    Sparse bilinear interpolation matrix I in R^{N x nX*nY} (CSR format).
+    Sparse bilinear interpolation matrix
+    $I \in \mathbb{R}^{N \times n_X n_Y}$ (CSR format).
 
-    Maps values on a regular 2D grid to N arbitrary query points via bilinear
-    interpolation. Node ordering: node(i, j) = i*nY + j, consistent with the
-    flat row-major layout of DNAFourierRealisation.evaluate_native().
+    Maps values on a regular 2D grid to N arbitrary query points via
+    bilinear interpolation. Node ordering, $\text{node}(i,j) = i n_Y + j$,
+    consistent with the flat row-major layout of
+    `DNAFourierRealisation.evaluate_native()`.
 
     Parameters
     ----------
     queryPoints : ndarray, shape (N, 2)
-        Query coordinates, each row is (x, y).
+        Query coordinates, each row is `(x, y)`.
     gridX : ndarray, shape (nX,)
         Strictly increasing x-coordinates of the grid.
     gridY : ndarray, shape (nY,)

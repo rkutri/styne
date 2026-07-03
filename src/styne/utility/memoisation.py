@@ -5,6 +5,11 @@ from styne.parameter.parameter import Parameter
 class Cache(ABC):
     """
     Template class for caching mechanisms.
+
+    Parameters
+    ----------
+    cacheSize : int
+        Maximum number of elements the cache can hold.
     """
 
     def __init__(self, cacheSize: int) -> None:
@@ -23,13 +28,36 @@ class Cache(ABC):
 
     @property
     def misses(self):
+        """
+        Number of `retrieve` calls that missed.
+        """
         return self._misses
 
     @property
     def hits(self):
+        """
+        Number of `retrieve` calls that hit.
+        """
         return self._hits
 
     def contains(self, parameter: Parameter) -> bool:
+        """
+        Whether `parameter` is currently cached.
+
+        Base implementation checks membership in `self._keys`, which the only
+        current subclass, `EvaluationCache`, doesn't populate, it overrides this
+        method with its own `id()`-based check instead. See flag 1 above. A new
+        subclass relying on the base implementation needs to populate `_keys`
+        itself, it isn't done automatically by `__init__`.
+
+        Parameters
+        ----------
+        parameter : Parameter
+
+        Returns
+        -------
+        bool
+        """
         return parameter in self._keys
 
     @abstractmethod
@@ -46,6 +74,17 @@ class Cache(ABC):
 
 
 class EvaluationCache(Cache):
+    """
+    Fixed-size evaluation cache, keyed by `id(parameter)` rather than value
+    equality. Evicts the oldest entry (FIFO, not LRU) once `cacheSize` is
+    reached. Does not use the base `Cache`'s `_keys` mechanism, see flag 1
+    above.
+
+    Parameters
+    ----------
+    cacheSize : int
+        Maximum number of cached entries.
+    """
 
     def __init__(self, cacheSize: int) -> None:
         super().__init__(cacheSize)
