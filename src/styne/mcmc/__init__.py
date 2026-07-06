@@ -2,6 +2,7 @@
 import importlib
 
 _SYMBOL_TO_MODULE = {
+    "MetropolisHastings": "styne.mcmc.metropolishastings",
     "MCMCSampler": "styne.mcmc.sampler",
     "ProposalMethod": "styne.mcmc.proposal",
     "MHFactory": "styne.mcmc.factory",
