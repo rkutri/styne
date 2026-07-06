@@ -304,7 +304,7 @@ class BC(Enum):
 
 
 class BoundaryCondition:
-    """
+    r"""
     Boundary condition vector $b \in \{BC\}^d$ for a single DNA component.
 
     Parameters

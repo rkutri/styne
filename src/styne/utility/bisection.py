@@ -17,7 +17,7 @@ def bisection(
     yLo: Optional[float] = None,
     yHi: Optional[float] = None,
 ):
-    """
+    r"""
     Bisection search for $x \in [x_{lo}, x_{hi}]$ such that $f(x) \approx
     f_{tgt}$ within `tol`.
 

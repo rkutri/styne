@@ -203,7 +203,7 @@ def matern_fourier(f, lengthScale, smoothness, variance, d=1):
 
 
 class ExponentialCovariance1D(StationaryCovariance):
-    """
+    r"""
     Exponential covariance function, $C(r) = \sigma^2 \exp(-\alpha |r|)$.
 
     Parameters
@@ -223,7 +223,7 @@ class ExponentialCovariance1D(StationaryCovariance):
 
 
 class MaternCovariance1D(StationaryCovariance):
-    """
+    r"""
     Matern covariance in 1D, arbitrary smoothness $\nu$. Closed-form fast
     paths for $\nu \in \{0.5, 1.5, 2.5\}$, general Gamma-based evaluation
     otherwise.
@@ -298,7 +298,7 @@ class Matern32Covariance1D(MaternCovariance1D):
 
 
 class MaternCovariance2D(StationaryCovariance):
-    """
+    r"""
     Matern covariance in 2D, arbitrary smoothness $\nu$. Closed-form fast
     paths for $\nu \in \{0.5, 1.5, 2.5\}$, general Gamma-based evaluation
     otherwise.

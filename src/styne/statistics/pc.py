@@ -52,7 +52,7 @@ class MaternRangePCPrior(DensityInterface):
 
 
 class MaternSigmaPCPrior(DensityInterface):
-    """
+    r"""
     Penalised Complexity (PC) prior for the marginal standard deviation
     sigma.
 

@@ -84,7 +84,7 @@ class GridInterpolation2D(GridFunctionInterface):
 
 
 def linear_interpolation_matrix(queryPoints, grid):
-    """
+    r"""
     Sparse linear interpolation matrix $I \in \mathbb{R}^{N \times n_{grid}}$
     (CSR format).
 
@@ -133,7 +133,7 @@ def linear_interpolation_matrix(queryPoints, grid):
 
 
 def bilinear_interpolation_matrix(queryPoints, gridX, gridY):
-    """
+    r"""
     Sparse bilinear interpolation matrix
     $I \in \mathbb{R}^{N \times n_X n_Y}$ (CSR format).
 

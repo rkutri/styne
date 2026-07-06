@@ -11,7 +11,7 @@ _LOG2PI = log(2. * pi)
 
 
 class GaussianDensity(DensityInterface):
-    """
+    r"""
     Log-density of a multivariate Gaussian.
 
     The mean must be set before evaluation. The unnormalised log-density is

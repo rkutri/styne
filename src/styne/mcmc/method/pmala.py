@@ -107,7 +107,7 @@ class PMALAProposal(ProposalMethod):
 
 
 class PreconditionedMALA(MetropolisHastings):
-    """
+    r"""
     Preconditioned MALA sampler.
 
     Extends pCN with a Langevin drift driven by $\nabla \log \Psi$ (the

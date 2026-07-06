@@ -33,12 +33,12 @@ class AcceptanceProbability(ABC):
 
 
 class StandardAcceptance(AcceptanceProbability):
-    """
+    r"""
     Standard Metropolis-Hastings acceptance, $\log \alpha(r) = \min(0, r)$.
     """
 
     def log_probability(self, logMHRatio: float) -> float:
-        """
+        r"""
         Log acceptance probability for a given log MH ratio.
 
         Parameters
@@ -56,7 +56,7 @@ class StandardAcceptance(AcceptanceProbability):
 
 
 class BarkerAcceptance(AcceptanceProbability):
-    """
+    r"""
     Barker (1965) acceptance, $\log \alpha_B(r) = r - \text{logaddexp}(0, r)$.
 
     Satisfies detailed balance via $\alpha_B(r) / \alpha_B(-r) = \exp(r)$.

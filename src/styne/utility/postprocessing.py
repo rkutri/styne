@@ -29,7 +29,7 @@ def estimate_autocorrelation_function_1d(sequence):
 
 
 def sokal_heuristic(tauSeq, heuristicConst):
-    """
+    r"""
     Truncation lag via Sokal's self-consistent windowing rule.
 
     Returns the smallest 1-based $t$ such that $t > c \cdot \tau(t)$, where
@@ -59,7 +59,7 @@ def sokal_heuristic(tauSeq, heuristicConst):
 
 
 def integrated_autocorrelation_1d(acf, sokalConst=5.0):
-    """
+    r"""
     Estimate the integrated autocorrelation time (IAT) tau from a normalised
     autocorrelation function using the method described in Goodman and Weare
     (2010) and implemented in the emcee sampler
