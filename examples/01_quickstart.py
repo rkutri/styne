@@ -61,7 +61,9 @@ likelihood = RegressionLikelihood(data, forwardModel, noiseModel)
 # posterior definition
 posterior = UnnormalisedPosterior(prior, likelihood)
 
-# --- inference ---
+
+# --- INFERENCE ---
+
 factory = MRWFactory()
 factory.target = posterior
 factory.proposalCovariance = DiagonalCovarianceMatrix([0.02, 0.08])
