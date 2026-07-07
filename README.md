@@ -75,7 +75,7 @@ Start with the four runnable examples in `examples/`.
 
 * `01_quickstart.py`: Bayesian linear regression, the shortest complete wiring
   from prior to posterior.
-* `02_gp_sampling.py`: interchangeable Gaussian-process representations.
+* `02_gp.py`: interchangeable Gaussian-process representations.
 * `03_sglmm.py`: a spatial GLMM with Poisson observations.
 * `04_pde_inverse_problem.py`: a custom PDE inverse problem.
 
@@ -148,7 +148,7 @@ problem represented by the `styne` interfaces.
 | Response family / measurement model | Conditional law of observations given the model evaluation                           | `ResponseFamily`                                                 | `GaussianResponse`; `PoissonResponse`; `BinomialResponse`                                                                                            |
 | Likelihood                          | Data-dependent log-density contribution                                              | `LikelihoodInterface`, `RegressionLikelihood`, `SGLMMLikelihood` | Gaussian regression likelihood; Poisson SGLMM likelihood                                                                                             |
 | Target                              | Measure or unnormalised density sampled by an algorithm                              | `DensityInterface`, `RadonNikodym`, `UnnormalisedPosterior`      | `UnnormalisedPosterior(prior, likelihood)`; `RadonNikodym(prior, likelihood)`; direct targets such as `GaussianDensity` and `GaussianMixtureDensity` |
-| Markov transition / sampler         | Transition mechanism targeting the chosen measure or density                         | `MCMCSampler`, `Gibbs`, `MetropolisHastings`                     | MRW in the quickstart; MALA for the SGLMM; pCN for the PDE inverse problem; DART and Gibbs samplers in the manuscript examples                       |
+| Markov transition / sampler         | Transition mechanism targeting the chosen measure or density                         | `MCMCSampler`, `GibbsSampler`, `MetropolisHastings`                     | MRW in the quickstart; MALA for the SGLMM; pCN for the PDE inverse problem; DART and Gibbs samplers in the manuscript examples                       |
 
 The main compression is the `Model` interface. Mathematically, one may separate
 a forward map $\mathcal{G}$, an observation functional $F$, and a response
