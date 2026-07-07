@@ -48,7 +48,7 @@ def test_dense_gp_zero_mean():
     sampler = gp.sampler
 
     samples = np.array(
-        [gp.engine.at_sites(sampler.draw(rng).function, gp.engine.grid) for _ in range(nSamples)])
+        [sampler.draw(rng).function.evaluate(gp.engine.grid) for _ in range(nSamples)])
     mean = np.mean(samples, axis=0)
 
     assert np.max(np.abs(mean)) < 3. * np.sqrt(sigma2 / nSamples), (
@@ -65,7 +65,7 @@ def test_dense_gp_marginal_variance():
     sampler = gp.sampler
 
     samples = np.array(
-        [gp.engine.at_sites(sampler.draw(rng).function, gp.engine.grid) for _ in range(nSamples)])
+        [sampler.draw(rng).function.evaluate(gp.engine.grid) for _ in range(nSamples)])
     variances = np.var(samples, axis=0)
 
     rel_err = np.max(np.abs(variances - sigma2) / sigma2)

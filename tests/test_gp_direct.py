@@ -121,7 +121,7 @@ class TestDirectGPCorrectness:
         samples = []
         for _ in range(self.nSamples):
             sample = sampler.draw(self.rng)
-            val = self.gp.engine.at_sites(sample.function, self.gp.engine.grid)
+            val = sample.function.evaluate(self.gp.engine.grid)
             samples.append(val)
         return np.array(samples)
 
@@ -160,3 +160,36 @@ class TestDirectGPCorrectness:
             self.grid, self.grid
         )
         np.testing.assert_allclose(newK, expected, atol=1e-10)
+
+
+# ---- DirectSampler evaluate behaviour ----
+
+class TestDirectSamplerEvaluate:
+    """Regression tests verifying DirectRealisation shapes itself when evaluated."""
+
+    def setup_method(self):
+        self.gridSize = 15
+        self.grid = UniformGrid(0.0, 1.0, self.gridSize)
+        self.variance = 0.8
+        self.covariance = MaternCovariance1D(0.3, 1.5, self.variance)
+        self.process = GaussianProcess.direct(self.grid, self.covariance)
+        self.randomGenerator = default_rng(2026)
+
+    def test_sampler_evaluate_matches_at_sites(self):
+        sample = self.process.sampler.generate_realisation(rng=self.randomGenerator)
+        evaluated = sample.function.evaluate(self.grid)
+        atSites = self.process.engine.at_sites(sample.function, self.grid)
+        np.testing.assert_allclose(evaluated, atSites, atol=1e-12)
+
+    def test_sampler_evaluate_marginal_variance(self):
+        sampleCount = 2000
+        samples = np.array([
+            self.process.sampler.generate_realisation(
+                rng=self.randomGenerator).function.evaluate(self.grid)
+            for _ in range(sampleCount)
+        ])
+        empiricalVariance = samples.var(axis=0)
+        relativeError = np.max(np.abs(empiricalVariance - self.variance) / self.variance)
+        assert relativeError < 0.25, (
+            f"Marginal variance mismatch: max rel. error = {relativeError:.3f}"
+        )

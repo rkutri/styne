@@ -28,6 +28,7 @@ class DirectRealisation(Expansion):
         self._dim = dimension
         self._grid = grid
         self._coeff = None
+        self._shapeCov = None
 
     @property
     def dimension(self) -> int:
@@ -90,13 +91,17 @@ class DirectRealisation(Expansion):
             )
 
         gridArr = self._grid.to_array().ravel()
+        fieldValues = self._coeff
+        if self._shapeCov is not None:
+            fieldValues = self._shapeCov.apply_chol_factor(fieldValues)
 
-        return Interpolation1D(gridArr, self._coeff, degree=1).evaluate(queryGrid)
+        return Interpolation1D(gridArr, fieldValues, degree=1).evaluate(queryGrid)
 
     def clone(self) -> 'DirectRealisation':
         result = DirectRealisation(self._grid, self._dim)
         if self._coeff is not None:
             result._coeff = self._coeff.copy()
+        result._shapeCov = self._shapeCov
         return result
 
 
@@ -148,7 +153,9 @@ class DirectGPEngine(GPEngine):
         DirectRealisation
             A fresh, uninitialised realisation matching the engine's grid.
         """
-        return DirectRealisation(self._grid, len(self._grid))
+        result = DirectRealisation(self._grid, len(self._grid))
+        result._shapeCov = self._shapeCovariance
+        return result
 
     def build_covariance(
             self, covarianceFunction: CovarianceFunctionInterface
@@ -168,8 +175,6 @@ class DirectGPEngine(GPEngine):
         
         return IIDCovarianceMatrix(len(self._grid), 1.0)
 
-    def at_sites(self, realisation, sites: Grid) -> np.ndarray:
-        return self._shapeCovariance.apply_chol_factor(realisation.coefficient)
 
     def apply_jacobian(
             self, v: np.ndarray, covariance: CovarianceMatrix) -> np.ndarray:

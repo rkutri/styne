@@ -44,10 +44,11 @@ class GaussianProcess:
 
     def __init__(self, covFcn: CovarianceFunctionInterface, engine: GPEngine):
 
+        measureCov = engine.build_covariance(covFcn)
         self._realisation = engine.build_realisation()
         self._param = Function(self._realisation)
 
-        self._measure = Gaussian(engine.build_covariance(covFcn))
+        self._measure = Gaussian(measureCov)
         self._measure.mean = self._param.clone()
         self._measure.mean.coordinate = np.zeros(self._realisation.dimension)
 
@@ -146,14 +147,13 @@ class GaussianProcess:
         if self._engine.requires_covariance_rebuild():
 
             self._measure.covariance = self._engine.build_covariance(self._covFcn)
-            self._measure.mean = self._param.clone()
-            self._measure.mean.coordinate = np.zeros(self._realisation.dimension)
-
             self._realisation = self._engine.build_realisation()
             if hasattr(self._engine, 'spectralWeights'):
                 self._realisation.spectralWeights = self._engine.spectralWeights
                 
             self._param = Function(self._realisation)
+            self._measure.mean = self._param.clone()
+            self._measure.mean.coordinate = np.zeros(self._realisation.dimension)
 
     @property
     def engine(self):
