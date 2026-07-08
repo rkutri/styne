@@ -1,4 +1,8 @@
-# styne
+<p align="center">
+  <img src="docs/assets/styne-logo-wide.svg" alt="styne logo" width="420">
+</p>
+
+[![DOI](https://zenodo.org/badge/1278349844.svg)](https://zenodo.org/badge/latestdoi/1278349844)
 
 *Pre-1.0 (`v0.2.0`)*
 
@@ -85,9 +89,12 @@ Start with the four runnable examples in `examples/`.
 delayed acceptance (MLDA), and DART, a surrogate-assisted delayed-acceptance
 algorithm developed alongside the library.
 
-**Gaussian-process priors.** Dense Cholesky, B-spline and DNA parametrisations
-provide interchangeable representations of the same covariance model with
-different computational trade-offs.
+**Gaussian-process simulation and priors.** Dense Cholesky, B-spline and DNA
+parametrisations provide interchangeable ways to sample Gaussian-process
+realisations, evaluate them on spatial grids and use the corresponding Gaussian
+measures as priors in Bayesian inverse problems. DNA is particularly useful when
+efficient simulation of high-dimensional Gaussian fields is itself part of the
+workflow.
 
 **Models.** Ready-to-use implementations of Bayesian linear regression and
 spatial GLMMs, together with the `Model` interface for wrapping arbitrary
@@ -165,7 +172,12 @@ white-noise coordinates to a GP realisation, while `gp.measure` supplies the
 corresponding Gaussian reference measure. Dense Cholesky, B-spline and DNA are
 therefore different parametrisations of the prior, not different model classes.
 
+## Citation
 
+If you use `styne` in academic work, please cite the archived version on Zenodo:
+[![DOI](https://zenodo.org/badge/1278349844.svg)](https://zenodo.org/badge/latestdoi/1278349844) .
+The DOI resolves to the latest archived release. For exact reproducibility,
+please cite the DOI of the specific release version used.
 
 ## Licence
 

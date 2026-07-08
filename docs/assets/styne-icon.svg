@@ -1,0 +1,48 @@
+<svg width="512" height="512" viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="title desc">
+  <title id="title">styne icon</title>
+  <desc id="desc">A low white faceted stone under smooth Gaussian-process-like blue curves.</desc>
+
+  <rect width="512" height="512" fill="white"/>
+
+  <!-- Main Gaussian-process curve -->
+  <path d="M52 178
+           C95 170 125 88 185 88
+           C244 88 275 178 332 178
+           C389 178 418 112 460 118"
+        fill="none" stroke="#0F5DB8" stroke-width="10" stroke-linecap="round"/>
+
+  <!-- Component / basis curves -->
+  <path d="M72 248
+           C126 248 140 145 200 145
+           C260 145 270 248 332 248
+           C394 248 404 168 452 168"
+        fill="none" stroke="#88B9EA" stroke-width="5" stroke-linecap="round" opacity="0.62"/>
+
+  <path d="M72 270
+           C135 270 150 165 220 205
+           C282 241 284 241 342 205
+           C405 166 418 270 452 270"
+        fill="none" stroke="#88B9EA" stroke-width="4" stroke-linecap="round" opacity="0.48"/>
+
+  <!-- Subtle ground shadow -->
+  <ellipse cx="256" cy="324" rx="185" ry="15" fill="#D9DEE5" opacity="0.35"/>
+
+  <!-- Low faceted white stone -->
+  <polygon points="86,320 135,270 218,235 300,215 392,255 438,320"
+           fill="#F3F1EB" stroke="none"/>
+  <polygon points="86,320 135,270 170,320"
+           fill="#D8D8D3"/>
+  <polygon points="135,270 218,235 245,295 170,320"
+           fill="#ECEAE4"/>
+  <polygon points="218,235 300,215 325,285 245,295"
+           fill="#F8F7F2"/>
+  <polygon points="245,295 325,285 305,320 220,320"
+           fill="#D2D3D1"/>
+  <polygon points="300,215 392,255 325,285"
+           fill="#E1E2DF"/>
+  <polygon points="325,285 392,255 438,320 365,320"
+           fill="#C4CBD2"/>
+  <polygon points="365,320 438,320 405,285"
+           fill="#9FAABA" opacity="0.85"/>
+  <polygon points="86,320 438,320" fill="none" stroke="#B8BEC6" stroke-width="2"/>
+</svg>
