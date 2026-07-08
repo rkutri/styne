@@ -171,9 +171,7 @@ therefore different parametrisations of the prior, not different model classes.
 ## Citation
 
 If you use `styne` in academic work, please cite the archived version on Zenodo:
-
-[![DOI](https://zenodo.org/badge/{repo_id}.svg)](https://zenodo.org/badge/latestdoi/1278349844)
-
+[![DOI](https://zenodo.org/badge/1278349844.svg)](https://zenodo.org/badge/latestdoi/1278349844) .
 The DOI resolves to the latest archived release. For exact reproducibility,
 please cite the DOI of the specific release version used.
 
