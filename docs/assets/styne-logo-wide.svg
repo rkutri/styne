@@ -1,0 +1,37 @@
+<svg width="1200" height="360" viewBox="0 0 1200 360" xmlns="http://www.w3.org/2000/svg">
+  <rect width="1200" height="360" fill="white"/>
+
+  <!-- main Gaussian-process curve -->
+  <path d="M120 150 C230 140, 260 55, 365 55 C470 55, 495 150, 600 150 C705 150, 730 55, 835 55 C940 55, 970 140, 1080 150"
+        fill="none" stroke="#1f6fb2" stroke-width="8" stroke-linecap="round"/>
+
+  <!-- faint basis/component curves -->
+  <path d="M160 185 C260 125, 340 125, 440 185 C540 245, 660 125, 760 185 C860 245, 940 125, 1040 185"
+        fill="none" stroke="#8abce3" stroke-width="4" stroke-linecap="round" opacity="0.55"/>
+  <path d="M160 205 C270 245, 330 115, 440 155 C560 200, 640 200, 760 155 C870 115, 930 245, 1040 205"
+        fill="none" stroke="#8abce3" stroke-width="4" stroke-linecap="round" opacity="0.45"/>
+
+  <!-- hill line -->
+  <path d="M120 230 C320 185, 500 210, 600 210 C700 210, 880 185, 1080 230"
+        fill="none" stroke="#17212b" stroke-width="7" stroke-linecap="round"/>
+
+  <!-- low white stone -->
+  <polygon points="445,215 485,145 560,110 650,135 725,155 770,215 675,225 560,225"
+           fill="#f4f4ef" stroke="#17212b" stroke-width="5" stroke-linejoin="round"/>
+  <polygon points="485,145 560,110 545,170 445,215"
+           fill="#e8e8e3" stroke="#9ca3aa" stroke-width="2"/>
+  <polygon points="560,110 650,135 610,185 545,170"
+           fill="#fafaf6" stroke="#9ca3aa" stroke-width="2"/>
+  <polygon points="650,135 725,155 770,215 610,185"
+           fill="#deded8" stroke="#9ca3aa" stroke-width="2"/>
+  <polygon points="545,170 610,185 675,225 560,225"
+           fill="#eeeeea" stroke="#9ca3aa" stroke-width="2"/>
+
+  <!-- wordmark -->
+  <text x="600" y="325"
+        text-anchor="middle"
+        font-family="Arial, Helvetica, sans-serif"
+        font-size="92"
+        letter-spacing="18"
+        fill="#0b355f">styne</text>
+</svg>

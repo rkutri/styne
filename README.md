@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="docs/assets/styne-logo-wide.svg" alt="styne logo" width="420">
+</p>
+
 # styne
 
 *Pre-1.0 (`v0.2.0`)*
