@@ -1,12 +1,11 @@
 """
 Trace plot comparison: MRW vs MALA vs 2-level DART vs 3-level DART
-for two 1D bimodal (Gaussian mixture) targets shown side-by-side.
+for two 1D bimodal (Gaussian mixture) targets.
 """
 
 import numpy as np
 from pathlib import Path
 
-# pyrefly: ignore [missing-import]
 from manuscript_boilerplate import (
     hasMatplotlib, hasJoblib, plt, joblib
 )
@@ -32,7 +31,6 @@ from styne.utility.tuning import (
 )
 
 from styne.statistics.mixture import GaussianMixtureDensity
-# pyrefly: ignore [missing-import]
 from manuscript_style import METHOD_COLORS
 
 
@@ -134,12 +132,8 @@ def make_target(separation, modeVar):
 
 
 def count_crossings(trace):
-    """Number of mode transitions in a 1D trace.
-
-    The two modes are symmetric about the origin (means +/- separation/2),
-    so the basin is identified by the sign of the coordinate and a
-    transition is a sign change. Zeros (exactly on the separatrix) are
-    dropped before counting.
+    """
+    Number of mode transitions in a 1D trace.
     """
     signs = np.sign(trace)
     signs = signs[signs != 0]
@@ -253,8 +247,6 @@ def run_experiment(separation, modeVar, gamma):
 CACHE = Path(__file__).parent / 'joblib_caches' / f"{Path(__file__).stem}.joblib"
 if hasJoblib:
     CACHE.parent.mkdir(parents=True, exist_ok=True)
-# Recompute when PARAMS change; reuse the cache otherwise. Set True to
-# force a fresh run regardless of the cache.
 FORCE = False
 
 PARAMS = dict(
