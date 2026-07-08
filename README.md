@@ -2,7 +2,7 @@
   <img src="docs/assets/styne-logo-wide.svg" alt="styne logo" width="420">
 </p>
 
-# styne
+[![DOI](https://zenodo.org/badge/1278349844.svg)](https://zenodo.org/badge/latestdoi/1278349844)
 
 *Pre-1.0 (`v0.2.0`)*
 

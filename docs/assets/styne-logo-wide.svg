@@ -1,37 +1,59 @@
-<svg width="1200" height="360" viewBox="0 0 1200 360" xmlns="http://www.w3.org/2000/svg">
-  <rect width="1200" height="360" fill="white"/>
+<svg width="1200" height="420" viewBox="0 0 1200 420" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="title desc">
+  <title id="title">styne logo</title>
+  <desc id="desc">A low white faceted stone under smooth Gaussian-process-like blue curves, with the word styne.</desc>
 
-  <!-- main Gaussian-process curve -->
-  <path d="M120 150 C230 140, 260 55, 365 55 C470 55, 495 150, 600 150 C705 150, 730 55, 835 55 C940 55, 970 140, 1080 150"
-        fill="none" stroke="#1f6fb2" stroke-width="8" stroke-linecap="round"/>
+  <rect width="1200" height="420" fill="white"/>
 
-  <!-- faint basis/component curves -->
-  <path d="M160 185 C260 125, 340 125, 440 185 C540 245, 660 125, 760 185 C860 245, 940 125, 1040 185"
-        fill="none" stroke="#8abce3" stroke-width="4" stroke-linecap="round" opacity="0.55"/>
-  <path d="M160 205 C270 245, 330 115, 440 155 C560 200, 640 200, 760 155 C870 115, 930 245, 1040 205"
-        fill="none" stroke="#8abce3" stroke-width="4" stroke-linecap="round" opacity="0.45"/>
+  <!-- Main Gaussian-process curve -->
+  <path d="M80 160
+           C170 150 230 65 330 65
+           C430 65 490 160 600 160
+           C710 160 770 65 870 65
+           C970 65 1030 150 1120 160"
+        fill="none" stroke="#0F5DB8" stroke-width="8" stroke-linecap="round"/>
 
-  <!-- hill line -->
-  <path d="M120 230 C320 185, 500 210, 600 210 C700 210, 880 185, 1080 230"
-        fill="none" stroke="#17212b" stroke-width="7" stroke-linecap="round"/>
+  <!-- Component / basis curves -->
+  <path d="M120 210
+           C220 210 250 115 350 115
+           C450 115 480 210 600 210
+           C720 210 750 115 850 115
+           C950 115 980 210 1080 210"
+        fill="none" stroke="#88B9EA" stroke-width="4" stroke-linecap="round" opacity="0.62"/>
 
-  <!-- low white stone -->
-  <polygon points="445,215 485,145 560,110 650,135 725,155 770,215 675,225 560,225"
-           fill="#f4f4ef" stroke="#17212b" stroke-width="5" stroke-linejoin="round"/>
-  <polygon points="485,145 560,110 545,170 445,215"
-           fill="#e8e8e3" stroke="#9ca3aa" stroke-width="2"/>
-  <polygon points="560,110 650,135 610,185 545,170"
-           fill="#fafaf6" stroke="#9ca3aa" stroke-width="2"/>
-  <polygon points="650,135 725,155 770,215 610,185"
-           fill="#deded8" stroke="#9ca3aa" stroke-width="2"/>
-  <polygon points="545,170 610,185 675,225 560,225"
-           fill="#eeeeea" stroke="#9ca3aa" stroke-width="2"/>
+  <path d="M120 230
+           C235 230 255 125 380 165
+           C500 205 505 205 600 165
+           C695 125 700 125 820 165
+           C945 205 965 230 1080 230"
+        fill="none" stroke="#88B9EA" stroke-width="3.5" stroke-linecap="round" opacity="0.48"/>
 
-  <!-- wordmark -->
-  <text x="600" y="325"
+  <!-- Subtle ground shadow -->
+  <ellipse cx="600" cy="262" rx="360" ry="18" fill="#D9DEE5" opacity="0.35"/>
+
+  <!-- Low faceted white stone -->
+  <polygon points="210,260 285,205 420,165 610,125 790,175 930,260"
+           fill="#F3F1EB" stroke="none"/>
+  <polygon points="210,260 285,205 360,260"
+           fill="#D8D8D3"/>
+  <polygon points="285,205 420,165 500,220 360,260"
+           fill="#ECEAE4"/>
+  <polygon points="420,165 610,125 690,190 500,220"
+           fill="#F8F7F2"/>
+  <polygon points="500,220 690,190 640,260 465,260"
+           fill="#D2D3D1"/>
+  <polygon points="610,125 790,175 690,190"
+           fill="#E1E2DF"/>
+  <polygon points="690,190 790,175 930,260 760,260"
+           fill="#C4CBD2"/>
+  <polygon points="760,260 930,260 850,210"
+           fill="#9FAABA" opacity="0.85"/>
+  <polygon points="210,260 930,260" fill="none" stroke="#B8BEC6" stroke-width="2"/>
+
+  <!-- Wordmark -->
+  <text x="600" y="380"
         text-anchor="middle"
-        font-family="Arial, Helvetica, sans-serif"
-        font-size="92"
-        letter-spacing="18"
-        fill="#0b355f">styne</text>
+        font-family="Inter, Avenir Next, Helvetica, Arial, sans-serif"
+        font-size="102"
+        letter-spacing="22"
+        fill="#082B5F">styne</text>
 </svg>

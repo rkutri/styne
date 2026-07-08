@@ -1,0 +1,51 @@
+<svg width="1280" height="640" viewBox="0 0 1280 640" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="title desc">
+  <title id="title">styne social preview</title>
+  <desc id="desc">Logo for styne: a white faceted stone under Gaussian-process-like blue curves with the package name and subtitle.</desc>
+
+  <rect width="1280" height="640" fill="white"/>
+
+  <g transform="translate(70,80) scale(0.72)">
+    <path d="M80 160
+             C170 150 230 65 330 65
+             C430 65 490 160 600 160
+             C710 160 770 65 870 65
+             C970 65 1030 150 1120 160"
+          fill="none" stroke="#0F5DB8" stroke-width="9" stroke-linecap="round"/>
+    <path d="M120 210
+             C220 210 250 115 350 115
+             C450 115 480 210 600 210
+             C720 210 750 115 850 115
+             C950 115 980 210 1080 210"
+          fill="none" stroke="#88B9EA" stroke-width="4.5" stroke-linecap="round" opacity="0.62"/>
+    <path d="M120 230
+             C235 230 255 125 380 165
+             C500 205 505 205 600 165
+             C695 125 700 125 820 165
+             C945 205 965 230 1080 230"
+          fill="none" stroke="#88B9EA" stroke-width="4" stroke-linecap="round" opacity="0.48"/>
+    <ellipse cx="600" cy="262" rx="360" ry="18" fill="#D9DEE5" opacity="0.35"/>
+    <polygon points="210,260 285,205 420,165 610,125 790,175 930,260"
+             fill="#F3F1EB" stroke="none"/>
+    <polygon points="210,260 285,205 360,260" fill="#D8D8D3"/>
+    <polygon points="285,205 420,165 500,220 360,260" fill="#ECEAE4"/>
+    <polygon points="420,165 610,125 690,190 500,220" fill="#F8F7F2"/>
+    <polygon points="500,220 690,190 640,260 465,260" fill="#D2D3D1"/>
+    <polygon points="610,125 790,175 690,190" fill="#E1E2DF"/>
+    <polygon points="690,190 790,175 930,260 760,260" fill="#C4CBD2"/>
+    <polygon points="760,260 930,260 850,210" fill="#9FAABA" opacity="0.85"/>
+    <polygon points="210,260 930,260" fill="none" stroke="#B8BEC6" stroke-width="2"/>
+  </g>
+
+  <text x="865" y="270"
+        text-anchor="middle"
+        font-family="Inter, Avenir Next, Helvetica, Arial, sans-serif"
+        font-size="150"
+        letter-spacing="14"
+        fill="#082B5F">styne</text>
+
+  <text x="865" y="350"
+        text-anchor="middle"
+        font-family="Inter, Avenir Next, Helvetica, Arial, sans-serif"
+        font-size="36"
+        fill="#274B75">Bayesian inference for high-dimensional models</text>
+</svg>
