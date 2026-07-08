@@ -17,31 +17,53 @@ def bisection(
     yLo: Optional[float] = None,
     yHi: Optional[float] = None,
 ):
-    """
-    Bisection search for x in [xLo, xHi] such that f(x) ~= fTgt (within tol).
+    r"""
+    Bisection search for $x \in [x_{lo}, x_{hi}]$ such that $f(x) \approx
+    f_{tgt}$ within `tol`.
+
+    Expansion strategy. When both endpoints are on the same side of `fTgt`
+    the bracket is expanded toward the endpoint closer to `fTgt`. After each
+    one-sided expansion the opposite endpoint is tightened to the previous
+    boundary, it already has the correct sign and is a strictly tighter
+    bound than the original endpoint. This avoids wasted evaluations at the
+    wide original bound once a bracket is found.
 
     Parameters
     ----------
-    f            : monotone callable
-    fTgt         : target value
-    xLo, xHi    : initial bracket (xLo < xHi); must lie within [xLimitLo, xLimitHi]
-    log          : work in log-space (x must be positive)
-    xLimitLo/Hi : hard bounds; f is never evaluated outside them
-    tol          : convergence criterion on |f(x) - fTgt|
-    maxIter      : bisection iterations after bracketing
-    maxExpansions: expansion attempts when initial bracket is not valid
-    expandFactor : multiplicative step for bracket expansion
-    yLo, yHi    : pre-computed f(xLo) - fTgt and f(xHi) - fTgt; if supplied
-                  the corresponding endpoint evaluations are skipped
+    f : Callable[[float], float]
+        Monotone objective function.
+    fTgt : float
+        Target value.
+    xLo : float
+        Initial bracket lower bound.
+    xHi : float
+        Initial bracket upper bound, `xLo < xHi`. Both must lie within
+        `[xLimitLo, xLimitHi]`.
+    log : bool, default True
+        Work in log-space, `x` must be positive.
+    xLimitLo : float, optional
+        Hard lower bound, `f` is never evaluated below it.
+    xLimitHi : float, optional
+        Hard upper bound, `f` is never evaluated above it.
+    tol : float, default 0.05
+        Convergence criterion on `|f(x) - fTgt|`.
+    maxIter : int, default 10
+        Bisection iterations after bracketing.
+    maxExpansions : int, default 12
+        Expansion attempts when the initial bracket doesn't contain a
+        sign change.
+    expandFactor : float, default 10.0
+        Multiplicative step for bracket expansion.
+    yLo : float, optional
+        Pre-computed `f(xLo) - fTgt`. If given, the corresponding endpoint
+        evaluation is skipped.
+    yHi : float, optional
+        Pre-computed `f(xHi) - fTgt`. If given, the corresponding endpoint
+        evaluation is skipped.
 
-    Expansion strategy
-    ------------------
-    When both endpoints are on the same side of fTgt the bracket is expanded
-    toward the endpoint closer to fTgt.  After each one-sided expansion the
-    opposite endpoint is *tightened* to the previous boundary: it already has
-    the correct sign and is a strictly tighter bound than the original endpoint.
-    This avoids wasted evaluations at the wide original bound once a bracket is
-    found.
+    Returns
+    -------
+    float
     """
 
     # ── validation ──────────────────────────────────────────────────────────

@@ -3,7 +3,7 @@ import pytest
 
 from scipy.sparse.linalg import spsolve
 
-from styne.utility.finiteElement import (
+from styne.utility.finiteelement import (
     p1_stiffness_1d, p1_mass_lumped_1d, apply_dirichlet_1d,
     q1_stiffness_2d, q1_mass_lumped_2d, apply_dirichlet_2d,
 )

@@ -1,23 +1,45 @@
+"""
+Base class for model parameters.
+
+A Parameter wraps the coordinate array that the model and MCMC layer
+operate on. The library reads 'coordinate' to evaluate models, and
+writes to 'coordinate' to propose new states. The rest of the library
+never needs to know the semantic meaning of the coordinates; that
+knowledge lives inside the Parameter subclass and the Model that
+consumes it.
+
+To define a custom parameter, subclass 'Parameter' and implement:
+
+    dimension   - int, the number of scalar degrees of freedom.
+    coordinate  - ndarray property with a getter *and* a setter.
+                  The getter returns the current coordinate array;
+                  the setter accepts an ndarray of the same shape
+                  and updates internal state accordingly.
+    clone()     - return an independent copy with identical content.
+
+Built-in subclasses: 'Vector', 'Scalar', 'Function', 'BlockParameter'.
+"""
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import Any, Optional
 from numpy import ndarray, array_equal
 
 
 class Parameter(ABC):
-    """
-    Template class for parameters represented by finite-dimensional real
-    coordinates. Coordinates are NumPy arrays. Equality is strict elementwise
-    identity; instances are unhashable.
+    """Finite-dimensional parameter with a mutable coordinate array.
 
-    Design 
-    ------
-    Conceptually, the Parameter class acts as a bridge between the abstract 
-    object the model parameters are supposed to represent, and the NumPy
-    array representing the coordinate array. Ultimately, all inference and
-    sampling is performed with respect to this coordinate array. It's the
-    interface between the model and the rest of the library.
+    See the module docstring for the extension guide. Instances are
+    unhashable; equality is strict elementwise identity.
+
+    Notes
+    -----
+    The coordinate is always a NumPy ndarray. The reason for wrapping
+    it in a Parameter object rather than passing the array directly is
+    that subclasses can carry metadata for the forward model alongside
+    the coordinates. For instance, a 'Function' parameter holds the basis
+    expansion that lets the model evaluate the function on a grid, and
+    a 'BlockParameter' preserves the blocking structure across
+    sub-parameters.
     """
 
     __hash__ = None  # equality defined, hashing disabled
@@ -31,7 +53,12 @@ class Parameter(ABC):
     @property
     @abstractmethod
     def coordinate(self) -> ndarray:
-        """Coordinate vector representing the parameter."""
+        """Coordinate array representing the parameter.
+
+        Subclasses must also provide a setter that accepts an ndarray
+        of the same shape. The MCMC layer writes to this property to
+        update the parameter state in-place.
+        """
         pass
 
     def __eq__(self, other: object) -> bool:
@@ -49,9 +76,10 @@ class Parameter(ABC):
         return array_equal(self.coordinate, other.coordinate)
 
     @abstractmethod
-    def clone(self, memo: Optional[dict[int, Any]] = None) -> Parameter:
-        """
-        Return an independent parameter with identical content. May delegate
-        to deepcopy or use a faster method.
+    def clone(self) -> Parameter:
+        """Return an independent copy with identical content.
+
+        The clone must not share mutable state with the original;
+        writing to one's coordinate must not affect the other.
         """
         pass

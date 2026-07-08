@@ -13,6 +13,18 @@ class RegressionLikelihood(LikelihoodInterface):
     """
     evaluate_log_gradient is available when the model satisfies the
     DifferentiableModel protocol.
+
+    Parameters
+    ----------
+    data : Data
+        Observed data.
+    forwardMap : Model
+        Forward model mapping the parameter to the linear predictor.
+    noise : ResponseFamily
+        Observation response family.
+    cacheSize : int, default 5
+        Number of recent evaluations cached for `evaluate_log` and
+        `evaluate_log_gradient`.
     """
 
     def __init__(
@@ -49,6 +61,19 @@ class RegressionLikelihood(LikelihoodInterface):
         return self._response
 
     def evaluate_log(self, parameter: Parameter) -> float:
+        """
+        Log-likelihood at `parameter`, cached by evaluation. Unnormalised,
+        inherits that from `ResponseFamily.log_likelihood`, see its docstring.
+
+        Parameters
+        ----------
+        parameter : Parameter
+            Point to evaluate at.
+
+        Returns
+        -------
+        float
+        """
 
         if self._logLikelihoodCache.contains(parameter):
             return self._logLikelihoodCache.retrieve(parameter)
@@ -90,6 +115,21 @@ class RegressionLikelihood(LikelihoodInterface):
 
 
 class SGLMMLikelihood(LikelihoodInterface):
+    """
+    Likelihood for an SGLMM.
+
+    Parameters
+    ----------
+    data : Data
+        Observed data.
+    predictor : SGLMM
+        SGLMM forward model.
+    response : ResponseFamily
+        Observation response family.
+    cacheSize : int, default 5
+        Number of recent evaluations cached for `evaluate_log` and
+        `evaluate_log_gradient`.
+    """
 
     def __init__(
             self, data: Data, predictor: SGLMM,
@@ -122,6 +162,19 @@ class SGLMMLikelihood(LikelihoodInterface):
         return self._response
 
     def evaluate_log(self, parameter: Parameter) -> float:
+        """
+        Log-likelihood at `parameter`, cached by evaluation. Unnormalised,
+        inherits that from `ResponseFamily.log_likelihood`, see its docstring.
+
+        Parameters
+        ----------
+        parameter : Parameter
+            Point to evaluate at.
+
+        Returns
+        -------
+        float
+        """
 
         if self._logLikelihoodCache.contains(parameter):
             return self._logLikelihoodCache.retrieve(parameter)

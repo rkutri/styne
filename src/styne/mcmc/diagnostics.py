@@ -9,9 +9,24 @@ from styne.statistics.welford import WelfordAccumulator
 from collections import deque
 
 class ChainDiagnostics(ABC):
+    """
+    Interface for accumulating statistics over an MCMC chain's transitions.
+
+    Notes
+    -----
+    Subclasses implement `process`, `summary`, and `clear`. `reset` is
+    concrete here and delegates to `clear` by default.
+    """
 
     @abstractmethod
     def process(self, transitionData):
+        """
+        Update accumulated statistics with one transition.
+
+        Parameters
+        ----------
+        transitionData : TransitionData
+        """
         ...
 
     def reset(self):
@@ -20,10 +35,20 @@ class ChainDiagnostics(ABC):
 
     @abstractmethod
     def summary(self) -> dict:
+        """
+        Current summary statistics.
+
+        Returns
+        -------
+        dict
+        """
         ...
 
     @abstractmethod
     def clear(self):
+        """
+        Discard all accumulated statistics.
+        """
         ...
 
 

@@ -112,14 +112,9 @@ class DNAFourierComponentRealisation(Expansion):
 
         if self._bc[0] == BC.NEUMANN:
              return cos_series(c, axis=-1, out=self._scratch)
-        
-        # Sine path: prepend zero manually into the buffer is handled by sin_series(..., out=...)
-        # We just need the coefficient part to be correct.
-        # But wait, sin_series logic with 'out' assumes a[..., 1:] is the input.
-        # Currently _coeff has size q. sin_series expects size q+1 with a[0]=0.
-        # Let's align: if Dirichlet, _coeff has size q. 
-        # We need a small temporary for the [0, coeff] concat if we don't have a specific sine buffer.
-        # Actually, let's keep it simple:
+
+        # Dirichlet (sine) path. _coeff has size q, but sin_series expects
+        # size q+1 with a[0]=0, so prepend the zero mode before synthesis.
         if self._coeff.ndim == 1:
             padded_coeff = np.concatenate([[0.], c])
         else:
@@ -389,7 +384,21 @@ class DNAFourierEngine(GPEngine):
         self, covFcn: CovarianceFunctionInterface
     ) -> DiagonalCovarianceMatrix:
         """
-        Compute spectral densities, update internal weights, and return Identity.
+        Build the whitened covariance for the DNA GRF.
+
+        Under the whitening contract, the latent coefficients are standard
+        white noise, so the returned covariance operator is the identity.
+        The spectral square root is evaluated here and stored in 'self._weights'
+        instead, one weight per mode across all 2^d boundary-condition blocks in
+        'BoundaryCondition.all_combinations' order. 'apply_jacobian' multiplies by
+        these weights before synthesis. The weights carry the spectral density's
+        square root and a domain-extent factor 'prod(alpha) ** -0.5'.
+
+        Returns
+        -------
+        DiagonalCovarianceMatrix
+            The identity operator (an 'IIDCovarianceMatrix' with unit variance),
+            matching the whitened parametrisation.
         """
         from styne.statistics.covariance import IIDCovarianceMatrix
         q, alpha = self._q, self._alpha

@@ -16,10 +16,24 @@ from styne.mcmc.acceptance import AcceptanceProbability, StandardAcceptance
 
 
 class MetropolisHastings(MCMCSampler):
-    """Metropolis-Hastings sampler base class.
+    """
+    Metropolis-Hastings sampler base class.
 
     Subclasses implement '_log_mh_ratio' to define the variant of the algorithm.
     This class handles accept/reject, diagnostics, and chain bookkeeping.
+
+    Parameters
+    ----------
+    targetDensity : DensityInterface
+        Target density to sample from.
+    proposalMethod : ProposalMethod
+        Proposal mechanism, assembled by the concrete subclass's `__init__`,
+        not passed through by most subclasses' own public constructors.
+    diagnostics : ChainDiagnostics
+        Tracks transition statistics.
+    acceptance : AcceptanceProbability, optional
+        Defaults to `StandardAcceptance` if not given.
+    rng : Generator, optional
     """
 
     def __init__(

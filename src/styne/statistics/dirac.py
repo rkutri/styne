@@ -3,6 +3,9 @@ from styne.parameter.parameter import Parameter
 
 
 class DiracMeasure(ProbabilityMeasure):
+    """
+    Point-mass probability measure at a fixed `Parameter` location.
+    """
 
     def __init__(self):
         self._location = None
@@ -27,4 +30,17 @@ class DiracMeasure(ProbabilityMeasure):
         return self._location.dimension
 
     def draw(self, rng) -> Parameter:
+        """
+        Return the fixed location, ignoring `rng`.
+
+        Parameters
+        ----------
+        rng : Generator
+            Unused, accepted for interface compatibility.
+
+        Returns
+        -------
+        Parameter
+            The measure's `location`.
+        """
         return self._location

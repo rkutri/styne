@@ -27,7 +27,7 @@ class PartitionedProposalMixin:
         self._pFinePrior = finePrior
 
     @property
-    def is_partitioned(self) -> bool:
+    def isPartitioned(self) -> bool:
         return getattr(self, '_pPartition', None) is not None
 
     def _coarse_from(self, state: Parameter) -> Vector:
@@ -47,6 +47,14 @@ class PartitionedProposalMixin:
 
 
 class ProposalMethod(ABC):
+    """
+    Interface for MCMC proposal mechanisms.
+
+    Notes
+    -----
+    Subclasses implement `generate_proposal`. `state` is a plain settable
+    property, the current point the next proposal is generated from.
+    """
 
     def __init__(self):
         self._state = None
@@ -61,6 +69,17 @@ class ProposalMethod(ABC):
 
     @abstractmethod
     def generate_proposal(self, rng: Generator) -> TransitionData:
+        """
+        Generate a proposal from the current `state`.
+
+        Parameters
+        ----------
+        rng : Generator
+
+        Returns
+        -------
+        TransitionData
+        """
         ...
 
 
@@ -101,6 +120,18 @@ class BlockProposal(ProposalMethod):
             method.state = Vector(self._partition.component(idx, state))
 
     def generate_proposal(self, rng: Generator) -> TransitionData:
+        """
+        Generate a proposal by drawing independently from each component
+        proposal method and merging the results via the partition.
+
+        Parameters
+        ----------
+        rng : Generator
+
+        Returns
+        -------
+        TransitionData
+        """
 
         components = [
             m.generate_proposal(rng).proposal.coordinate for m in self._pMethods

@@ -5,7 +5,17 @@ from styne.mcmc.chain import Chain
 
 def estimate_autocorrelation_function_1d(sequence):
     """
-    Return the biased normalized autocorrelation function for lags 0..n-1.
+    Biased normalised autocorrelation function for lags 0 to n-1.
+
+    Parameters
+    ----------
+    sequence : array_like
+        1D scalar chain.
+
+    Returns
+    -------
+    np.ndarray
+        Autocorrelation at each lag, `acf[0] == 1`.
     """
     sequence = np.asarray(sequence)
     if sequence.ndim != 1 or sequence.size == 0:
@@ -19,8 +29,22 @@ def estimate_autocorrelation_function_1d(sequence):
 
 
 def sokal_heuristic(tauSeq, heuristicConst):
-    """
-    Return truncation lag t* (1-based) using Sokal's rule t > c * tau(t).
+    r"""
+    Truncation lag via Sokal's self-consistent windowing rule.
+
+    Returns the smallest 1-based $t$ such that $t > c \cdot \tau(t)$, where
+    $c$ is `heuristicConst`.
+
+    Parameters
+    ----------
+    tauSeq : array_like
+        Running integrated autocorrelation time estimate at each lag.
+    heuristicConst : float
+        The constant $c$ in the windowing rule.
+
+    Returns
+    -------
+    int
     """
     if len(tauSeq) == 0 or not np.all(np.isfinite(tauSeq)):
         return 0
@@ -35,24 +59,37 @@ def sokal_heuristic(tauSeq, heuristicConst):
 
 
 def integrated_autocorrelation_1d(acf, sokalConst=5.0):
-    """
-    Estimate the integrated autocorrelation time (IAT) tau from a normalized
-    autocorrelation function using the method described in Goodman & Weare
+    r"""
+    Estimate the integrated autocorrelation time (IAT) tau from a normalised
+    autocorrelation function using the method described in Goodman and Weare
     (2010) and implemented in the emcee sampler
     (https://github.com/dfm/emcee). The procedure follows Sokal's
-    self-consistent windowing rule:
-        tau(t) = 1 + 2 * sum_{k=1..t} acf[k]
-        choose t* such that t* > c * tau(t*),
-    and return tau(t*).
+    self-consistent windowing rule,
 
-    Non-closing fix: when the rule is never satisfied, sokal_heuristic
-    returns the full length len(tauSeq). The value tauSeq[-1] there is ~0,
-    because the centred ACF satisfies sum_{k>=1} acf[k] = -1/2, which would
-    send ESS = 1/tau to infinity. In that case the chain is too short to
-    resolve tau, which is at least ~ N / sokalConst, so we return that lower
-    bound rather than ~0.
+    $\tau(t) = 1 + 2\sum_{k=1}^{t}\text{acf}[k]$,
 
-    Returns np.nan on invalid input.
+    choose $t^*$ such that $t^* > c\,\tau(t^*)$, and return $\tau(t^*)$.
+
+    Non-closing fix, when the rule is never satisfied, `sokal_heuristic`
+    returns the full length `len(tauSeq)`. The value `tauSeq[-1]` there is
+    approximately 0, because the centred ACF satisfies
+    $\sum_{k \geq 1}\text{acf}[k] = -1/2$, which would send $\text{ESS} =
+    1/\tau$ to infinity. In that case the chain is too short to resolve
+    tau, which is at least around $N / \text{sokalConst}$, so this returns
+    that lower bound rather than a value near 0.
+
+    Parameters
+    ----------
+    acf : array_like
+        Normalised autocorrelation function, e.g. from
+        `estimate_autocorrelation_function_1d`.
+    sokalConst : float, default 5.0
+        The constant $c$ in Sokal's windowing rule.
+
+    Returns
+    -------
+    float
+        np.nan on invalid input.
     """
     acf = np.atleast_1d(acf)
     if acf.ndim != 1 or acf.size < 2:
@@ -73,8 +110,22 @@ def integrated_autocorrelation_1d(acf, sokalConst=5.0):
 def integrated_autocorrelation(seq, method="mean", sokalConst=5.0):
     """
     Wrapper estimating tau for 1D or 2D sequences.
-    method: 'mean' (ACF of mean across dims) or 'max' (max tau across dims).
-    Returns np.nan on invalid input.
+
+    Parameters
+    ----------
+    seq : array_like
+        1D scalar chain or 2D array of per-dimension chains.
+    method : str, default 'mean'
+        'mean' takes the ACF of the mean across dimensions, 'max' takes the
+        max tau across dimensions.
+    sokalConst : float, default 5.0
+        The constant $c$ in Sokal's windowing rule, passed through to
+        `integrated_autocorrelation_1d`.
+
+    Returns
+    -------
+    float
+        np.nan on invalid input.
     """
     seq = np.asarray(seq)
     if seq.size == 0:
@@ -157,16 +208,3 @@ def multichain_ess_per_iter(chains):
             break
         tau += 2.0 * pair
     return 1.0 / max(tau, 1.0)
-
-
-def extract_samples(chainOrArray, burnin: int, thinning=None) -> np.ndarray:
-    """Extract thinned samples from a Chain or a raw trajectory array."""
-    states = np.asarray(
-        chainOrArray.trajectory
-        if hasattr(chainOrArray, 'trajectory')
-        else chainOrArray
-    )
-    if thinning is None:
-        iat = integrated_autocorrelation(states[burnin:])
-        thinning = max(1, int(iat)) if np.isfinite(iat) else 1
-    return (states[burnin::thinning].copy(), thinning)

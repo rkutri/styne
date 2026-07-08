@@ -27,7 +27,10 @@ class MockIdentityModel(Model):
         self._p = parameter
 
     def _evaluate(self):
-        self._evaluation = self._p.coordinate if hasattr(self, '_p') else np.zeros((self._dim, self._dim))
+        if hasattr(self, '_p'):
+            self._evaluation = self._p.coordinate
+        else:
+            self._evaluation = np.zeros(self._dim)
 
 
 @pytest.fixture
@@ -40,8 +43,8 @@ def mock_noise():
 @pytest.fixture
 def mock_data():
     from styne.statistics.data import Data
-    data = Data(2, np.zeros((2, 2)))
-    data.measurement = np.zeros((2, 2))
+    data = Data(2, np.zeros((1, 2)))
+    data.measurement = np.zeros((1, 2))
     return data
 
 

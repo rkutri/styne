@@ -45,7 +45,7 @@ class CirculantEmbeddingEngine(ProbabilityMeasure, ABC):
                  maxPadding: int = 512, tol: float = 1e-12):
 
         self._vertPerDim = vertPerDim
-        self._n_base = vertPerDim + 1
+        self._nBase = vertPerDim + 1
         self._domExt = domExt
         self._h = domExt / vertPerDim
         self._padding = padding
@@ -60,7 +60,7 @@ class CirculantEmbeddingEngine(ProbabilityMeasure, ABC):
         self._eigenvalues = self._compute_eigenvalues(cov_callable)
 
     def _n_ext(self) -> int:
-        return self._n_base + self._padding
+        return self._nBase + self._padding
 
     def _is_valid(self, eigenvalues: ndarray) -> bool:
         return eigenvalues.min() >= -self._tol
@@ -129,7 +129,28 @@ class CirculantEmbeddingEngine(ProbabilityMeasure, ABC):
 
 
 class CirculantEmbeddingEngine1D(CirculantEmbeddingEngine):
-    """1D circulant embedding using np.fft.fft."""
+    """
+    1D GP sampling via circulant embedding (`np.fft.fft`).
+
+    Parameters
+    ----------
+    cov_callable : callable
+        Stationary covariance function, takes a scalar distance and returns
+        the covariance value.
+    vertPerDim : int
+        Number of grid cells (output has `vertPerDim` points).
+    domExt : float, default 1.0
+        Domain extent (grid spacing = `domExt / vertPerDim`).
+    autotunePadding : bool, default True
+        If True, bisect to find minimal valid padding after finding a valid
+        embedding.
+    padding : int, default 0
+        Initial zero-padding size.
+    maxPadding : int, default 512
+        Maximum padding before raising an error.
+    tol : float, default 1e-12
+        Tolerance for detecting negative eigenvalues.
+    """
 
     def _build_eigenvalues(self, cov_callable, n_ext: int) -> ndarray:
         nRed = 2 * n_ext - 1
@@ -151,7 +172,29 @@ class CirculantEmbeddingEngine1D(CirculantEmbeddingEngine):
 
 
 class CirculantEmbeddingEngine2D(CirculantEmbeddingEngine):
-    """2D circulant embedding using scipy.fft.fft2. Returns a single field."""
+    """
+    2D GP sampling via circulant embedding (`scipy.fft.fft2`). Returns a
+    single field.
+
+    Parameters
+    ----------
+    cov_callable : callable
+        Stationary covariance function, takes a scalar distance and returns
+        the covariance value.
+    vertPerDim : int
+        Number of grid cells per axis (output has `vertPerDim`$^2$ points).
+    domExt : float, default 1.0
+        Domain extent (grid spacing = `domExt / vertPerDim`).
+    autotunePadding : bool, default True
+        If True, bisect to find minimal valid padding after finding a valid
+        embedding.
+    padding : int, default 0
+        Initial zero-padding size.
+    maxPadding : int, default 512
+        Maximum padding before raising an error.
+    tol : float, default 1e-12
+        Tolerance for detecting negative eigenvalues.
+    """
 
     def _build_eigenvalues(self, cov_callable, n_ext: int) -> ndarray:
         nRed = 2 * n_ext - 1
@@ -183,10 +226,24 @@ class CirculantEmbeddingEngine2D(CirculantEmbeddingEngine):
 
 
 class ApproximateCirculantEmbeddingEngine1D(CirculantEmbeddingEngine1D):
-    """1D circulant embedding that clamps negative eigenvalues to zero.
+    """
+    1D circulant embedding that clamps negative eigenvalues to zero.
 
-    The resulting covariance is approximate; use when the exact embedding
-    is indefinite and no padding can fix it.
+    The resulting covariance is approximate, use when the exact embedding
+    is indefinite and no padding can fix it. Fixes `autotunePadding=False`
+    internally, not exposed as a constructor argument.
+
+    Parameters
+    ----------
+    cov_callable : callable
+        Stationary covariance function, takes a scalar distance and returns
+        the covariance value.
+    vertPerDim : int
+        Number of grid cells (output has `vertPerDim` points).
+    domExt : float, default 1.0
+        Domain extent (grid spacing = `domExt / vertPerDim`).
+    padding : int, default 0
+        Zero-padding size, fixed, not autotuned for this variant.
     """
 
     def __init__(self, cov_callable, vertPerDim: int, domExt: float = 1.,
@@ -201,7 +258,25 @@ class ApproximateCirculantEmbeddingEngine1D(CirculantEmbeddingEngine1D):
 
 
 class ApproximateCirculantEmbeddingEngine2D(CirculantEmbeddingEngine2D):
-    """2D circulant embedding that clamps negative eigenvalues to zero."""
+    """
+    2D circulant embedding that clamps negative eigenvalues to zero.
+
+    The resulting covariance is approximate, use when the exact embedding
+    is indefinite and no padding can fix it. Fixes `autotunePadding=False`
+    internally, not exposed as a constructor argument.
+
+    Parameters
+    ----------
+    cov_callable : callable
+        Stationary covariance function, takes a scalar distance and returns
+        the covariance value.
+    vertPerDim : int
+        Number of grid cells per axis (output has `vertPerDim`$^2$ points).
+    domExt : float, default 1.0
+        Domain extent (grid spacing = `domExt / vertPerDim`).
+    padding : int, default 0
+        Zero-padding size, fixed, not autotuned for this variant.
+    """
 
     def __init__(self, cov_callable, vertPerDim: int, domExt: float = 1.,
                  padding: int = 0):

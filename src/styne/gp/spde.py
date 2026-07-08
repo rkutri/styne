@@ -4,7 +4,7 @@ from numpy.random import Generator
 from scipy.sparse.linalg import splu
 
 from styne.statistics.measure import ProbabilityMeasure
-from styne.utility.finiteElement import (
+from styne.utility.finiteelement import (
     p1_stiffness_1d, p1_mass_lumped_1d,
     q1_stiffness_2d, q1_mass_lumped_2d
 )

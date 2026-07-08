@@ -1,52 +1,117 @@
-# Contributing Guidelines
+# Contributing to styne
 
-Thank you for your interest in contributing to this project! We welcome contributions from the community to help improve this toolkit. 
+Thanks for considering a contribution. This file covers what to expect
+before you write any code.
 
-To ensure a smooth collaboration, please follow the guidelines outlined below. These guidelines are designed to align with the Journal of Open Source Software (JOSS) community standards.
+## Maintenance
 
-## How to Report Bugs or Seek Support
+The styne library is currently managed by a single maintainer. To keep the
+project sustainable, review times may occasionally be slow and the library
+must adhere to a deliberately narrow design and strict style guidelines.
 
-If you encounter any bugs, unexpected behavior, or need help using the toolkit, please open an issue in the GitHub repository:
+Pull requests that fall outside this specific scope or style will typically be
+closed rather than put through a lengthy revision cycle. This is entirely a
+practical decision to manage workload rather than a critique of your code.
 
-1. Go to the **Issues** tab on GitHub.
-2. Click **New Issue**.
-3. Use a clear and descriptive title.
-4. Provide a detailed description of the problem, including:
-   - Steps to reproduce the issue.
-   - A minimal working example (MWE) demonstrating the bug.
-   - The expected vs. actual behavior.
-   - Any relevant traceback or log output.
-   - Your system configuration (OS, Python version, dependency versions).
+If you have developed a valuable feature that does not quite fit the core
+project, you are strongly encouraged to fork the repository and build it
+without these constraints. An independent fork that serves new use cases is a
+highly successful outcome for the community. Leaving a star and sharing your
+version with others is always appreciated.
 
-For general support questions or discussion, you can also open an issue or use the repository's Discussion section (if enabled).
+## Requirements for acceptance
 
-## How to Submit Pull Requests
+- **Tests.** All new features require unit tests. Changes affecting component
+  interactions also require integration tests. Pull requests must include
+  appropriate tests to qualify for review.
+- **Style.** The codebase relies on strict uniformity. Every file must adhere
+  to the formatting conventions detailed below to ensure long-term
+  maintainability.
+- **Design.** Components must remain as independent as possible. Submissions
+  that tightly couple components to force a local solution will be rejected
+  in favour of a decoupled approach.
+- **Code Quality.** Submissions must prioritise clean architecture. Temporary
+  workarounds, duplicated logic or unrefined hacks will not be merged even if the
+  test suite passes.
 
-We welcome improvements to code, documentation, and tests. Please use the following workflow to submit your changes:
+## Explicitly welcomed contributions
 
-1. **Fork the Repository**: Create a personal copy of the repository on GitHub.
-2. **Clone the Fork**: Clone your fork to your local machine:
+- **New samplers, models, or GP engines** that fit the existing
+  interfaces (`MetropolisHastings`, `Model`, `GPEngine`, etc.). Please open an
+  issue before writing code if you are unsure about structural compatibility.
+- **Interface extensions.** If existing interfaces do not support specific
+  surrogate classes, your model or likelihood, open an issue detailing the
+  structural gap. Modifying interfaces to robustly accommodate new computational
+  tools is a legitimate expansion of the library.
+- **Performance improvements.** Optimisations require
+  quantitative evidence. Please provide a benchmark demonstrating the
+  improvement, ideally alongside a profile showing the previous computational
+  bottleneck.
+- **Architectural proposals.** Discussions regarding library architecture
+  and design patterns are highly encouraged. If you identify a structural
+  limitation or wish to propose a new design paradigm, please open an issue.
+  Exploring the mathematical and software concepts together first guarantees
+  that any subsequent coding effort is well directed.
+
+## Code style
+
+These conventions are strictly enforced to maintain codebase uniformity. Pull
+requests failing to adhere to these rules will not be merged.
+
+- **Naming conventions.** Use `camelCase` for variables and properties,
+  `snake_case` for methods and functions, `PascalCase` for class names.
+  Module filenames are lower-case with no separators at all.
+- **Line width.** Maximum 90 characters.
+- **Docstrings.** Please provide minimal and signal-dense docstrings for the
+  core entry-points of the new features.
+- **Comments.** Comments must explain the underlying reasoning rather than
+  the mechanics. Delete any comment that simply describes the execution of the
+  next line or a fixed parameter value. The code must be self-explanatory through
+  structure and naming.
+
+## Workflow
+
+1. Fork the repository and clone your fork.
+
    ```bash
-   git clone https://github.com/rkutri/nelo.git
-   cd nelo
+   git clone https://github.com/<you>/styne.git
+   cd styne
    ```
-3. **Set Up the Environment**: We use `uv` for dependency management. You can sync the development environment with:
+
+2. Set up the development environment.
+
    ```bash
-   uv sync --extra plotting
+   pip install -e ".[plotting]"
    ```
-4. **Create a Branch**: Create a descriptive feature branch for your changes:
+
+3. Branch from `main`.
+
    ```bash
    git checkout -b feature/your-feature-name
    ```
-5. **Make Your Changes**: Write clean, readable code and document any new functions or classes. Ensure your code follows the project's design and style.
-6. **Write and Run Tests**: All contributions must be accompanied by relevant tests. Before submitting a pull request, the test suite must pass using `pytest`. Run the test suite with:
+
+4. Write your code in strict accordance with the style guidelines and include
+   appropriate tests.
+
+5. Run the specific tests for your changes followed by the full test suite.
+
    ```bash
-   pytest tests/
+   python -m pytest tests/
    ```
-   **Important**: Any pull request with failing tests or decreased test coverage will not be accepted.
-7. **Commit Your Changes**: Use clear, concise commit messages.
-8. **Push and Open a Pull Request**: Push your branch to your fork and submit a Pull Request (PR) to the `main` or development branch of the parent repository. Please provide a clear description of the changes and reference any related issues in the PR description.
 
-## Code of Conduct
+6. Open a pull request against `main`. Describe the changes, the reasoning and
+   any interfaces the new code extends or relies upon.
 
-By participating in this project, you agree to abide by standard open-source community norms, maintaining a respectful, welcoming, and collaborative environment for everyone.
+## Reporting bugs
+
+Open an issue containing a minimal working example that reproduces the problem.
+Include the expected versus actual behaviour and specify your Python and styne
+versions. Bug reports require a reproducing example to be actionable and will
+remain on hold until one is provided. Where applicable, including a failing
+regression test alongside your report is highly encouraged.
+
+## Code of conduct
+
+Contributors must adhere to standard open-source norms. Please remain
+respectful and keep all discussions strictly focused on the code and the
+underlying concepts.

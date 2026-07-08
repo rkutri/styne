@@ -13,6 +13,12 @@ from styne.parameter.parameter import Parameter
 from styne.statistics.gaussian import Gaussian
 
 
+def _validate_beta(beta) -> None:
+    if not (0.0 < beta <= 1.0):
+        raise ValueError(
+            f"pCN step size must satisfy 0 < beta <= 1. Got {beta}.")
+
+
 class PCNProposal(ProposalMethod):
     """
     Preconditioned Crank-Nicolson proposal.
@@ -44,9 +50,7 @@ class PCNProposal(ProposalMethod):
                 "Currently, only Gaussian reference measures are supported"
             )
 
-        if not (0.0 < beta <= 1.0):
-            raise ValueError(
-                f"pCN step size must satisfy 0 < beta <= 1. Got {beta}.")
+        _validate_beta(beta)
 
         self._beta = beta
         self._refMeasure = referenceMeasure
@@ -83,13 +87,12 @@ class PCNProposal(ProposalMethod):
 
 
 class PreconditionedCrankNicolson(MetropolisHastings):
-    name = "pCN"
     """
     Preconditioned Crank-Nicolson sampler.
 
     Since the pCN proposal preserves the reference measure, the log MH
     ratio reduces to the difference in the log Radon-Nikodym derivative
-    (i.e. the log-likelihood ratio).
+    (the log-likelihood ratio).
 
     Parameters
     ----------
@@ -100,6 +103,7 @@ class PreconditionedCrankNicolson(MetropolisHastings):
     diagnostics : ChainDiagnostics
         Tracks transition statistics.
     """
+    name = "pCN"
 
     def __init__(self, target, beta, diagnostics,
                  acceptance: AcceptanceProbability = None,
@@ -155,8 +159,7 @@ class PCNFactory(MHFactory):
             )
         if self._beta is None:
             raise ValueError("Step size parameter (beta) not set for pCN.")
-        if not (0.0 < self._beta <= 1.0):
-            raise ValueError(f"Invalid pCN step size: beta={self._beta}")
+        _validate_beta(self._beta)
 
     def _create_sampler(self) -> PreconditionedCrankNicolson:
         return PreconditionedCrankNicolson(

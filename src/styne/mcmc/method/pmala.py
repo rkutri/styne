@@ -107,15 +107,24 @@ class PMALAProposal(ProposalMethod):
 
 
 class PreconditionedMALA(MetropolisHastings):
-    name = "pMALA"
-    """
+    r"""
     Preconditioned MALA sampler.
 
-    Extends pCN with a Langevin drift driven by ∇ log Ψ (the derivative's
-    log-gradient). The full target (derivative + reference) enters the log
-    acceptance ratio; the reference geometry enters the drift and the metric
-    for the quadratic correction term.
+    Extends pCN with a Langevin drift driven by $\nabla \log \Psi$ (the
+    derivative's log-gradient). The full target (derivative + reference)
+    enters the log acceptance ratio, the reference geometry enters the
+    drift and the metric for the quadratic correction term.
+
+    Parameters
+    ----------
+    target : RadonNikodym
+        Target density with Gaussian reference measure.
+    beta : float
+        Step size in (0, 1].
+    diagnostics : ChainDiagnostics
+        Tracks transition statistics.
     """
+    name = "pMALA"
 
     def __init__(self, target: RadonNikodym, beta: float, diagnostics,
                  acceptance: AcceptanceProbability = None,

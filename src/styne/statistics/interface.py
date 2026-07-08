@@ -14,6 +14,22 @@ SeedType = Union[int, Sequence[int], SeedSequence, None]
 
 
 class DensityInterface(ABC):
+    """
+    Interface for objects exposing a log-density over a `Parameter` domain.
+
+    Parameters
+    ----------
+    (abstract, no constructor)
+
+    Notes
+    -----
+    Subclasses implement `domainType`, `domainDimension`, and `evaluate_log`.
+    The interface makes no guarantee about normalisation. `evaluate_log` may
+    return a properly normalised log-density or one missing an additive
+    constant, depending on the implementation. Check the concrete class's
+    own docstring, don't assume either way. This matters for MCMC code that
+    compares densities across different classes rather than only within one.
+    """
 
     @property
     @abstractmethod
@@ -59,6 +75,15 @@ class TwiceDifferentiableDensity(DifferentiableDensity, Protocol):
 
 
 class LikelihoodInterface(DensityInterface):
+    """
+    Density interface for likelihood functions, adds the data and model the
+    likelihood is evaluated against.
+
+    Notes
+    -----
+    Subclasses implement `data` and `model` in addition to the
+    `DensityInterface` contract.
+    """
 
     @property
     @abstractmethod
@@ -72,6 +97,16 @@ class LikelihoodInterface(DensityInterface):
 
 
 class CovarianceOperatorInterface(ABC):
+    """
+    Interface for objects that apply a covariance operator and its Cholesky
+    factors to a vector, without necessarily exposing the operator's full
+    structure (dense, diagonal, or otherwise).
+
+    Notes
+    -----
+    Subclasses implement `apply_chol_factor`, `apply_chol_factor_transpose`,
+    and `apply_inverse`.
+    """
 
     @abstractmethod
     def apply_chol_factor(self, x: ndarray) -> ndarray:
@@ -87,6 +122,17 @@ class CovarianceOperatorInterface(ABC):
 
 
 class CovarianceFunctionInterface(ABC):
+    """
+    Interface for stationary or non-stationary covariance functions
+    evaluated pairwise between two sets of points.
+
+    Notes
+    -----
+    Subclasses implement `evaluate_covariance`. `MaternCovariance2D` is
+    curated but does not formally implement this interface, despite
+    matching its contract structurally. `isinstance` checks against this
+    interface will fail for `MaternCovariance2D` instances.
+    """
 
     @abstractmethod
     def evaluate_covariance(self, xGrid: ndarray, yGrid: ndarray) -> ndarray:
@@ -94,6 +140,14 @@ class CovarianceFunctionInterface(ABC):
 
 
 class BayesianModelInterface(ABC):
+    """
+    Interface for a Bayesian model exposing its likelihood and prior as
+    separate components.
+
+    Notes
+    -----
+    Subclasses implement `likelihood` and `prior`.
+    """
 
     @property
     @abstractmethod

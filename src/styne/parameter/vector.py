@@ -8,6 +8,12 @@ from styne.parameter.parameter import Parameter
 class Vector(Parameter):
     """
     Finite-dimensional parameter vector.
+
+    Parameters
+    ----------
+    coordinate : ndarray
+        1D vector or 2D batch matrix, coerced to float and validated on
+        every set, not just at construction.
     """
 
     def __init__(self, coordinate: ndarray):
@@ -27,6 +33,22 @@ class Vector(Parameter):
 
     @staticmethod
     def validate(coordinate: ndarray):
+        """
+        Coerce to a float array and check it's 1D or 2D.
+
+        Parameters
+        ----------
+        coordinate : ndarray
+
+        Returns
+        -------
+        ndarray
+
+        Raises
+        ------
+        ValueError
+            If the array isn't 1D or 2D after coercion.
+        """
 
         coordinate = atleast_1d(asarray(coordinate, dtype=float))
 
@@ -38,4 +60,11 @@ class Vector(Parameter):
         return coordinate
 
     def clone(self) -> Parameter:
+        """
+        Return an independent copy with the same coordinate.
+
+        Returns
+        -------
+        Vector
+        """
         return self.__class__(self._coordinate.copy())

@@ -44,3 +44,8 @@ exclude = [
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/styne"]
+
+[tool.pytest.ini_options]
+markers = [
+    "slow: marks tests as slow (deselect with '-m \"not slow\"')",
+]

@@ -9,6 +9,17 @@ from typing import Iterable, Sequence, Union, Iterator
 
 
 class Grid:
+    """
+    Thin wrapper around a list of point arrays, letting a set of arbitrary
+    points and a `UniformGrid` be used interchangeably wherever a `Grid` is
+    expected.
+
+    Parameters
+    ----------
+    points : Iterable[np.ndarray | Sequence[float]]
+        Points, each coerced to a flat float array. All points must have
+        the same dimension.
+    """
 
     def __init__(self, points: Iterable[Union[np.ndarray, Sequence[float]]]):
 
@@ -48,6 +59,13 @@ class Grid:
             yield p.copy()
 
     def to_array(self) -> np.ndarray:
+        """
+        Stack all points into a single `(n_points, dimension)` array.
+
+        Returns
+        -------
+        np.ndarray
+        """
 
         if len(self._points) == 0:
             return np.empty((0, 0))
@@ -171,6 +189,16 @@ class UniformGrid(Grid):
         return self._yAxis.copy()
 
     def to_array(self) -> np.ndarray:
+        """
+        Stack the grid into a `(n_points, dimension)` array.
+
+        For 2D, returns every `(x, y)` combination in row-major order,
+        `node(i, j) = i * nY + j`, matching `__getitem__`'s flattened indexing.
+
+        Returns
+        -------
+        np.ndarray
+        """
 
         if self._is2d:
 

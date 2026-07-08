@@ -11,30 +11,60 @@ from styne.statistics.covariance import (
 )
 from styne.utility.grid import Grid, UniformGrid
 
+_MATERN_MAX_SCALED_DISTANCE = 800.0
+_MATERN_MIN_SCALED_DISTANCE = 1e-8
 
-class StationaryCovariance1D(CovarianceFunctionInterface):
 
-    def __init__(self, statCovCallable, fourierCallable):
+def _as_point_array(points: np.ndarray) -> np.ndarray:
+    """Coerce a Grid or raw array to a dense `(nPoints, dimension)` array.
 
+    'Grid.to_array' already returns this shape, `(n, 1)` in 1D and `(n, 2)`
+    in 2D, so cdist consumes it directly. A raw 1D array of coordinates is
+    promoted to a column.
+    """
+    if isinstance(points, (Grid, UniformGrid)):
+        return np.asarray(points.to_array())
+
+    array = np.asarray(points, dtype=float)
+    if array.ndim == 1:
+        return array[:, None]
+    return array
+
+
+class StationaryCovariance(CovarianceFunctionInterface):
+    """
+    Stationary covariance function in any spatial dimension, wrapping a
+    radial covariance and its spectral density as plain callables.
+
+    Pairwise distances are Euclidean via cdist, so the same implementation
+    serves 1D and 2D. 'spatialDimension' is carried only to set the 'd'
+    argument of the Fourier callable, which differs between dimensions.
+
+    Parameters
+    ----------
+    statCovCallable : callable
+        Takes an array of Euclidean distances, returns covariance values.
+    fourierCallable : callable
+        Takes an array of frequencies, returns spectral density values.
+    spatialDimension : int
+        Domain dimension, 1 or 2.
+    """
+
+    def __init__(self, statCovCallable, fourierCallable, spatialDimension):
         self._fcn = statCovCallable
         self._fourier = fourierCallable
+        self._spatialDimension = spatialDimension
+
+    @property
+    def spatialDimension(self) -> int:
+        return self._spatialDimension
 
     def evaluate_covariance(self, x: np.ndarray,
                             y: np.ndarray) -> np.ndarray:
-        """
-        Dispatching implementation for 1D covariance evaluation.
-        """
-        if isinstance(x, (Grid, UniformGrid)):
-            xArr = np.asarray(x.to_array()).ravel()
-        else:
-            xArr = np.asarray(x).ravel()
+        xPoints = _as_point_array(x)
+        yPoints = _as_point_array(y)
 
-        if isinstance(y, (Grid, UniformGrid)):
-            yArr = np.asarray(y.to_array()).ravel()
-        else:
-            yArr = np.asarray(y).ravel()
-
-        distances = np.abs(xArr[:, None] - yArr[None, :])
+        distances = cdist(xPoints, yPoints)
         covFlat = self._fcn(distances.ravel())
         return np.asarray(covFlat).reshape(distances.shape)
 
@@ -73,7 +103,7 @@ def matern_covariance(x, lengthScale, smoothness, variance):
         scaledDistance = np.where(scaledDistance == 0, 0.0, np.inf)
 
     # Avoid inf * 0 = nan when distance overflows
-    safeDist = np.minimum(scaledDistance, 800.0)
+    safeDist = np.minimum(scaledDistance, _MATERN_MAX_SCALED_DISTANCE)
 
     if isclose(smoothness, 1.5):
         return variance * (1. + safeDist) * np.exp(-safeDist)
@@ -84,8 +114,11 @@ def matern_covariance(x, lengthScale, smoothness, variance):
 
     covariance = np.zeros_like(scaledDistance)
 
-    validMask = (scaledDistance > 1e-8) & (scaledDistance < 800.0)
-    covariance[~validMask & (scaledDistance < 1e-8)] = variance
+    validMask = (
+        (scaledDistance > _MATERN_MIN_SCALED_DISTANCE)
+        & (scaledDistance < _MATERN_MAX_SCALED_DISTANCE)
+    )
+    covariance[~validMask & (scaledDistance < _MATERN_MIN_SCALED_DISTANCE)] = variance
     covariance[validMask] = (variance * (2. ** (1. - smoothness)) / gamma(smoothness)) * \
         (scaledDistance[validMask] ** smoothness) * kv(smoothness, scaledDistance[validMask])
 
@@ -108,7 +141,7 @@ def matern_log_rho_gradient(x, lengthScale, smoothness, variance):
         scaledDistance = np.where(scaledDistance == 0, 0.0, np.inf)
 
     # Avoid inf * 0 = nan when distance overflows
-    safeDist = np.minimum(scaledDistance, 800.0)
+    safeDist = np.minimum(scaledDistance, _MATERN_MAX_SCALED_DISTANCE)
 
     if isclose(smoothness, 1.5):
         return variance * (safeDist**2) * np.exp(-safeDist)
@@ -118,7 +151,10 @@ def matern_log_rho_gradient(x, lengthScale, smoothness, variance):
             np.exp(-safeDist)
 
     gradient = np.zeros_like(scaledDistance)
-    validMask = (scaledDistance > 1e-8) & (scaledDistance < 800.0)
+    validMask = (
+        (scaledDistance > _MATERN_MIN_SCALED_DISTANCE)
+        & (scaledDistance < _MATERN_MAX_SCALED_DISTANCE)
+    )
     gradient[validMask] = (variance * (2. ** (1. - smoothness)) / gamma(smoothness)) * \
         (scaledDistance[validMask] ** (smoothness + 1.)) * \
         kv(smoothness - 1., scaledDistance[validMask])
@@ -166,21 +202,47 @@ def matern_fourier(f, lengthScale, smoothness, variance, d=1):
     return np.exp(logSpectral)
 
 
-class ExponentialCovariance1D(StationaryCovariance1D):
+class ExponentialCovariance1D(StationaryCovariance):
+    r"""
+    Exponential covariance function, $C(r) = \sigma^2 \exp(-\alpha |r|)$.
+
+    Parameters
+    ----------
+    alpha : float
+        Decay rate.
+    marginalVariance : float
+        Marginal variance $\sigma^2$.
+    """
 
     def __init__(self, alpha, marginalVariance):
         super().__init__(
             lambda r: exponential_covariance(r, alpha, marginalVariance),
-            lambda f: matern_fourier(f, 1. / alpha, 0.5, marginalVariance, d=1)
+            lambda f: matern_fourier(f, 1. / alpha, 0.5, marginalVariance, d=1),
+            spatialDimension=1
         )
 
 
-class MaternCovariance1D(StationaryCovariance1D):
+class MaternCovariance1D(StationaryCovariance):
+    r"""
+    Matern covariance in 1D, arbitrary smoothness $\nu$. Closed-form fast
+    paths for $\nu \in \{0.5, 1.5, 2.5\}$, general Gamma-based evaluation
+    otherwise.
+
+    Parameters
+    ----------
+    lengthScale : float
+        Length scale.
+    smoothness : float
+        Smoothness parameter $\nu$, must be at least 0.5.
+    marginalVariance : float
+        Marginal variance $\sigma^2$.
+    """
 
     def __init__(self, lengthScale, smoothness, marginalVariance):
         super().__init__(
             lambda r: matern_covariance(r, lengthScale, smoothness, marginalVariance),
-            lambda f: matern_fourier(f, lengthScale, smoothness, marginalVariance, d=1)
+            lambda f: matern_fourier(f, lengthScale, smoothness, marginalVariance, d=1),
+            spatialDimension=1
         )
         self._lengthScale = lengthScale
         self._smoothness = smoothness
@@ -235,52 +297,45 @@ class Matern32Covariance1D(MaternCovariance1D):
         return kappa, tau
 
 
-class MaternCovariance2D:
+class MaternCovariance2D(StationaryCovariance):
+    r"""
+    Matern covariance in 2D, arbitrary smoothness $\nu$. Closed-form fast
+    paths for $\nu \in \{0.5, 1.5, 2.5\}$, general Gamma-based evaluation
+    otherwise.
+
+    Parameters
+    ----------
+    lengthScale : float
+        Length scale.
+    smoothness : float
+        Smoothness parameter $\nu$, must be at least 0.5.
+    marginalVariance : float
+        Marginal variance $\sigma^2$.
+    """
 
     def __init__(self, lengthScale, smoothness, marginalVariance):
+        super().__init__(
+            lambda r: matern_covariance(r, lengthScale, smoothness, marginalVariance),
+            lambda f: matern_fourier(f, lengthScale, smoothness, marginalVariance, d=2),
+            spatialDimension=2
+        )
         self._lengthScale = lengthScale
         self._smoothness = smoothness
         self._marginalVariance = marginalVariance
 
-    def evaluate_fourier(self, freq: np.ndarray) -> np.ndarray:
-        return matern_fourier(
-            freq, self._lengthScale, self._smoothness, self._marginalVariance, d=2
+    def evaluate_covariance_gradient(self, x: np.ndarray, y: np.ndarray) -> dict:
+        distances = cdist(_as_point_array(x), _as_point_array(y))
+        rhoGrad = matern_log_rho_gradient(
+            distances.ravel(), self._lengthScale, self._smoothness,
+            self._marginalVariance
         )
-
-    def evaluate_covariance(self, pts1: np.ndarray,
-                            pts2: np.ndarray) -> np.ndarray:
-        if isinstance(pts1, (Grid, UniformGrid)):
-            pts1 = pts1.to_array()
-        else:
-            pts1 = np.atleast_2d(pts1)
-
-        if isinstance(pts2, (Grid, UniformGrid)):
-            pts2 = pts2.to_array()
-        else:
-            pts2 = np.atleast_2d(pts2)
-
-        R = cdist(pts1, pts2)
-        return matern_covariance(R, self._lengthScale, self._smoothness,
-                                 self._marginalVariance)
-
-    def evaluate_covariance_gradient(self, pts1: np.ndarray, pts2: np.ndarray) -> dict:
-        if isinstance(pts1, (Grid, UniformGrid)):
-            pts1 = pts1.to_array()
-        else:
-            pts1 = np.atleast_2d(pts1)
-
-        if isinstance(pts2, (Grid, UniformGrid)):
-            pts2 = pts2.to_array()
-        else:
-            pts2 = np.atleast_2d(pts2)
-
-        R = cdist(pts1, pts2)
-        rhoGrad = matern_log_rho_gradient(R.ravel(), self._lengthScale, self._smoothness, self._marginalVariance)
-        sigmaGrad = 2. * matern_covariance(R.ravel(), self._lengthScale, self._smoothness, self._marginalVariance)
-        
+        sigmaGrad = 2. * matern_covariance(
+            distances.ravel(), self._lengthScale, self._smoothness,
+            self._marginalVariance
+        )
         return {
-            'log_rho': rhoGrad.reshape(R.shape),
-            'log_sigma': sigmaGrad.reshape(R.shape)
+            'log_rho': rhoGrad.reshape(distances.shape),
+            'log_sigma': sigmaGrad.reshape(distances.shape)
         }
 
 

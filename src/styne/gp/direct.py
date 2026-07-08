@@ -12,8 +12,15 @@ from styne.utility.interpolation import Interpolation1D
 
 class DirectRealisation(Expansion):
     """
-    A Gaussian process parametrisation where the coordinates directly correspond
-    to the values of the realisation at the grid points.
+    A Gaussian process parametrisation where the coordinates directly
+    correspond to the values of the realisation at the grid points.
+
+    Parameters
+    ----------
+    grid : Grid
+        The grid the realisation's coefficients live on.
+    dimension : int
+        Number of coefficients (grid points).
     """
 
     def __init__(self, grid: Grid, dimension: int):
@@ -21,6 +28,7 @@ class DirectRealisation(Expansion):
         self._dim = dimension
         self._grid = grid
         self._coeff = None
+        self._shapeCov = None
 
     @property
     def dimension(self) -> int:
@@ -57,6 +65,25 @@ class DirectRealisation(Expansion):
         self._coeff = coeff
 
     def evaluate(self, queryGrid: Grid) -> np.ndarray:
+        """
+        Linearly interpolate the realisation onto a query grid.
+
+        Parameters
+        ----------
+        queryGrid : Grid
+            Sites to evaluate the realisation at.
+
+        Returns
+        -------
+        np.ndarray
+            Interpolated field values at `queryGrid`.
+
+        Raises
+        ------
+        NotImplementedError
+            If the realisation's own grid is 2D. Off-grid evaluation is
+            currently only implemented in 1D.
+        """
 
         if self._grid.dimension != 1:
             raise NotImplementedError(
@@ -64,13 +91,17 @@ class DirectRealisation(Expansion):
             )
 
         gridArr = self._grid.to_array().ravel()
+        fieldValues = self._coeff
+        if self._shapeCov is not None:
+            fieldValues = self._shapeCov.apply_chol_factor(fieldValues)
 
-        return Interpolation1D(gridArr, self._coeff, degree=1).evaluate(queryGrid)
+        return Interpolation1D(gridArr, fieldValues, degree=1).evaluate(queryGrid)
 
     def clone(self) -> 'DirectRealisation':
         result = DirectRealisation(self._grid, self._dim)
         if self._coeff is not None:
             result._coeff = self._coeff.copy()
+        result._shapeCov = self._shapeCov
         return result
 
 
@@ -78,9 +109,18 @@ class DirectGPEngine(GPEngine):
     """
     GPEngine for the direct (whitened) GP parametrisation.
 
-    The parameter θ = z̃ lives in N(0, I). The field at the sites is
-    u = L @ z̃, where L is the Cholesky factor of K(sites, sites).
+    The parameter $\theta = \tilde{z}$ lives in $N(0, I)$. The field at
+    the sites is $u = L\tilde{z}$, where $L$ is the Cholesky factor of
+    K(\text{sites}, \text{sites})$.
     Changing the sites requires rebuilding the covariance.
+
+    Parameters
+    ----------
+    grid : Grid
+        Sites the GP is initially defined on.
+    nugget : float, default 0.0
+        Diagonal regularisation added to the covariance before
+        factorisation.
     """
 
     def __init__(self, grid: Grid, nugget: float = 0.0):
@@ -105,7 +145,17 @@ class DirectGPEngine(GPEngine):
             self._grid = sites
 
     def build_realisation(self) -> DirectRealisation:
-        return DirectRealisation(self._grid, len(self._grid))
+        """
+        Construct a new `DirectRealisation` on the engine's current grid.
+
+        Returns
+        -------
+        DirectRealisation
+            A fresh, uninitialised realisation matching the engine's grid.
+        """
+        result = DirectRealisation(self._grid, len(self._grid))
+        result._shapeCov = self._shapeCovariance
+        return result
 
     def build_covariance(
             self, covarianceFunction: CovarianceFunctionInterface
@@ -125,8 +175,6 @@ class DirectGPEngine(GPEngine):
         
         return IIDCovarianceMatrix(len(self._grid), 1.0)
 
-    def at_sites(self, realisation, sites: Grid) -> np.ndarray:
-        return self._shapeCovariance.apply_chol_factor(realisation.coefficient)
 
     def apply_jacobian(
             self, v: np.ndarray, covariance: CovarianceMatrix) -> np.ndarray:
@@ -184,6 +232,24 @@ class DirectGPEngine(GPEngine):
 
 
 class DirectGPPredictor(Predictor):
+    """
+    Out-of-sample prediction for the direct GP engine.
+
+    Precomputes pairwise distances between the query sites and the
+    engine's grid, used to build the cross-covariance for the predictive
+    mean.
+
+    Parameters
+    ----------
+    gpState : GPState
+        Current GP state, exposes the parameter and covariance function to
+        predict from.
+    engine : DirectGPEngine
+        The engine the prediction is built against.
+    queryGrid : Grid
+        Sites to predict at.
+    """
+
     def __init__(
         self, gpState: GPState, engine: DirectGPEngine,
         queryGrid: Grid
@@ -204,6 +270,14 @@ class DirectGPPredictor(Predictor):
         return cdist(queryArr, gridArr)
 
     def mean(self) -> np.ndarray:
+        """
+        Predictive mean at the query sites, conditional on the current state.
+
+        Returns
+        -------
+        np.ndarray
+            Predictive mean values at `queryGrid`.
+        """
         covFcn = self._gpState.covarianceFunction
         kStarArr = matern_covariance(
             self._distanceMatrix,

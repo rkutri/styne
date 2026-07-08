@@ -70,12 +70,36 @@ def tune_parameter(
 
 @dataclass
 class RWTunerConfig:
+    """
+    Configuration for random-walk-type tuners (MRW, pCN).
+
+    Attributes
+    ----------
+    acceptanceGoal : float, default 0.3
+        Target acceptance rate the bisection aims for.
+    nTuning : int, default 1000
+        Chain length run at each probed parameter value.
+    tolerance : float, default 0.05
+        Convergence tolerance on acceptance rate.
+    """
     acceptanceGoal: float = 0.3
     nTuning: int = 1000
     tolerance: float = 0.05
 
 @dataclass
 class LangevinTunerConfig:
+    """
+    Configuration for Langevin-type tuners (MALA, pMALA).
+
+    Attributes
+    ----------
+    acceptanceGoal : float, default 0.6
+        Target acceptance rate the bisection aims for.
+    nTuning : int, default 1000
+        Chain length run at each probed parameter value.
+    tolerance : float, default 0.05
+        Convergence tolerance on acceptance rate.
+    """
     acceptanceGoal: float = 0.6
     nTuning: int = 1000
     tolerance: float = 0.05
@@ -86,7 +110,21 @@ class LangevinTunerConfig:
 # ─── Init helper ─────────────────────────────────────────────────────────────
 
 def infer_init(target):
-    """Return a sensible starting point for the given target density."""
+    """
+    Return a sensible starting point for the given target density.
+
+    Uses the reference measure's mean for a `RadonNikodym` target, or the
+    density's own mean for a `GaussianDensity`, otherwise a zero vector of
+    the correct type and dimension.
+
+    Parameters
+    ----------
+    target : DensityInterface
+
+    Returns
+    -------
+    Parameter
+    """
     if isinstance(target, RadonNikodym):
         return target.reference.mean.clone()
     elif isinstance(target, GaussianDensity):
@@ -98,7 +136,18 @@ def infer_init(target):
 # ─── Per-method tuner classes ────────────────────────────────────────────────
 
 class MRWTuner:
-    """Tunes an MRW sampler by bisecting on proposal variance."""
+    """
+    Tunes an MRW sampler by bisecting on proposal variance.
+
+    Parameters
+    ----------
+    factory : MRWFactory
+        Factory whose `proposalCovariance` is set during tuning.
+    init : Parameter
+        Initial state for each tuning run.
+    config : RWTunerConfig, optional
+        Defaults to `RWTunerConfig()` if not given.
+    """
 
     def __init__(self, factory, init, config=None):
         self._factory = factory
@@ -106,6 +155,16 @@ class MRWTuner:
         self._config = config if config is not None else RWTunerConfig()
 
     def tune(self):
+        """
+        Bisect on proposal variance until the target acceptance rate is met.
+
+        Mutates `factory.proposalCovariance` to the tuned value as a side
+        effect, then returns a chain built from the tuned factory.
+
+        Returns
+        -------
+        MetropolisedRandomWalk
+        """
         dim = self._factory.target.domainDimension
         state = {'probes': 0, 'acc': 0.0}
 
@@ -128,7 +187,18 @@ class MRWTuner:
 
 
 class MALATuner:
-    """Tunes a MALA sampler by bisecting on step size."""
+    """
+    Tunes a MALA sampler by bisecting on step size.
+
+    Parameters
+    ----------
+    factory : MALAFactory
+        Factory whose `stepSize` is set during tuning.
+    init : Parameter
+        Initial state for each tuning run.
+    config : LangevinTunerConfig, optional
+        Defaults to `LangevinTunerConfig()` if not given.
+    """
 
     def __init__(self, factory, init, config=None):
         self._factory = factory
@@ -136,6 +206,16 @@ class MALATuner:
         self._config = config if config is not None else LangevinTunerConfig()
 
     def tune(self):
+        """
+        Bisect on step size until the target acceptance rate is met.
+
+        Mutates `factory.stepSize` to the tuned value as a side effect, then
+        returns a chain built from the tuned factory.
+
+        Returns
+        -------
+        MetropolisAdjustedLangevinAlgorithm
+        """
         state = {'probes': 0, 'acc': 0.0}
 
         def objective(h):
@@ -158,7 +238,18 @@ class MALATuner:
 
 
 class PCNTuner:
-    """Tunes a pCN sampler by bisecting on beta."""
+    """
+    Tunes a pCN sampler by bisecting on beta.
+
+    Parameters
+    ----------
+    factory : PCNFactory
+        Factory whose `beta` is set during tuning.
+    init : Parameter
+        Initial state for each tuning run.
+    config : RWTunerConfig, optional
+        Defaults to `RWTunerConfig()` if not given.
+    """
 
     def __init__(self, factory, init, config=None):
         self._factory = factory
@@ -166,6 +257,16 @@ class PCNTuner:
         self._config = config if config is not None else RWTunerConfig()
 
     def tune(self):
+        """
+        Bisect on beta until the target acceptance rate is met.
+
+        Mutates `factory.beta` to the tuned value as a side effect, then
+        returns a chain built from the tuned factory.
+
+        Returns
+        -------
+        PreconditionedCrankNicolson
+        """
         state = {'probes': 0, 'acc': 0.0}
 
         def objective(b):
@@ -194,7 +295,18 @@ class PCNTuner:
 
 
 class PMALATuner:
-    """Tunes a pMALA sampler by bisecting on beta."""
+    """
+    Tunes a pMALA sampler by bisecting on beta.
+
+    Parameters
+    ----------
+    factory : PMALAFactory
+        Factory whose `beta` is set during tuning.
+    init : Parameter
+        Initial state for each tuning run.
+    config : LangevinTunerConfig, optional
+        Defaults to `LangevinTunerConfig()` if not given.
+    """
 
     def __init__(self, factory, init, config=None):
         self._factory = factory
@@ -202,6 +314,16 @@ class PMALATuner:
         self._config = config if config is not None else LangevinTunerConfig()
 
     def tune(self):
+        """
+        Bisect on beta until the target acceptance rate is met.
+
+        Mutates `factory.beta` to the tuned value as a side effect, then
+        returns a chain built from the tuned factory.
+
+        Returns
+        -------
+        PreconditionedMALA
+        """
         state = {'probes': 0, 'acc': 0.0}
 
         def objective(b):

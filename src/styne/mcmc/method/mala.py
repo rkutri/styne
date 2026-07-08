@@ -28,21 +28,21 @@ class MALAProposal(ProposalMethod):
     stepSize : float
         Step size h, interpreted as the standard deviation of the
         isotropic noise.
-    log_gradient_callable : callable
+    logGradientCallable : callable
         Maps a Parameter to the gradient of the log target density
         (as an ndarray).
     """
 
-    def __init__(self, dim, stepSize, log_gradient_callable):
+    def __init__(self, dim, stepSize, logGradientCallable):
 
         super().__init__()
 
-        if not callable(log_gradient_callable):
+        if not callable(logGradientCallable):
             raise ValueError("gradient must be callable")
 
         self._h = float(stepSize)
         self._h2 = self._h * self._h
-        self._log_gradient = log_gradient_callable
+        self._logGradient = logGradientCallable
 
         propCov = IIDCovarianceMatrix(dim, self._h2)
         self._proposalMeasure = Gaussian(propCov)
@@ -53,7 +53,7 @@ class MALAProposal(ProposalMethod):
 
     def _drift(self, state: Parameter) -> np.ndarray:
         """Compute the deterministic drift: x + (h^2 / 2) * grad log pi(x)."""
-        return state.coordinate + 0.5 * self._h2 * self._log_gradient(state)
+        return state.coordinate + 0.5 * self._h2 * self._logGradient(state)
 
     def generate_proposal(self, rng: Generator) -> TransitionData:
         # Guard against use outside the MH loop, where state may not be set.
@@ -74,7 +74,6 @@ class MALAProposal(ProposalMethod):
 
 
 class MetropolisAdjustedLangevinAlgorithm(MetropolisHastings):
-    name = "MALA"
     """
     Metropolis-Adjusted Langevin Algorithm (MALA).
 
@@ -86,13 +85,14 @@ class MetropolisAdjustedLangevinAlgorithm(MetropolisHastings):
     targetDensity : DensityInterface
         Target density. Must provide an ``evaluate_log_gradient(state)``
         method returning the gradient of the log-density as an ndarray.
-        This is checked at construction time via duck typing — no specific
-        base class is required; any object with the method will work.
+        This is checked at construction time via duck typing, no specific
+        base class is required, any object with the method will work.
     stepSize : float
         Step size h (standard deviation of the isotropic noise).
     diagnostics : ChainDiagnostics
         Tracks transition statistics.
     """
+    name = "MALA"
 
     def __init__(self, targetDensity, stepSize, diagnostics,
                  acceptance: AcceptanceProbability = None,

@@ -117,6 +117,14 @@ def induced_prior_covariance_2d(covFunc2d, bspX, bspY, xBounds, yBounds,
 
 
 class BSplineRealisation1D(Expansion):
+    """
+    Gaussian process parametrisation via a 1D B-spline coefficient space.
+
+    Parameters
+    ----------
+    expansion : BSpline1D
+        The underlying B-spline basis and coefficient store.
+    """
 
     def __init__(self, expansion: BSpline1D):
         self._expansion = expansion
@@ -137,6 +145,19 @@ class BSplineRealisation1D(Expansion):
         self._expansion.project(coeff)
 
     def evaluate(self, grid: Grid) -> np.ndarray:
+        """
+        Evaluate the B-spline realisation on a query grid.
+
+        Parameters
+        ----------
+        grid : Grid
+            Sites to evaluate the realisation at.
+
+        Returns
+        -------
+        np.ndarray
+            Field values at `grid`.
+        """
         return self._expansion.evaluate(grid.to_array().ravel())
 
     def clone(self) -> 'BSplineRealisation1D':
@@ -144,6 +165,15 @@ class BSplineRealisation1D(Expansion):
 
 
 class BSplineRealisation2D(Expansion):
+    """
+    Gaussian process parametrisation via a 2D tensor-product B-spline
+    coefficient space.
+
+    Parameters
+    ----------
+    expansion : BSpline2D
+        The underlying tensor-product B-spline basis and coefficient store.
+    """
 
     def __init__(self, expansion: BSpline2D):
         self._expansion = expansion
@@ -164,6 +194,19 @@ class BSplineRealisation2D(Expansion):
         self._expansion.project(coeff)
 
     def evaluate(self, grid: Grid) -> np.ndarray:
+        """
+        Evaluate the B-spline realisation on a query grid.
+
+        Parameters
+        ----------
+        grid : Grid
+            Sites to evaluate the realisation at.
+
+        Returns
+        -------
+        np.ndarray
+            Field values at `grid`.
+        """
         return self._expansion.evaluate(grid.to_array())
 
     def clone(self) -> 'BSplineRealisation2D':
@@ -171,6 +214,15 @@ class BSplineRealisation2D(Expansion):
 
 
 class BSplineGPEngine(GPEngine):
+    """
+    GPEngine using a B-spline basis parametrisation, 1D or 2D depending on
+    the expansion supplied.
+
+    Parameters
+    ----------
+    expansion : BSpline1D | BSpline2D
+        The B-spline basis. Dimensionality is inferred from its type.
+    """
 
     def __init__(self, expansion):
         self._expansion = expansion
@@ -189,6 +241,14 @@ class BSplineGPEngine(GPEngine):
         self._H = self._expansion.design_matrix(pts if self._is2d else pts.ravel())
 
     def build_realisation(self) -> Expansion:
+        """
+        Construct a new B-spline realisation matching the engine's basis.
+
+        Returns
+        -------
+        BSplineRealisation1D | BSplineRealisation2D
+            A fresh realisation, 1D or 2D matching the engine's expansion.
+        """
         if self._is2d:
             return BSplineRealisation2D(copy.deepcopy(self._expansion))
         return BSplineRealisation1D(copy.deepcopy(self._expansion))
@@ -222,9 +282,29 @@ class BSplineGPEngine(GPEngine):
 
 
 class BSplineGPPredictor(Predictor):
+    """
+    Out-of-sample prediction for the B-spline GP engine.
+
+    Parameters
+    ----------
+    gpState : GPState
+        Current GP state, exposes the parameter to predict from.
+    H_pred : np.ndarray
+        Design matrix mapping B-spline coefficients to values at the query
+        sites.
+    """
+
     def __init__(self, gpState: GPState, H_pred: np.ndarray):
         self._gpState = gpState
         self._H_pred = H_pred
 
     def mean(self) -> np.ndarray:
+        """
+        Predictive mean at the query sites.
+
+        Returns
+        -------
+        np.ndarray
+            Predictive mean values, `H_pred @ coefficients`.
+        """
         return self._H_pred @ self._gpState.parameter.coordinate

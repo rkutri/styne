@@ -117,13 +117,12 @@ def test_mrw(mcmcProposal):
     check_mean([meanState, posteriorMean], groundTruth)
 
 
-@pytest.mark.skip(reason="PCN is not maintained currently")
 def test_pcn():
 
     seed(17)
 
     chainBuilder = PCNFactory()
-    chainBuilder.beta = 0.001
+    chainBuilder.beta = 0.2
     chainBuilder.target = statModel
 
     mcmc = chainBuilder.create()
@@ -136,7 +135,7 @@ def test_pcn():
 
     states = mcmc.chain.trajectory
 
-    burnIn = 200
+    burnIn = 50
     thinningStep = 5
 
     mcmcSamples = states[burnIn::thinningStep]

@@ -58,7 +58,7 @@ class MLDAProposal(PartitionedProposalMixin, ProposalMethod):
     @ProposalMethod.state.setter
     def state(self, state: Parameter):
         ProposalMethod.state.fset(self, state)
-        if self.is_partitioned:
+        if self.isPartitioned:
             self._surrogateMeasure.initialMeasure.location = (
                 self._coarse_from(state))
         else:
@@ -75,7 +75,7 @@ class MLDAProposal(PartitionedProposalMixin, ProposalMethod):
 
     def generate_proposal(self, rng: Generator) -> TransitionData:
         coarseProposal = self._surrogateMeasure.generate_realisation(rng=rng)
-        if not self.is_partitioned:
+        if not self.isPartitioned:
             return TransitionData(self._state, coarseProposal)
         fineProposal = self._draw_fine(rng)
         fullProposal = self._merge(
