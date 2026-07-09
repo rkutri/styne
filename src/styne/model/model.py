@@ -6,13 +6,18 @@ To add a new model, subclass 'Model' and implement four things:
     pType   — the 'Parameter' subclass (or tuple of subclasses) your model
                accepts; used by 'interpolate' for an isinstance check.
     pDim    — total number of scalar degrees of freedom.
-    _interpolate(parameter) — extract and cache whatever internal state
-               '_evaluate' will need from 'parameter'. Do not touch
+    _interpolate(parameter) — extract parameter state and perform all
+               parameter-dependent precomputation (e.g. operator assembly,
+               factorisations). Everything '_evaluate' and the optional
+               gradient hooks will need should be built and cached here,
+               keeping '_evaluate' as light as possible. Do not touch
                'self._evaluation' here.
     _evaluate() — compute the model response and assign the result to
                'self._evaluation'. For use with any built-in likelihood
                this must be a 1-D ndarray of length N (number of
-               observations), representing the linear predictor eta.
+               observations): the forward map evaluated at the
+               observation sites. GLM-type response families read this
+               vector as the linear predictor eta.
 
 Callers drive the model through a two-phase protocol:
 
@@ -34,11 +39,20 @@ from styne.parameter.parameter import Parameter
 
 class Model(ABC):
     """
-    Base class for parametric forward models.
+    Base class for parametric forward maps: parameter -> model response
+    at the observation sites.
 
     See the module docstring for the full extension guide. Instances are
     stateful and not thread-safe; one model instance should be owned by
     exactly one likelihood object.
+
+    Note
+    ----
+    'interpolate' short-circuits on parameter *identity*, not value. The
+    built-in samplers create a fresh Parameter object per proposal, so
+    this is safe within MCMC. When driving a model manually, do not
+    mutate 'parameter.coordinate' in place and re-call 'interpolate' with
+    the same object; either clone the parameter or call 'reset' first.
     """
 
     def __init__(self):
@@ -51,10 +65,11 @@ class Model(ABC):
 
     @property
     def evaluation(self) -> Any:
-        """Last successful evaluation result (the linear predictor eta).
+        """Last successful evaluation result.
 
-        A 1-D ndarray of length N set by '_evaluate'. None if the model
-        has not yet been evaluated or has been reset.
+        The model response at the N observation sites, a 1-D ndarray set
+        by '_evaluate'. None if the model has not yet been evaluated or
+        has been reset.
         """
         return self._evaluation
 
@@ -79,7 +94,10 @@ class Model(ABC):
         Clears the previous evaluation result.
         """
         if not isinstance(parameter, self.pType):
-            raise TypeError("Parameter must match pType")
+            raise TypeError(
+                f"expected parameter of type {self.pType}, "
+                f"got {type(parameter).__name__}"
+            )
 
         if self._interpolatedParameter is parameter:
             return
@@ -116,12 +134,15 @@ class Model(ABC):
 
     @abstractmethod
     def _interpolate(self, parameter: Parameter) -> None:
-        """Extract and cache internal state from 'parameter'.
+        """Extract parameter state and perform parameter-dependent
+        precomputation.
 
-        Store whatever '_evaluate' will need (e.g. coordinate arrays,
-        GP coefficients). Called once per distinct parameter object;
-        repeated calls with the same object are short-circuited by
-        the base class. Must not write to 'self._evaluation'.
+        Build and cache everything '_evaluate' and the optional gradient
+        hooks will need (e.g. assembled operators, factorisations, GP
+        coefficients), keeping '_evaluate' light. Called once per
+        distinct parameter object; repeated calls with the same object
+        are short-circuited by the base class. Must not write to
+        'self._evaluation'.
         """
         ...
 
@@ -131,7 +152,8 @@ class Model(ABC):
 
         Must assign a 1-D ndarray of shape (N,) to 'self._evaluation',
         where N is the number of observation sites. This value is read
-        by the likelihood layer as the linear predictor eta.
+        by the likelihood layer; GLM-type response families treat it as
+        the linear predictor eta.
         """
         ...
 
