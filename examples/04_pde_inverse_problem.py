@@ -1,14 +1,15 @@
 """
-PDE-Constrained Bayesian Inverse Problem
+Bayesian Inverse Problem with PDE forward model
 
 Recover a spatially varying diffusion coefficient from noisy point observations
-of an elliptic PDE solution, using a custom forward model and a DNA Gaussian
-process prior.
+of the elliptic PDE solution. Defines a custom forward model and a DNA Gaussian
+process parametrisation and prior.
 """
 
 import numpy as np
 from scipy.sparse.linalg import spsolve
 
+import styne
 from styne.gp import GaussianProcess
 from styne.parameter import Function
 from styne.statistics import (
@@ -16,8 +17,10 @@ from styne.statistics import (
     UnnormalisedPosterior, IIDCovarianceMatrix,
 )
 from styne.mcmc import PCNFactory
-from styne.utility import UniformGrid, PCNTuner, RWTunerConfig
-from styne.model.model import Model
+from styne.utility import (
+    UniformGrid, PCNTuner, RWTunerConfig, ExplicitFunction,
+    linear_interpolation_matrix,
+)
 from styne.utility.finiteelement import (
     p1_stiffness_1d, p1_mass_lumped_1d, apply_dirichlet_1d,
 )
@@ -34,105 +37,171 @@ except ImportError:
 rng = np.random.default_rng(2026)
 
 
-class EllipticForwardModel(Model):
-    """Forward map theta -> solution values at observation nodes.
+# definition of a custom forward model. For more details on the
+# interface, see src/styne/model/model.py
+class EllipticForwardModel(styne.Model):
+    """
+    Forward map: parameter to PDE solution at the observation sites.
 
-    P1 finite-element solve of -d/dx(exp(theta) dw/dx) = source with
-    homogeneous Dirichlet conditions. The field enters as a per-element
-    diffusion coefficient exp(theta).
+    The solution is obtained via a P1 finite-element solve of
+    -d/dx(exp(theta) dw/dx) = f with homogeneous Dirichlet boundary
+    conditions. The log-diffusion theta is a parametrised GP, entering
+    the assembly as a per-element coefficient exp(theta) evaluated at
+    the element midpoints.
+
+    Everything that does not depend on the parameter (mass matrix,
+    right-hand side, observation interpolation matrix) is assembled once
+    at construction. Per parameter update, _interpolate reassembles and
+    constrains the stiffness matrix, so that _evaluate only solves the
+    system and interpolates to the observation sites.
     """
 
-    def __init__(self, gp, mesh, source, obsIndices):
+    def __init__(self, gp: GaussianProcess, source: ExplicitFunction,
+                 feMesh: UniformGrid, obsSites: np.ndarray):
         super().__init__()
-        self._gp = gp
-        self._mesh = mesh
-        self._meshVertices = mesh.axis
-        self._source = source
-        self._obsIndices = obsIndices
-        self._diffusion = None
 
-        self._gp.sites = mesh
+        self._gp = gp
+        self._vertices = feMesh.axis
+
+        # anchor the GP at the element midpoints, once. Repeatedly mutating
+        # gp.sites is expensive, see the GaussianProcess.sites docstring.
+        h = self._vertices[1] - self._vertices[0]
+        midpoints = UniformGrid(
+            self._vertices[0] + 0.5 * h,
+            self._vertices[-1] - 0.5 * h,
+            len(feMesh) - 1,
+        )
+        self._gp.sites = midpoints
+
+        # interpolation matrix from the FE solution to the observation sites
+        self._obsInterp = linear_interpolation_matrix(obsSites, self._vertices)
+
+        # parameter-independent right-hand side, boundary entries zeroed
+        # to match the Dirichlet rows of the constrained stiffness matrix
+        massMat = p1_mass_lumped_1d(self._vertices)
+        rhs = massMat.diagonal() * source.evaluate(feMesh)
+        rhs[0] = 0.0
+        rhs[-1] = 0.0
+        self._rhs = rhs
+
+        self._stiffMat = None
 
     @property
     def pType(self):
+        """
+        parameter type associated with the forward map. Must be derived from
+        styne.Parameter.
+        """
         return Function
 
     @property
     def pDim(self):
+        """
+        parameter dimension, as in: length of the coordinate vector (ndarray)
+        """
         return self._gp.parameter.dimension
 
     def _interpolate(self, parameter):
-        self._gp.sites = self._mesh
+        """
+        Set parameter as new state of the forward map and perform the
+        parameter-dependent precomputation.
+        """
         self._gp.parameter.coordinate = parameter.coordinate
-        field = self._gp.at_sites()
-        self._diffusion = np.exp(0.5 * (field[:-1] + field[1:]))
+        diffusion = np.exp(self._gp.at_sites())
+
+        stiffMat = p1_stiffness_1d(self._vertices, diffusion)
+        self._stiffMat = apply_dirichlet_1d(stiffMat)
 
     def _evaluate(self):
-        stiffness = p1_stiffness_1d(self._meshVertices, self._diffusion)
-        mass = p1_mass_lumped_1d(self._meshVertices)
-        rhs = mass.diagonal() * self._source
-        stiffnessBC, rhsBC = apply_dirichlet_1d(stiffness, rhs)
-        solution = spsolve(stiffnessBC, rhsBC)
-        self._evaluation = solution[self._obsIndices]
+        """
+        Evaluate the forward map: solve the precomputed FE system and
+        interpolate the solution to the observation sites.
+        """
+        solution = spsolve(self._stiffMat, self._rhs)
+        self._evaluation = self._obsInterp @ solution
 
 
 # --- SETUP ---
 
-# PDE mesh and GP prior
-spatialDim = 1
-resolution = 24
+DIM = 1
 
-covariance = MaternCovariance1D(0.3, 2.5, 1.)
-gp = GaussianProcess.dna(covariance, q=resolution, d=spatialDim)
-mesh = gp.engine.nativeGrid
-dim = len(mesh)
+# observation sites, away from the boundary where the Dirichlet
+# conditions pin the solution
+nObs = 10
+obsSites = np.sort(rng.uniform(0.05, 0.95, nObs))
 
-vertices = mesh.axis
-source = np.ones(dim)
+# GP parametrisation
+corrLength = 0.2
+smoothness = 2.5
+margVar = 1.
+gpCov = MaternCovariance1D(corrLength, smoothness, margVar)
+gp = GaussianProcess.dna(gpCov, q=30, d=DIM)
 
-# measurement locations
-nObs = 20
-obsMargin = 1
-obsIndices = np.linspace(obsMargin, dim - obsMargin - 1, nObs).astype(int)
-noiseStd = 0.015
+# forward map
+nFEM = 50
+feMesh = UniformGrid(0., 1., nFEM)
+source = ExplicitFunction(lambda x: 1.)
+fMap = EllipticForwardModel(gp, source, feMesh, obsSites)
 
-# synthetic data generation
-thetaTrue = 0.8 * np.sin(2 * np.pi * vertices) + 0.4 * np.cos(np.pi * vertices)
-diffusionTrue = np.exp(0.5 * (thetaTrue[:-1] + thetaTrue[1:]))
-stiffnessTrue = p1_stiffness_1d(vertices, diffusionTrue)
-massTrue = p1_mass_lumped_1d(vertices)
-stiffnessBC, rhsBC = apply_dirichlet_1d(
-    stiffnessTrue, massTrue.diagonal() * source,
-)
-solutionTrue = spsolve(stiffnessBC, rhsBC)
-measurement = solutionTrue[obsIndices] + noiseStd * rng.standard_normal(nObs)
+
+# --- SYNTHETIC DATA GENERATION ---
+
+# the ground truth is computed on a finer mesh. Avoid the inverse crime.
+truthMesh = UniformGrid(0., 1., 200)
+truthVertices = truthMesh.axis
+
+
+def log_diffusion_true(x):
+    return 0.8 * np.sin(2 * np.pi * x) + 0.4 * np.cos(np.pi * x)
+
+
+# FE setup, diffusion evaluated at the element midpoints
+truthMidpoints = 0.5 * (truthVertices[:-1] + truthVertices[1:])
+diffusionTrue = np.exp(log_diffusion_true(truthMidpoints))
+
+stiffTrue = p1_stiffness_1d(truthVertices, diffusionTrue)
+massTrue = p1_mass_lumped_1d(truthVertices)
+rhsTrue = massTrue.diagonal() * source.evaluate(truthMesh)
+
+# apply boundary conditions and solve for the ground truth
+stiffTrue, rhsTrue = apply_dirichlet_1d(stiffTrue, rhsTrue)
+solutionTrue = spsolve(stiffTrue, rhsTrue)
+
+# generate measurement data at the observation sites
+truthInterp = linear_interpolation_matrix(obsSites, truthVertices)
+trueNoiseVar = 1e-4
+measurement = truthInterp @ solutionTrue \
+    + np.sqrt(trueNoiseVar) * rng.standard_normal(nObs)
 
 
 # --- PROBLEM FORMULATION ---
 
-# prior definition
+# prior
 prior = gp.measure
 
-# likelihood definition
-model = EllipticForwardModel(gp, mesh, source, obsIndices)
-data = Data(dimension=nObs, design=mesh.to_array()[obsIndices])
-data.measurement = measurement
-noiseModel = GaussianResponse(IIDCovarianceMatrix(nObs, noiseStd**2))
-likelihood = RegressionLikelihood(data, model, noiseModel)
+# noise model (i.i.d. Gaussian measurement noise, variance assumed known)
+inferenceNoiseVar = trueNoiseVar
+noiseModel = GaussianResponse(IIDCovarianceMatrix(nObs, inferenceNoiseVar))
 
-# posterior definition
+# likelihood
+data = Data(dimension=nObs, design=obsSites)
+data.measurement = measurement
+likelihood = RegressionLikelihood(data, fMap, noiseModel)
+
+# posterior
 posterior = UnnormalisedPosterior(prior, likelihood)
 
 
 # --- INFERENCE ---
 
+# choose MCMC method
 factory = PCNFactory()
 factory.target = posterior
 factory.rng = rng
 
 # tune proposal scale
 nTuning = 500
-initState = prior.generate_realisation(rng=rng)
+initState = prior.mean.clone()
 sampler = PCNTuner(factory, initState, RWTunerConfig(nTuning=nTuning)).tune()
 
 # run mcmc
@@ -150,44 +219,54 @@ print(f"acceptance rate={acceptanceRate:.3f}")
 
 # --- POSTPROCESSING ---
 
-# compute the posterior mean of the diffusion coefficient exp(theta)
-fields = np.empty((len(trajectory), dim))
+# reconstruct the diffusion coefficient exp(theta) on a display grid.
+# Sampling is finished, so re-anchoring the GP once is fine here.
+plotMesh = UniformGrid(0., 1., 200)
+gp.sites = plotMesh
+
+fields = np.empty((len(trajectory), len(plotMesh)))
 for i, coefficients in enumerate(trajectory):
-    gp.sites = mesh
     gp.parameter.coordinate = coefficients
     fields[i] = np.exp(gp.at_sites())
 
+# posterior mean and pointwise 95% credible band
 posteriorMean = fields.mean(axis=0)
-diffusionTrueNodal = np.exp(thetaTrue)
+diffusionLower, diffusionUpper = np.percentile(fields, [2.5, 97.5], axis=0)
 
+# summary statistics against the ground truth
+diffusionTrueNodal = np.exp(log_diffusion_true(plotMesh.axis))
 correlation = np.corrcoef(diffusionTrueNodal, posteriorMean)[0, 1]
+coverage = np.mean(
+    (diffusionTrueNodal >= diffusionLower)
+    & (diffusionTrueNodal <= diffusionUpper)
+)
 print(f"posterior mean vs truth: diffusion correlation = {correlation:.3f}")
+print(f"pointwise 95% band covers {100 * coverage:.1f}% of the true field")
 
 if hasMatplotlib:
-    diffusionLower, diffusionUpper = np.percentile(
-        fields, [2.5, 97.5], axis=0
-    )
     fig, (axDiffusion, axSolution) = plt.subplots(
         1, 2, figsize=(10, 4), layout="constrained"
     )
+
     axDiffusion.plot(
-        vertices, diffusionTrueNodal, "k-", lw=2, label="true diffusion"
+        plotMesh.axis, diffusionTrueNodal, "k-", lw=2, label="true diffusion"
     )
     axDiffusion.plot(
-        vertices, posteriorMean, "r--", lw=2, label="posterior mean"
+        plotMesh.axis, posteriorMean, "r--", lw=2, label="posterior mean"
     )
     axDiffusion.fill_between(
-        vertices, diffusionLower, diffusionUpper, color="r", alpha=0.2,
+        plotMesh.axis, diffusionLower, diffusionUpper, color="r", alpha=0.2,
         label="95% credible band",
     )
     axDiffusion.set_xlabel("x")
     axDiffusion.set_ylabel("exp(theta)")
     axDiffusion.legend()
 
-    axSolution.plot(vertices, solutionTrue, "k-", lw=2, label="true solution")
     axSolution.plot(
-        vertices[obsIndices], measurement, "ko",
-        ms=5, label="noisy observations",
+        truthVertices, solutionTrue, "k-", lw=2, label="true solution"
+    )
+    axSolution.plot(
+        obsSites, measurement, "ko", ms=5, label="noisy observations"
     )
     axSolution.set_xlabel("x")
     axSolution.set_ylabel("solution")
