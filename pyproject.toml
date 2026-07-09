@@ -40,6 +40,7 @@ Repository = "https://github.com/rkutri/styne"
 [tool.hatch.build]
 exclude = [
     "/reproducibility",
+    "/benchmarks",
 ]
 
 [tool.hatch.build.targets.wheel]
