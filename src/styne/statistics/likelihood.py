@@ -10,21 +10,37 @@ from styne.statistics.response import ResponseFamily
 
 
 class RegressionLikelihood(LikelihoodInterface):
-    """
-    evaluate_log_gradient is available when the model satisfies the
-    DifferentiableModel protocol.
+    r"""
+    Likelihood L given by
+
+        L(\theta) = \rho(y \mid G(\theta)),
+
+    where \theta is the parameter, y represents a
+    generic measurement, G is the forward map, and
+    \rho is the response family's density.
 
     Parameters
     ----------
     data : Data
         Observed data.
     forwardMap : Model
-        Forward model mapping the parameter to the linear predictor.
+        Forward model mapping the parameter to the model
+        response G(\theta) at the observation sites.
     noise : ResponseFamily
         Observation response family.
     cacheSize : int, default 5
         Number of recent evaluations cached for `evaluate_log` and
         `evaluate_log_gradient`.
+
+    Notes
+    -----
+    evaluate_log_gradient is available when the model satisfies the
+    DifferentiableModel protocol.
+
+    All distributional assumptions about the observations live in the
+    response family. For `GaussianResponse`, the noise structure
+    (i.i.d., heteroscedastic, or correlated) is carried entirely by
+    the covariance matrix.
     """
 
     def __init__(
@@ -115,20 +131,43 @@ class RegressionLikelihood(LikelihoodInterface):
 
 
 class SGLMMLikelihood(LikelihoodInterface):
-    """
-    Likelihood for an SGLMM.
+    r"""
+    Likelihood for an SGLMM, given by
+
+        L(\theta) = \rho(y \mid \eta(\theta)),
+
+    where \theta is the parameter, y represents a
+    generic measurement, \eta is the SGLMM linear
+    predictor, and \rho is the response family's
+    density conditioned on it.
+
+    Notes
+    -----
+    Functionally equivalent to RegressionLikelihood. Will be deprecated in 0.3.0
 
     Parameters
     ----------
     data : Data
         Observed data.
     predictor : SGLMM
-        SGLMM forward model.
+        SGLMM forward model mapping the parameter to the
+        linear predictor \eta(\theta) at the observation sites.
     response : ResponseFamily
         Observation response family.
     cacheSize : int, default 5
         Number of recent evaluations cached for `evaluate_log` and
         `evaluate_log_gradient`.
+
+    Notes
+    -----
+    evaluate_log_gradient is available when the model satisfies the
+    DifferentiableModel protocol.
+
+    Conditional independence of the observations given \eta is built
+    into the non-Gaussian response families (`PoissonResponse`,
+    `BinomialResponse`) as a sum over observations. For
+    `GaussianResponse`, the noise structure is carried by the
+    covariance matrix it wraps.
     """
 
     def __init__(
