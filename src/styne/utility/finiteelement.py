@@ -58,41 +58,56 @@ def p1_mass_lumped_1d(vertices) -> csc_matrix:
     return diags(mass, 0, format='csc')
 
 
-def apply_dirichlet_1d(A, b) -> tuple:
+def apply_dirichlet_1d(A, b=None):
     """Apply homogeneous Dirichlet BCs at both endpoints.
+
+    Boundary rows of `A` are replaced by identity rows. If a right-hand
+    side is given, its boundary entries are set to zero so the constrained
+    system enforces u = 0 at the endpoints.
 
     Parameters
     ----------
     A : sparse matrix (any format)
-        System matrix; converted to lil internally.
-    b : ndarray
-        Right-hand side vector; modified in-place copy.
+        System matrix; converted to lil internally, returned as csc.
+    b : ndarray, optional
+        Right-hand side vector; a modified copy is returned. If omitted,
+        only the constrained matrix is returned. In that case the caller
+        must zero the boundary entries of any right-hand side used with
+        the returned matrix.
 
     Returns
     -------
-    (csc_matrix, ndarray)
+    csc_matrix, or (csc_matrix, ndarray) if `b` is given.
     """
-    b = b.copy()
     A = A.tolil()
     for idx in (0, A.shape[0] - 1):
         A[idx, :] = 0.0
         A[idx, idx] = 1.0
-        b[idx] = 0.0
-    return csc_matrix(A), b
+    A = csc_matrix(A)
+
+    if b is None:
+        return A
+
+    b = b.copy()
+    b[0] = 0.0
+    b[-1] = 0.0
+    return A, b
 
 
-def apply_neumann_1d(A, b) -> tuple:
+def apply_neumann_1d(A, b=None):
     """Natural (homogeneous Neumann) BCs — no row modification for P1 elements.
 
     Parameters
     ----------
     A : sparse matrix (any format)
-    b : ndarray
+    b : ndarray, optional
 
     Returns
     -------
-    (csc_matrix, ndarray)
+    csc_matrix, or (csc_matrix, ndarray) if `b` is given.
     """
+    if b is None:
+        return csc_matrix(A)
     return csc_matrix(A), b
 
 
@@ -170,21 +185,29 @@ def q1_mass_lumped_2d(xVert, yVert) -> csc_matrix:
     return diags(mass.ravel(), 0, format='csc')
 
 
-def apply_dirichlet_2d(A, b, nx, ny) -> tuple:
+def apply_dirichlet_2d(A, b=None, nx=None, ny=None):
     """Apply homogeneous Dirichlet BCs on all four sides of a 2D mesh.
+
+    Boundary rows of `A` are replaced by identity rows. If a right-hand
+    side is given, its boundary entries are set to zero.
 
     Parameters
     ----------
     A : sparse matrix
-    b : ndarray
+    b : ndarray, optional
+        Right-hand side vector; a modified copy is returned. If omitted,
+        only the constrained matrix is returned and the caller must zero
+        the boundary entries of any right-hand side used with it.
     nx, ny : int
-        Number of elements in x and y directions.
+        Number of elements in x and y directions. Required.
 
     Returns
     -------
-    (csc_matrix, ndarray)
+    csc_matrix, or (csc_matrix, ndarray) if `b` is given.
     """
-    b = b.copy()
+    if nx is None or ny is None:
+        raise TypeError("nx and ny are required")
+
     A = A.tolil()
 
     bc_nodes = set()
@@ -198,9 +221,16 @@ def apply_dirichlet_2d(A, b, nx, ny) -> tuple:
     for n in bc_nodes:
         A[n, :] = 0.0
         A[n, n] = 1.0
+    A = csc_matrix(A)
+
+    if b is None:
+        return A
+
+    b = b.copy()
+    for n in bc_nodes:
         b[n] = 0.0
 
-    return csc_matrix(A), b
+    return A, b
 
 
 def apply_mixed_bc_2d(A, b_rhs, nx, ny, bc) -> tuple:

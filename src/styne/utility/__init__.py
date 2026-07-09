@@ -8,6 +8,7 @@ _SYMBOL_TO_MODULE = {
     "GridInterpolation2D": "styne.utility.interpolation",
     "linear_interpolation_matrix": "styne.utility.interpolation",
     "bilinear_interpolation_matrix": "styne.utility.interpolation",
+    "ExplicitFunction": "styne.utility.evaluation",
     "estimate_autocorrelation_function_1d": "styne.utility.postprocessing",
     "sokal_heuristic": "styne.utility.postprocessing",
     "integrated_autocorrelation_1d": "styne.utility.postprocessing",
