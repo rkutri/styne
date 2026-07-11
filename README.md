@@ -2,9 +2,9 @@
   <img src="docs/assets/styne-logo-wide.svg" alt="styne logo" width="420">
 </p>
 
-[![DOI](https://zenodo.org/badge/1278349844.svg)](https://zenodo.org/badge/latestdoi/1278349844)
+[![DOI](https://zenodo.org/badge/1278349844.svg)](https://zenodo.org/badge/latestdoi/1278349844) [![DART](https://img.shields.io/badge/DART-arXiv%3A2606.27564-b31b1b)](https://arxiv.org/abs/2606.27564) [![DNA](https://img.shields.io/badge/DNA-10.1137%2F24M1715854-blue)](https://doi.org/10.1137/24M1715854)
 
-*Pre-1.0 (`v0.2.0`)*
+*Pre-1.0 (`v0.2.1`)*
 
 A Python library for Bayesian inference designed for high-dimensional problems
 and computationally expensive forward models.
