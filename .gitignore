@@ -6,6 +6,7 @@ __pycache__/
 # image files
 *.png
 *.jpeg
+!/docs/assets/*.png
 
 # other files
 *.csv
