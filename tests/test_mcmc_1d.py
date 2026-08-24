@@ -185,7 +185,7 @@ def test_metropolis_within_gibbs():
     gibbs = builder.build()
     
     nSteps = 5
-    initState = BlockParameter([latentInit.clone()])
+    initState = BlockParameter([latentInit])
     gibbs.run(nSteps, initState)
     
     assert len(gibbs.chain.block(0).trajectory) == nSteps + 1
@@ -239,7 +239,7 @@ def test_metropolis_within_gibbs_chain_continuity():
     gibbs = builder.build()
 
     nGibbsSweeps = 4
-    initState = BlockParameter([latentInit.clone()])
+    initState = BlockParameter([latentInit])
     gibbs.run(nGibbsSweeps, initState)
 
     # Inner chain must accumulate: 1 initial + nGibbsSweeps * nStepsPerSweep

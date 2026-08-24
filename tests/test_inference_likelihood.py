@@ -1,6 +1,9 @@
+import importlib
+
 import numpy as np
 import pytest
 
+import styne.utility as utilityModule
 from styne.model.forwardmap import ForwardMap
 from styne.parameter.vector import Vector
 from styne.statistics.likelihood import RegressionLikelihood
@@ -13,6 +16,7 @@ class _DifferentiableMock(ForwardMap):
     def __init__(self, dim=2):
         super().__init__()
         self._dim = dim
+        self.evaluations = 0
 
     @property
     def pType(self):
@@ -26,10 +30,11 @@ class _DifferentiableMock(ForwardMap):
         return parameter.coordinate
 
     def _evaluate(self, preparedState):
+        self.evaluations += 1
         return preparedState
 
     def directional_derivative(self, parameter, direction):
-        return direction.clone()
+        return direction
 
     def adjoint_derivative(self, parameter, cotangent):
         return np.asarray(cotangent)
@@ -60,28 +65,45 @@ def test_initialisation(mock_likelihood, mock_data, mock_forward_model):
     assert mock_likelihood.domainDimension == 2
 
 
-def test_memoisation(mock_likelihood):
-    parameter = Vector(np.array([0.5, 0.5]))
-    logLFirst = mock_likelihood.evaluate_log(parameter)
-    logLCached = mock_likelihood.evaluate_log(parameter)
-
-    assert logLFirst == logLCached
-    assert mock_likelihood._logLikelihoodCache.contains(parameter)
-    assert mock_likelihood._logLikelihoodCache.retrieve(parameter) == logLFirst
+def test_generic_evaluation_cache_is_removed():
+    assert "EvaluationCache" not in utilityModule.__all__
+    assert not hasattr(utilityModule, "EvaluationCache")
+    with pytest.raises(ModuleNotFoundError):
+        importlib.import_module("styne.utility.memoisation")
 
 
-def test_gradient_memoisation(mock_data, mock_noise):
+def test_log_likelihood_does_not_cache_parameter_evaluations(
+        mock_data, mock_noise):
+    model = _DifferentiableMock(dim=2)
     likelihood = RegressionLikelihood(
         mock_data,
-        _DifferentiableMock(dim=2),
+        model,
         GaussianResponse(mock_noise.density.covariance),
     )
     parameter = Vector(np.array([0.5, 0.5]))
-    gradientFirst = likelihood.evaluate_log_gradient(parameter)
-    gradientCached = likelihood.evaluate_log_gradient(parameter)
+    first = likelihood.evaluate_log(parameter)
+    second = likelihood.evaluate_log(parameter)
 
-    np.testing.assert_array_equal(gradientFirst, gradientCached)
-    assert likelihood._gradientCache.contains(parameter)
+    assert first == second
+    assert model.evaluations == 2
+    assert not hasattr(likelihood, "_logLikelihoodCache")
+
+
+def test_log_gradient_does_not_cache_parameter_evaluations(
+        mock_data, mock_noise):
+    model = _DifferentiableMock(dim=2)
+    likelihood = RegressionLikelihood(
+        mock_data,
+        model,
+        GaussianResponse(mock_noise.density.covariance),
+    )
+    parameter = Vector(np.array([0.5, 0.5]))
+    first = likelihood.evaluate_log_gradient(parameter)
+    second = likelihood.evaluate_log_gradient(parameter)
+
+    np.testing.assert_array_equal(first, second)
+    assert model.evaluations == 2
+    assert not hasattr(likelihood, "_gradientCache")
 
 
 def test_non_differentiable_model_exception(mock_data, mock_noise):
@@ -93,20 +115,3 @@ def test_non_differentiable_model_exception(mock_data, mock_noise):
     parameter = Vector(np.array([0.5, 0.5]))
     with pytest.raises(RuntimeError):
         likelihood.evaluate_log_gradient(parameter)
-
-
-def test_condition_on_clears_caches(mock_data, mock_noise):
-    model = _DifferentiableMock(dim=2)
-    likelihood = RegressionLikelihood(
-        mock_data, model, GaussianResponse(mock_noise.density.covariance)
-    )
-    parameter = Vector(np.array([0.5, 0.5]))
-    likelihood.evaluate_log(parameter)
-    likelihood.evaluate_log_gradient(parameter)
-
-    assert likelihood._logLikelihoodCache.contains(parameter)
-    assert likelihood._gradientCache.contains(parameter)
-    likelihood.condition_on(parameter)
-
-    assert not likelihood._logLikelihoodCache.contains(parameter)
-    assert not likelihood._gradientCache.contains(parameter)

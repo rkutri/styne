@@ -53,15 +53,6 @@ class Function(Parameter):
             self._coordinate, cotangent
         )
 
-    def clone(self) -> Function:
-        """Return an equivalent parameter sharing the static expansion."""
-        backend = self.backend
-        metadata = backend.metadata(self._coordinate)
-        zero = backend.zeros(
-            (), dtype=metadata.dtype, device=metadata.device
-        )
-        return self.with_coordinate(self._coordinate + zero)
-
     @staticmethod
     def _validate(coordinate, dimension):
         coordinate = _as_coordinate(coordinate)

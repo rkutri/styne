@@ -27,14 +27,5 @@ class Vector(Parameter):
             )
         return coordinate
 
-    def clone(self) -> Parameter:
-        """Return an equivalent parameter with independent array storage."""
-        backend = self.backend
-        metadata = backend.metadata(self._coordinate)
-        zero = backend.zeros(
-            (), dtype=metadata.dtype, device=metadata.device
-        )
-        return self.with_coordinate(self._coordinate + zero)
-
     def with_coordinate(self, coordinate) -> Vector:
         return self.__class__(coordinate)

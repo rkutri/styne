@@ -199,7 +199,7 @@ factory.rng = rng
 
 # tune proposal scale
 nTuning = 500
-initState = prior.mean.clone()
+initState = prior.mean
 sampler = PCNTuner(factory, initState, RWTunerConfig(nTuning=nTuning)).tune()
 
 # run mcmc

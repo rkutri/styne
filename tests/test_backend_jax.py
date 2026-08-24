@@ -11,6 +11,23 @@ from styne.backend import (  # noqa: E402
     infer_backend,
 )
 from styne.backend.jax import JAXBackend, JAXNamespace  # noqa: E402
+from styne.model.representation.expansion import Expansion  # noqa: E402
+from styne.parameter import (  # noqa: E402
+    BlockParameter,
+    Function,
+    Scalar,
+    Vector,
+)
+
+
+class _StaticExpansion(Expansion):
+
+    @property
+    def dimension(self):
+        return 2
+
+    def _bind(self, grid):
+        raise NotImplementedError
 
 
 def test_jax_backend_is_registered_for_arrays_and_tracers():
@@ -237,3 +254,49 @@ def test_jax_capabilities_are_explicit():
     assert capabilities.controlFlow
     assert capabilities.spectralTransforms
     assert capabilities.transformedLoops
+
+
+def test_jax_parameter_containers_transform_as_pytrees():
+    expansion = _StaticExpansion()
+    parameter = BlockParameter(
+        [
+            Vector(jnp.array([
+                [1.0, 2.0],
+                [3.0, 4.0],
+            ])),
+            Scalar(jnp.array([[5.0], [6.0]])),
+            Function(jnp.array([
+                [7.0, 8.0],
+                [9.0, 10.0],
+            ]), expansion),
+        ],
+        {"vector": 0, "scalar": 1, "function": 2},
+    )
+
+    leaves, structure = jax.tree_util.tree_flatten(parameter)
+    reconstructed = jax.tree_util.tree_unflatten(structure, leaves)
+
+    assert len(leaves) == 3
+    assert all(isinstance(leaf, jax.Array) for leaf in leaves)
+    assert reconstructed.names == parameter.names
+    assert reconstructed["function"].expansion is expansion
+
+    compiled = jax.jit(
+        lambda state: state.with_coordinate(state.coordinate * 2.0)
+    )(parameter)
+    vectorised = jax.vmap(
+        lambda state: state.with_coordinate(state.coordinate + 1.0)
+    )(parameter)
+    gradient = jax.grad(
+        lambda state: jnp.sum(state.coordinate ** 2)
+    )(parameter)
+
+    np.testing.assert_allclose(compiled.coordinate, 2.0 * parameter.coordinate)
+    np.testing.assert_allclose(
+        vectorised.coordinate, parameter.coordinate + 1.0
+    )
+    np.testing.assert_allclose(
+        gradient.coordinate, 2.0 * parameter.coordinate
+    )
+    assert compiled["function"].expansion is expansion
+    assert vectorised.names == parameter.names

@@ -38,8 +38,6 @@ class SGLMMHyperConditionalDensity(DensityInterface):
         self._model = model
         self._likelihood = likelihood
         self._latentState = latentState
-        self._cachedProposalLog = None
-        self._cachedProposalParams = None
 
     @property
     def domainType(self):
@@ -73,9 +71,6 @@ class SGLMMHyperConditionalDensity(DensityInterface):
         except np.linalg.LinAlgError:
             pass
             
-        self._cachedProposalParams = None
-        self._cachedProposalLog = None
-
     def evaluate_log(self, parameter: Parameter, normalised: bool = False) -> float:
         """
         Log-posterior density on log-hyperparameters `(log rho, log sigma)`,
@@ -126,13 +121,9 @@ class SGLMMHyperConditionalDensity(DensityInterface):
         
         logPriorContribution = 0.0
 
-        totalLogProbability = (logPrior + logPriorContribution + 
-                               logLikelihood + logJacobian)
-        
-        self._cachedProposalLog = totalLogProbability
-        self._cachedProposalParams = (lengthScale, sigma)
-
-        return float(totalLogProbability)
+        return float(
+            logPrior + logPriorContribution + logLikelihood + logJacobian
+        )
 
     def evaluate_log_gradient(self, parameter: Parameter) -> np.ndarray:
         logHyperparameters = np.asarray(parameter.coordinate).ravel()
@@ -140,13 +131,12 @@ class SGLMMHyperConditionalDensity(DensityInterface):
         lengthScale, sigma = hyperparameters[0], hyperparameters[1]
 
         try:
-            if self._cachedProposalParams != (lengthScale, sigma):
-                covarianceType = type(self._gp.covarianceFunction)
-                smoothness = self._gp.covarianceFunction._smoothness
-                self._gp.covarianceFunction = covarianceType(
-                    lengthScale, smoothness, sigma**2
-                )
-                self._gp.measure.covariance.scaling = 1.0
+            covarianceType = type(self._gp.covarianceFunction)
+            smoothness = self._gp.covarianceFunction._smoothness
+            self._gp.covarianceFunction = covarianceType(
+                lengthScale, smoothness, sigma**2
+            )
+            self._gp.measure.covariance.scaling = 1.0
 
             linearPredictor = self._model(self._latentState)
         except np.linalg.LinAlgError:
@@ -342,7 +332,6 @@ class SGLMMLatentConditional(ConditionalMeasure, DensityInterface):
         self._finePrior = finePrior
         self._hyperIdx = hyperIdx
         self._localisedDensity = localisedDensity
-        self._cachedHyper = None
 
     @property
     def blockDimension(self) -> int:
@@ -377,17 +366,11 @@ class SGLMMLatentConditional(ConditionalMeasure, DensityInterface):
         Sync GP covariance functions to the current hyperparameter block, then
         forward conditioning to `target`.
 
-        If the hyperparameter block is unchanged since the last call, the
-        rebuild is skipped. Otherwise, rebuilds `gp`'s covariance function at
-        the new hyperparameters, and `coarseGP`'s too if set. If `partition` and
-        `finePrior` are both set, also extracts the fine-block marginal variance
-        from `gp`'s covariance and rebuilds `finePrior` from it. If
-        `localisedDensity` is set, syncs its weights from `coarseGP`'s engine.
-
-        Forwarding to `target` happens on every call regardless of whether the
-        rebuild ran, this updates the likelihood and prior evaluation points for
-        the current hyperparameters, and is required even when the covariance
-        itself hasn't changed.
+        Rebuilds `gp`'s covariance function at the supplied hyperparameters,
+        and `coarseGP`'s too if set. If `partition` and `finePrior` are both
+        set, also extracts the fine-block marginal variance from `gp`'s
+        covariance and rebuilds `finePrior` from it. If `localisedDensity` is
+        set, syncs its weights from `coarseGP`'s expansion.
 
         Parameters
         ----------
@@ -395,50 +378,34 @@ class SGLMMLatentConditional(ConditionalMeasure, DensityInterface):
             Full joint state. The hyperparameter block is
             `state.block(self.hyperIdx)`, index 1 by default.
         """
-        # Finding 3: jointState accesses the hyper block via state.block(self._hyperIdx)
-        # where _hyperIdx defaults to 1.
         hyperState = state.block(self._hyperIdx)
+        phi = hyperState.coordinate
+        zeta = np.exp(phi)
+        rho, sigma = zeta[0], zeta[1]
 
-        if self._cachedHyper is not None and self._cachedHyper == hyperState:
-            # Hyperparameters are unchanged, so we can skip the rebuild.
-            pass
-        else:
-            # Finding 1: The "rebuild" is constituted by creating a new covariance object
-            # and assigning it to self._gp.covarianceFunction (and potentially _coarseGP and _finePrior).
-            # This invalidates the previously cached covariance, forcing assembly and
-            # factorisation upon the next evaluation.
-            phi = hyperState.coordinate
-            zeta = np.exp(phi)
-            rho, sigma = zeta[0], zeta[1]
-
-            covType = type(self._gp.covarianceFunction)
-            smoothness = self._gp.covarianceFunction._smoothness
-            newCov = covType(rho, smoothness, sigma**2)
-            
-            self._gp.covarianceFunction = newCov
-            if self._coarseGP is not None:
-                self._coarseGP.covarianceFunction = covType(
-                    rho, smoothness, sigma**2
-                )
-                if self._localisedDensity is not None:
-                    self._localisedDensity.sync_weights(
-                        self._coarseGP.expansion.spectralWeights
-                    )
-
-            if self._finePrior is not None and self._partition is not None:
-                cov = self._gp.measure.covariance
-                compVar = self._partition.rule.extract(
-                    1, cov.marginalVariance
-                )
-                self._finePrior.covariance = (
-                    self._finePrior.covariance.__class__(compVar)
+        covType = type(self._gp.covarianceFunction)
+        smoothness = self._gp.covarianceFunction._smoothness
+        self._gp.covarianceFunction = covType(
+            rho, smoothness, sigma**2
+        )
+        if self._coarseGP is not None:
+            self._coarseGP.covarianceFunction = covType(
+                rho, smoothness, sigma**2
+            )
+            if self._localisedDensity is not None:
+                self._localisedDensity.sync_weights(
+                    self._coarseGP.expansion.spectralWeights
                 )
 
-            self._cachedHyper = hyperState.clone()
+        if self._finePrior is not None and self._partition is not None:
+            cov = self._gp.measure.covariance
+            compVar = self._partition.rule.extract(
+                1, cov.marginalVariance
+            )
+            self._finePrior.covariance = (
+                self._finePrior.covariance.__class__(compVar)
+            )
 
-        # Finding 2: The operations that must still run even when theta is unchanged
-        # are updating the likelihood evaluation point and the prior evaluation point
-        # for the current zeta, which are handled by target.condition_on(state).
         if hasattr(self._target, 'condition_on'):
             self._target.condition_on(state)
         elif hasattr(self._target, 'derivative') and hasattr(self._target.derivative, 'condition_on'):

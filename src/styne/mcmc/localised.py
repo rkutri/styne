@@ -66,15 +66,16 @@ class LocalisedSurrogateDensity(RadonNikodym):
         )
         self._regGaussian = Gaussian(regCov)
         
-        # Use a clone of the surrogate's mean to preserve domainType (e.g. Function vs Vector)
         if hasattr(surrogateDensity, 'reference'):
-            self._regGaussian.mean =  surrogateDensity.reference.mean.clone()
+            self._regGaussian.mean = (
+                surrogateDensity.reference.mean.with_coordinate(
+                    np.zeros(surrogateDensity.domainDimension)
+                )
+            )
         else:
-            self._regGaussian.mean = Vector(np.zeros(surrogateDensity.domainDimension))
-        
-        self._regGaussian.mean = self._regGaussian.mean.with_coordinate(
-            np.zeros(surrogateDensity.domainDimension)
-        )
+            self._regGaussian.mean = Vector(
+                np.zeros(surrogateDensity.domainDimension)
+            )
 
         # if the surrogate density is itself a Radon-Nikodym density, there is a
         # choice in which to consider the reference measure. We choose the

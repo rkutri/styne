@@ -69,9 +69,7 @@ class MetropolisWithinGibbsConditional(ConditionalMeasure):
             self._sampler._rng = _rng
         if not self._initialized:
             # First sweep: start fresh from the initial coordinate
-            self._sampler.run(
-                self._nSteps, self._currentBlock.clone()
-            )
+            self._sampler.run(self._nSteps, self._currentBlock)
             self._initialized = True
         else:
             # Subsequent sweeps: continue the existing chain.

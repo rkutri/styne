@@ -12,6 +12,7 @@ from styne.backend.pytorch import (  # noqa: E402
     PyTorchBackend,
     PyTorchNamespace,
 )
+from styne.parameter import Vector  # noqa: E402
 
 
 def test_pytorch_backend_is_registered_for_tensors():
@@ -257,3 +258,24 @@ def test_pytorch_capabilities_are_explicit():
             torch.tensor(0.0),
             torch.arange(3.0),
         )
+
+
+def test_pytorch_compiles_at_the_parameter_coordinate_boundary():
+    backend = get_backend("pytorch")
+    coordinate = torch.tensor(
+        [1.0, 2.0], dtype=torch.float64, requires_grad=True
+    )
+    parameter = Vector(coordinate)
+    compiledCoordinateFunction = backend.compile(
+        lambda value: backend.namespace.sum(value ** 2),
+        backend="eager",
+        fullgraph=True,
+    )
+
+    result = compiledCoordinateFunction(parameter.coordinate)
+    gradient = torch.autograd.grad(result, parameter.coordinate)[0]
+
+    torch.testing.assert_close(result, torch.tensor(5.0, dtype=torch.float64))
+    torch.testing.assert_close(
+        gradient, torch.tensor([2.0, 4.0], dtype=torch.float64)
+    )

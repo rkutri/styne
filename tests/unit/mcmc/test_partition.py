@@ -47,7 +47,7 @@ def setup_target():
     data.measurement = y.coordinate.reshape(-1, 1)
 
     dnaPrior = GaussianProcess.dna(covFcn, q=dnaResolution, d=1)
-    dnaInit = dnaPrior.measure.mean.clone()
+    dnaInit = dnaPrior.measure.mean
 
     partition = DNACoarseFinePartition(dnaPrior, coarseResolution, d=DIM)
     

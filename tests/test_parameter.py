@@ -195,18 +195,9 @@ def test_numeric_parameter_reconstruction_is_immutable(parameterType):
     replacement = parameter.with_coordinate(replacementCoordinate)
 
     assert parameterType.coordinate.fset is None
+    assert not hasattr(parameter, "clone")
     assert parameter.coordinate is coordinate
     assert replacement.coordinate is replacementCoordinate
-
-
-@pytest.mark.parametrize("parameterType", (Vector, Scalar))
-def test_numpy_numeric_parameter_clone_has_independent_storage(parameterType):
-    parameter = parameterType(np.array([1.0], dtype=np.float32))
-
-    clone = parameter.clone()
-
-    assert clone.coordinate.dtype == parameter.coordinate.dtype
-    assert not np.shares_memory(clone.coordinate, parameter.coordinate)
 
 
 def test_jax_numeric_parameters_preserve_graph_and_metadata():
@@ -239,7 +230,6 @@ def test_pytorch_numeric_parameters_preserve_graph_and_metadata():
 
     parameter = Vector(coordinate)
     replacement = parameter.with_coordinate(coordinate * 2)
-    clone = parameter.clone()
     scalar = Scalar(torch.tensor(2, dtype=torch.int16))
 
     assert parameter.coordinate is coordinate
@@ -247,7 +237,6 @@ def test_pytorch_numeric_parameters_preserve_graph_and_metadata():
     assert parameter.backend.name == "pytorch"
     assert parameter.backendMetadata.dtype == torch.float64
     assert parameter.backendMetadata.device == coordinate.device
-    assert clone.coordinate.data_ptr() != coordinate.data_ptr()
     assert scalar.coordinate.shape == (1,)
     assert scalar.coordinate.dtype == torch.int16
 
@@ -277,6 +266,7 @@ def test_function_reconstruction_shares_expansion_without_mutation():
     batch = parameter.with_coordinate(batchCoordinate)
 
     assert Function.coordinate.fset is None
+    assert not hasattr(parameter, "clone")
     assert parameter.coordinate is coordinate
     assert replacement.coordinate is replacementCoordinate
     assert batch.coordinate is batchCoordinate

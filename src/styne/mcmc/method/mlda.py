@@ -467,7 +467,7 @@ class MLDAFactory(MHFactory):
             if self._partition is not None:
                 rootInit = Vector(self._partition.rule.extract(0, self._crankedState.coordinate))
             else:
-                rootInit = self._crankedState.clone()
+                rootInit = self._crankedState
             self._tune_root(surrogates[0], rootInit)
 
         self._rootFactory.target = surrogates[0]

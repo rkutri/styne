@@ -31,7 +31,7 @@ def estimate_acceptance(
 
     configure_factory(factory, optValue)
     mcmc = factory.create()
-    mcmc.run(nTuning, init.clone())
+    mcmc.run(nTuning, init)
 
     logger.debug(
         "        -> resulting acceptance: "
@@ -127,9 +127,9 @@ def infer_init(target):
     Parameter
     """
     if isinstance(target, RadonNikodym):
-        return target.reference.mean.clone()
+        return target.reference.mean
     elif isinstance(target, GaussianDensity):
-        return target.mean.clone()
+        return target.mean
     elif isinstance(target, IndependentPartitionDensity):
         return target.parameter.with_coordinate(
             np.zeros(target.domainDimension)
@@ -176,7 +176,7 @@ class MRWTuner:
         def objective(pv):
             self._factory.proposalCovariance = IIDCovarianceMatrix(dim, pv)
             mcmc = self._factory.create()
-            mcmc.run(self._config.nTuning, self._init.clone())
+            mcmc.run(self._config.nTuning, self._init)
             acc = mcmc.diagnostics.global_acceptance_rate()
             logger.debug(f"      * probing MRW propVar={pv:.3e}: acc={acc:.3f}")
             state['probes'] += 1
@@ -226,7 +226,7 @@ class MALATuner:
         def objective(h):
             self._factory.stepSize = h
             mcmc = self._factory.create()
-            mcmc.run(self._config.nTuning, self._init.clone())
+            mcmc.run(self._config.nTuning, self._init)
             acc = mcmc.diagnostics.global_acceptance_rate()
             logger.debug(f"      * probing MALA stepSize={h:.3e}: acc={acc:.3f}")
             state['probes'] += 1
@@ -277,7 +277,7 @@ class PCNTuner:
         def objective(b):
             self._factory.beta = b
             mcmc = self._factory.create()
-            mcmc.run(self._config.nTuning, self._init.clone())
+            mcmc.run(self._config.nTuning, self._init)
             acc = mcmc.diagnostics.global_acceptance_rate()
             logger.debug(f"      * probing pCN beta={b:.4f}: acc={acc:.3f}")
             state['probes'] += 1
@@ -334,7 +334,7 @@ class PMALATuner:
         def objective(b):
             self._factory.beta = b
             mcmc = self._factory.create()
-            mcmc.run(self._config.nTuning, self._init.clone())
+            mcmc.run(self._config.nTuning, self._init)
             acc = mcmc.diagnostics.global_acceptance_rate()
             logger.debug(f"      * probing pMALA beta={b:.4f}: acc={acc:.3f}")
             state['probes'] += 1

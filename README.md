@@ -205,6 +205,21 @@ updated = field.with_coordinate(new_coordinate)
 assert updated.expansion is field.expansion
 ```
 
+`BlockParameter` applies the same immutable convention to ordered parameter
+blocks. Its `coordinate` is a backend-native concatenation along the trailing
+axis, with leading batch dimensions broadcast as needed. Reconstruction keeps
+block order, names, and static metadata without changing the original blocks.
+
+JAX registers these parameter containers as pytrees when its backend loads, so
+coordinates remain differentiable leaves while expansions and block names stay
+static. PyTorch compilation uses the stable tensor boundary: pass
+`parameter.coordinate` to compiled numerical functions and reconstruct with
+`with_coordinate` outside that boundary when a parameter result is required.
+Parameters can be shared safely because their numerical state is immutable;
+the concrete `clone()` helpers and generic identity-based evaluation caches
+have therefore been removed. Parameter-dependent reuse should instead be
+expressed through an explicit local `prepare`/`evaluate` state.
+
 The refactored API replaces the previous mutable-realisation interface:
 
 | Previous API | Current API |
@@ -212,6 +227,9 @@ The refactored API replaces the previous mutable-realisation interface:
 | `function.function` | `function.expansion` |
 | `function.function.evaluate(grid)` | `function.evaluate(grid)` |
 | assign `expansion.coefficient` or call `project(...)` | `expansion.evaluate(coefficient, grid)` |
+| assign `block.coordinate` | `block.with_coordinate(coordinate)` |
+| `parameter.clone()` | share `parameter` or call `with_coordinate(...)` |
+| `EvaluationCache` or likelihood `cacheSize` | explicit local prepared state |
 | mutable `GPEngine.sites` and `gp.at_sites(...)` | `gp.evaluate(coefficient, grid)` or `expansion.bind(grid)` |
 | `apply_jacobian(...)` / `apply_adjoint_jacobian(...)` | `directional_derivative(...)` / `adjoint_derivative(...)` |
 | representation-specific `*Realisation` classes | stateless `*Expansion` classes |

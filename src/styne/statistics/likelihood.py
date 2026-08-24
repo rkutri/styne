@@ -3,7 +3,6 @@ import numpy as np
 from styne.model.forwardmap import ForwardMap, DifferentiableModel
 from styne.model.sglmm import SGLMM
 from styne.parameter.parameter import Parameter
-from styne.utility.memoisation import EvaluationCache
 from styne.statistics.interface import LikelihoodInterface
 from styne.statistics.data import Data
 from styne.statistics.response import ResponseFamily
@@ -28,10 +27,6 @@ class RegressionLikelihood(LikelihoodInterface):
         response G(\theta) at the observation sites.
     noise : ResponseFamily
         Observation response family.
-    cacheSize : int, default 5
-        Number of recent evaluations cached for `evaluate_log` and
-        `evaluate_log_gradient`.
-
     Notes
     -----
     evaluate_log_gradient is available when the model satisfies the
@@ -48,13 +43,10 @@ class RegressionLikelihood(LikelihoodInterface):
         data: Data,
         forwardMap: ForwardMap,
         noise: ResponseFamily,
-        cacheSize: int = 5,
     ):
         self._data = data
         self._forwardMap = forwardMap
         self._response = noise
-        self._logLikelihoodCache = EvaluationCache(cacheSize)
-        self._gradientCache = EvaluationCache(cacheSize)
 
     @property
     def domainType(self):
@@ -78,8 +70,7 @@ class RegressionLikelihood(LikelihoodInterface):
 
     def evaluate_log(self, parameter: Parameter) -> float:
         """
-        Log-likelihood at `parameter`, cached by evaluation. Unnormalised,
-        inherits that from `ResponseFamily.log_likelihood`, see its docstring.
+        Unnormalised log-likelihood at `parameter`.
 
         Parameters
         ----------
@@ -91,17 +82,10 @@ class RegressionLikelihood(LikelihoodInterface):
         float
         """
 
-        if self._logLikelihoodCache.contains(parameter):
-            return self._logLikelihoodCache.retrieve(parameter)
-
         evaluation = self._forwardMap(parameter)
 
-        result = self._response.log_likelihood(
+        return self._response.log_likelihood(
             self._data.measurement, evaluation)
-
-        self._logLikelihoodCache.add(parameter, result)
-
-        return result
 
     def evaluate_log_gradient(self, parameter: Parameter) -> np.ndarray:
 
@@ -111,25 +95,14 @@ class RegressionLikelihood(LikelihoodInterface):
                 "DifferentiableModel protocol."
             )
 
-        if self._gradientCache.contains(parameter):
-            return self._gradientCache.retrieve(parameter)
-
         evaluation = self._forwardMap(parameter)
 
         cotangent = self._response.score(
             self._data.measurement, evaluation
         )
-        result = self._forwardMap.adjoint_derivative(
+        return self._forwardMap.adjoint_derivative(
             parameter, cotangent
         )
-        self._gradientCache.add(parameter, result)
-        return result
-
-    def condition_on(self, state: Parameter) -> None:
-        """State is ignored; signature maintained for downward cache
-        invalidation propagation from RadonNikodym."""
-        self._logLikelihoodCache.clear()
-        self._gradientCache.clear()
 
 
 class SGLMMLikelihood(LikelihoodInterface):
@@ -145,7 +118,8 @@ class SGLMMLikelihood(LikelihoodInterface):
 
     Notes
     -----
-    Functionally equivalent to RegressionLikelihood. Will be deprecated in 0.3.0
+    Functionally equivalent to RegressionLikelihood. Will be deprecated in
+    0.3.0.
 
     Parameters
     ----------
@@ -156,10 +130,6 @@ class SGLMMLikelihood(LikelihoodInterface):
         linear predictor \eta(\theta) at the observation sites.
     response : ResponseFamily
         Observation response family.
-    cacheSize : int, default 5
-        Number of recent evaluations cached for `evaluate_log` and
-        `evaluate_log_gradient`.
-
     Notes
     -----
     evaluate_log_gradient is available when the model satisfies the
@@ -174,13 +144,11 @@ class SGLMMLikelihood(LikelihoodInterface):
 
     def __init__(
             self, data: Data, predictor: SGLMM,
-            response: ResponseFamily, cacheSize: int = 5):
+            response: ResponseFamily):
 
         self._data = data
         self._predictor = predictor
         self._response = response
-        self._logLikelihoodCache = EvaluationCache(cacheSize)
-        self._gradientCache = EvaluationCache(cacheSize)
 
     @property
     def domainType(self):
@@ -204,8 +172,7 @@ class SGLMMLikelihood(LikelihoodInterface):
 
     def evaluate_log(self, parameter: Parameter) -> float:
         """
-        Log-likelihood at `parameter`, cached by evaluation. Unnormalised,
-        inherits that from `ResponseFamily.log_likelihood`, see its docstring.
+        Unnormalised log-likelihood at `parameter`.
 
         Parameters
         ----------
@@ -217,17 +184,11 @@ class SGLMMLikelihood(LikelihoodInterface):
         float
         """
 
-        if self._logLikelihoodCache.contains(parameter):
-            return self._logLikelihoodCache.retrieve(parameter)
-
         evaluation = self._predictor(parameter)
 
-        result = self._response.log_likelihood(
+        return self._response.log_likelihood(
             self._data.measurement, evaluation
         )
-
-        self._logLikelihoodCache.add(parameter, result)
-        return result
 
     def evaluate_log_gradient(self, parameter: Parameter) -> np.ndarray:
 
@@ -237,22 +198,11 @@ class SGLMMLikelihood(LikelihoodInterface):
                 "DifferentiableModel protocol."
             )
 
-        if self._gradientCache.contains(parameter):
-            return self._gradientCache.retrieve(parameter)
-
         evaluation = self._predictor(parameter)
 
         cotangent = self._response.score(
             self._data.measurement, evaluation
         )
-        result = self._predictor.adjoint_derivative(
+        return self._predictor.adjoint_derivative(
             parameter, cotangent
         )
-        self._gradientCache.add(parameter, result)
-        return result
-
-    def condition_on(self, state: Parameter) -> None:
-        """State is ignored; signature maintained for downward cache
-        invalidation propagation from RadonNikodym."""
-        self._logLikelihoodCache.clear()
-        self._gradientCache.clear()

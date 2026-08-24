@@ -45,7 +45,7 @@ class GaussianProcess:
         )
 
         self._measure = Gaussian(measureCov)
-        self._measure.mean = self._param.clone()
+        self._measure.mean = self._param
 
         self._covFcn = covFcn
 

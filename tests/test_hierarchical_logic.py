@@ -54,10 +54,9 @@ class TestHierarchicalLogic(unittest.TestCase):
         self.assertIsInstance(gp.measure.covariance, IIDCovarianceMatrix)
         self.assertEqual(gp.measure.covariance.scaling, 1.0)
 
-    def test_hyper_conditional_cache_invalidation(self):
+    def test_hyper_conditional_recomputes_for_new_parameters(self):
         """
-        Verify that sequential evaluations with different hyperparameters 
-        correctly clear the predictor cache.
+        Sequential evaluations use their supplied hyperparameters.
         """
         axis = np.linspace(0, 1, 100)
         from styne.utility.grid import UniformGrid
@@ -85,6 +84,7 @@ class TestHierarchicalLogic(unittest.TestCase):
         
         hyperCond.condition_on(state1)
         density = hyperCond.density
+        self.assertFalse(hasattr(density, "_cachedProposalParams"))
         
         logp1 = density.evaluate_log(hyper1)
         eval1 = predictor(latent).copy()

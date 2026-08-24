@@ -26,17 +26,9 @@ class DummyParameter(Parameter):
     def coordinate(self):
         return self._coord
 
-    @coordinate.setter
-    def coordinate(self, val):
-        self._coord = val
-
     @property
     def dimension(self):
         return len(self._coord)
-
-    def clone(self):
-        v = DummyParameter(self.coordinate.copy())
-        return v
 
     def with_coordinate(self, coordinate):
         return DummyParameter(coordinate)

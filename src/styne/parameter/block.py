@@ -2,48 +2,37 @@ from __future__ import annotations
 
 import numpy as np
 
-from styne.parameter.parameter import Parameter
+from styne.backend import infer_backend
+from styne.parameter.parameter import Parameter, _as_coordinate
 
 
 class BlockParameter(Parameter):
-    """
-    Direct sum of an ordered list of parameters, exposed as a single flat
-    parameter. The blocking structure is fixed at construction. Supports batch 
-    trajectory coordinates (nBatch, nTotal) by broadcasting along axis 0.
+    """Immutable direct sum of ordered parameters.
 
-    Parameters
-    ----------
-    blocks : list[Parameter]
-        Ordered list of component parameters. Block order is fixed at
-        construction and used for both flattening and un-flattening the
-        coordinate.
-    names : dict, optional
-        Maps names to block indices for `__getitem__` lookup by name
-        instead of position. Empty if not given.
+    Coordinates use a common backend, dtype, and device. Leading batch
+    dimensions are broadcast before concatenation along the trailing parameter
+    axis.
     """
 
     def __init__(self, blocks: list[Parameter], names: dict = None):
-        self._blocks = list(blocks)
-        self._dims = [b.dimension for b in self._blocks]
-        self._names = names or {}
+        if not blocks:
+            raise ValueError("BlockParameter requires at least one block.")
+        if not all(isinstance(block, Parameter) for block in blocks):
+            raise TypeError("BlockParameter blocks must be Parameters.")
+
+        self._blocks = tuple(blocks)
+        self._dimensions = tuple(
+            block.dimension for block in self._blocks
+        )
+        self._names = dict(names) if names is not None else {}
+        self._backend = self._validate_backend()
 
     @property
     def nBlocks(self) -> int:
         return len(self._blocks)
 
-    def block(self, idx: int) -> Parameter:
-        """
-        The parameter at block index `idx`.
-
-        Parameters
-        ----------
-        idx : int
-
-        Returns
-        -------
-        Parameter
-        """
-        return self._blocks[idx]
+    def block(self, index: int) -> Parameter:
+        return self._blocks[index]
 
     def __getitem__(self, key):
         if isinstance(key, int):
@@ -58,78 +47,66 @@ class BlockParameter(Parameter):
 
     @property
     def dimension(self) -> int:
-        return sum(self._dims)
+        return sum(self._dimensions)
 
     @property
-    def coordinate(self) -> np.ndarray:
-        """
-        Flattened coordinate across all blocks.
-
-        If every block's own coordinate is 1D, this is a plain concatenation.
-        If any block is 2D (a batch of trajectories, shape `(nBatch, blockDim)`),
-        every block is broadcast to that batch size first, then concatenated
-        along axis 1, so a 1D block is tiled across the batch rather than
-        raising a shape error.
-        """
-        # Check if any block has a 2D coordinate (batch)
-        coords = [b.coordinate for b in self._blocks]
-        isBatch = any(c.ndim == 2 for c in coords)
-        
-        if not isBatch:
-            return np.concatenate(coords)
-            
-        # For batching, ensure everything is 2D and concatenate on axis 1
-        nBatch = max(c.shape[0] if c.ndim == 2 else 1 for c in coords)
-        standardized = []
-        for c in coords:
-            if c.ndim == 1:
-                # Tile 1D parameter across the batch
-                standardized.append(np.tile(c, (nBatch, 1)))
-            else:
-                standardized.append(c)
-        return np.concatenate(standardized, axis=1)
-
-    @coordinate.setter
-    def coordinate(self, value: np.ndarray) -> None:
-        # Expected size: total dimension for 1D, or nBatch * dimension for 2D
-        # For 2D, we compare value.shape[1] with self.dimension
-        currentDim = value.shape[1] if value.ndim == 2 else value.size
-        
-        if currentDim != self.dimension:
+    def coordinate(self):
+        coordinates = tuple(
+            block.coordinate for block in self._blocks
+        )
+        try:
+            batchShape = np.broadcast_shapes(*(
+                coordinate.shape[:-1] for coordinate in coordinates
+            ))
+        except ValueError as error:
             raise ValueError(
-                f"Coordinate dimensionality {currentDim} does not match "
-                f"BlockParameter dimension {self.dimension}."
+                "BlockParameter batch dimensions are not broadcastable."
+            ) from error
+
+        broadcastCoordinates = tuple(
+            self._backend.namespace.broadcast_to(
+                coordinate, batchShape + (dimension,)
             )
-        
-        offset = 0
-        for idx, (block, dim) in enumerate(zip(self._blocks, self._dims)):
-            # uses ellipsis for axis-agnostic slicing (offset is always on the parameter axis)
-            sl = [slice(None)] * value.ndim
-            sl[-1] = slice(offset, offset + dim)
-            self._blocks[idx] = block.with_coordinate(value[tuple(sl)])
-            offset += dim
-
-    def clone(self) -> BlockParameter:
-        """
-        Return an independent copy, cloning every block.
-
-        Returns
-        -------
-        BlockParameter
-        """
-        return BlockParameter(
-            [b.clone() for b in self._blocks],
-            dict(self._names)
+            for coordinate, dimension in zip(
+                coordinates, self._dimensions
+            )
+        )
+        return self._backend.namespace.concatenate(
+            broadcastCoordinates, axis=-1
         )
 
-    def with_coordinate(self, coordinate: np.ndarray) -> BlockParameter:
-        result = self.clone()
-        result.coordinate = coordinate
-        return result
+    def with_coordinate(self, coordinate) -> BlockParameter:
+        coordinate = _as_coordinate(coordinate)
+        if coordinate.shape[-1] != self.dimension:
+            raise ValueError(
+                "BlockParameter coordinate must have trailing dimension "
+                f"{self.dimension}; got {coordinate.shape}."
+            )
 
-    def __eq__(self, other: object) -> bool:
-        if not isinstance(other, BlockParameter):
-            return NotImplemented
-        if self.nBlocks != other.nBlocks:
-            return False
-        return all(b1 == b2 for b1, b2 in zip(self._blocks, other._blocks))
+        blocks = []
+        offset = 0
+        for block, dimension in zip(self._blocks, self._dimensions):
+            blockCoordinate = coordinate[
+                ..., offset:offset + dimension
+            ]
+            blocks.append(block.with_coordinate(blockCoordinate))
+            offset += dimension
+        return type(self)(blocks, self._names)
+
+    def _validate_backend(self):
+        coordinates = tuple(
+            block.coordinate for block in self._blocks
+        )
+        backend = infer_backend(*coordinates)
+        metadata = tuple(
+            backend.metadata(coordinate) for coordinate in coordinates
+        )
+        reference = metadata[0]
+        if any(
+                item.dtype != reference.dtype
+                or item.device != reference.device
+                for item in metadata[1:]):
+            raise ValueError(
+                "Block coordinates must share dtype and device."
+            )
+        return backend

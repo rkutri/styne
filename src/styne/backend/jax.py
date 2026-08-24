@@ -11,6 +11,45 @@ from styne.backend.interface import (
 )
 
 
+def _register_parameter_containers():
+    """Register Styne's public parameters as JAX pytrees."""
+    from styne.parameter.block import BlockParameter
+    from styne.parameter.function import Function
+    from styne.parameter.scalar import Scalar
+    from styne.parameter.vector import Vector
+
+    jax.tree_util.register_pytree_node(
+        Vector,
+        lambda parameter: ((parameter.coordinate,), None),
+        lambda metadata, children: Vector(children[0]),
+    )
+    jax.tree_util.register_pytree_node(
+        Scalar,
+        lambda parameter: ((parameter.coordinate,), None),
+        lambda metadata, children: Scalar(children[0]),
+    )
+    jax.tree_util.register_pytree_node(
+        Function,
+        lambda parameter: (
+            (parameter.coordinate,), parameter.expansion
+        ),
+        lambda expansion, children: Function(children[0], expansion),
+    )
+    jax.tree_util.register_pytree_node(
+        BlockParameter,
+        lambda parameter: (
+            tuple(
+                parameter.block(index)
+                for index in range(parameter.nBlocks)
+            ),
+            tuple(parameter.names.items()),
+        ),
+        lambda names, children: BlockParameter(
+            list(children), dict(names)
+        ),
+    )
+
+
 class JAXNamespace(ArrayNamespace):
     """Declared `styne` array operations implemented by JAX."""
 
@@ -110,6 +149,12 @@ class JAXBackend(Backend):
         spectralTransforms=True,
         transformedLoops=True,
     )
+    _parameterContainersRegistered = False
+
+    def __init__(self):
+        if not type(self)._parameterContainersRegistered:
+            _register_parameter_containers()
+            type(self)._parameterContainersRegistered = True
 
     @property
     def name(self):

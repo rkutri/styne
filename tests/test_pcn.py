@@ -284,6 +284,6 @@ class TestPCNTuner:
         init = Vector(np.zeros(self.DIM))
         tuner = PCNTuner(factory, init)
         sampler = tuner.tune()
-        sampler.run(1000, init.clone())
+        sampler.run(1000, init)
         rate = sampler.diagnostics.global_acceptance_rate()
         assert 0.1 <= rate <= 0.9

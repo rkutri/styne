@@ -107,7 +107,7 @@ class MCMCSampler(ABC):
         self.clear()
         self._initialize(nSteps, initialState)
         self._append_initial(initialState)
-        self._lastState = initialState.clone()
+        self._lastState = initialState
         yield from self._drive(nSteps, progress, description)
 
     def run(self, nSteps, initialState, progress=False, description=None):
@@ -137,4 +137,3 @@ class MCMCSampler(ABC):
         """
         for _ in self.stream_continue(nSteps, progress, description):
             pass
-

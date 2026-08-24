@@ -49,7 +49,7 @@ class GibbsSampler(MCMCSampler):
 
 
     def _iterate(self) -> BlockParameter:
-        state = self._lastState.clone()
+        state = self._lastState
         for i in range(self._nBlocks):
             newBlock = self._sample_block(i, state)
             blocks = [state.block(j) for j in range(self._nBlocks)]

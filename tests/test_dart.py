@@ -135,7 +135,7 @@ def test_partitioned_dart_acceptance_invariant():
 
     sampler = factory.create()
     rng = np.random.default_rng(42)
-    state = gp.parameter.clone()
+    state = gp.parameter
     sampler._proposalMethod.state = state
     trans = sampler._proposalMethod.generate_proposal(rng)
 
