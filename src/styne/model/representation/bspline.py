@@ -11,7 +11,7 @@ from styne.model.representation.expansion import (
 from styne.utility.grid import Grid
 
 
-def _validate_coefficient(coefficient, dimension):
+def validate_coefficient(coefficient, dimension):
     if coefficient.ndim < 1:
         raise ValueError(
             "coefficient must have shape (..., dimension)"
@@ -24,11 +24,11 @@ def _validate_coefficient(coefficient, dimension):
     return coefficient
 
 
-def _grid_array(grid):
+def grid_array(grid):
     return grid.to_array() if isinstance(grid, Grid) else np.asarray(grid)
 
 
-class _BSplineEvaluation(BoundLinearExpansion):
+class BSplineEvaluation(BoundLinearExpansion):
 
     def __init__(self, designMatrix):
         self._designMatrix = np.asarray(designMatrix)
@@ -38,7 +38,7 @@ class _BSplineEvaluation(BoundLinearExpansion):
         return self._designMatrix.shape[1]
 
     def evaluate(self, coefficient):
-        coefficient = _validate_coefficient(coefficient, self.dimension)
+        coefficient = validate_coefficient(coefficient, self.dimension)
         designMatrix = backend_constant(self._designMatrix, coefficient)
         return coefficient @ designMatrix.T
 
@@ -96,7 +96,7 @@ class BSpline2D(LinearExpansion):
             phi_i(grid[k,0]) * psi_j(grid[k,1]).
         """
 
-        grid = _grid_array(grid)
+        grid = grid_array(grid)
         N = grid.shape[0]
         nx, ny = self._nBasis
 
@@ -107,7 +107,7 @@ class BSpline2D(LinearExpansion):
         return (PhiX[:, :, None] * PhiY[:, None, :]).reshape(N, nx * ny)
 
     def _bind(self, grid) -> BoundLinearExpansion:
-        return _BSplineEvaluation(self.design_matrix(grid))
+        return BSplineEvaluation(self.design_matrix(grid))
 
 
 class BSpline1D(LinearExpansion):
@@ -147,7 +147,7 @@ class BSpline1D(LinearExpansion):
         return list(self._boundary)
 
     def design_matrix(self, grid: np.ndarray) -> np.ndarray:
-        grid = _grid_array(grid).ravel()
+        grid = grid_array(grid).ravel()
         return si.BSpline.design_matrix(
             grid, self._knots, self.degree, extrapolate=False
         ).toarray()
@@ -173,4 +173,4 @@ class BSpline1D(LinearExpansion):
         return np.concatenate((leftClamp, domain, rightClamp))
 
     def _bind(self, grid) -> BoundLinearExpansion:
-        return _BSplineEvaluation(self.design_matrix(grid))
+        return BSplineEvaluation(self.design_matrix(grid))

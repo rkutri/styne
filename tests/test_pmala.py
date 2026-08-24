@@ -5,7 +5,7 @@ from styne.mcmc.method.pmala import (
     PMALAFactory,
     PMALAProposal,
     PreconditionedMALA,
-    _validate_pmala_target,
+    validate_pmala_target,
 )
 from styne.mcmc.diagnostics import AcceptanceRateDiagnostics
 from styne.statistics.radonnikodym import RadonNikodym
@@ -22,7 +22,7 @@ from styne.utility.tuning import PMALATuner
 # Shared helpers
 # ---------------------------------------------------------------------------
 
-def _make_valid_target(dim=2):
+def make_valid_target(dim=2):
     refCov = IIDCovarianceMatrix(dim, 1.0)
     refMean = Vector(np.zeros(dim))
     prior = Gaussian(refCov, refMean)
@@ -32,7 +32,7 @@ def _make_valid_target(dim=2):
     return RadonNikodym(prior, derivative)
 
 
-class _NonDifferentiableDensity(DensityInterface):
+class NonDifferentiableDensity(DensityInterface):
     @property
     def domainType(self): return Vector
     @property
@@ -40,7 +40,7 @@ class _NonDifferentiableDensity(DensityInterface):
     def evaluate_log(self, p): return 0.0
 
 
-class _NonGaussianMeasure(AbsolutelyContinuousProbabilityMeasure):
+class NonGaussianMeasure(AbsolutelyContinuousProbabilityMeasure):
     """Stub that looks like an AbsolutelyContinuousProbabilityMeasure but is not Gaussian."""
     class _Density(DensityInterface):
         @property
@@ -76,22 +76,22 @@ class TestPMALASetup:
     def test_rejects_non_differentiable_derivative(self):
         refCov = IIDCovarianceMatrix(2, 1.0)
         prior = Gaussian(refCov, Vector(np.zeros(2)))
-        target = RadonNikodym(prior, _NonDifferentiableDensity())
+        target = RadonNikodym(prior, NonDifferentiableDensity())
         with pytest.raises(ValueError):
             PreconditionedMALA(target, 0.5, AcceptanceRateDiagnostics())
 
     def test_rejects_beta_zero(self):
         with pytest.raises(ValueError):
-            PreconditionedMALA(_make_valid_target(), 0.0,
+            PreconditionedMALA(make_valid_target(), 0.0,
                                AcceptanceRateDiagnostics())
 
     def test_rejects_beta_above_one(self):
         with pytest.raises(ValueError):
-            PreconditionedMALA(_make_valid_target(), 1.1,
+            PreconditionedMALA(make_valid_target(), 1.1,
                                AcceptanceRateDiagnostics())
 
     def test_rejects_non_gaussian_reference(self):
-        stub = _NonGaussianMeasure()
+        stub = NonGaussianMeasure()
         deriv = GaussianDensity(IIDCovarianceMatrix(2, 1.0),
                                 Vector(np.zeros(2)))
         target = RadonNikodym(stub, deriv)
@@ -109,20 +109,20 @@ class TestPMALASetup:
 
     def test_factory_rejects_missing_beta(self):
         factory = PMALAFactory()
-        factory.target = _make_valid_target()
+        factory.target = make_valid_target()
         with pytest.raises(ValueError):
             factory.create()
 
     def test_factory_rejects_invalid_beta(self):
         factory = PMALAFactory()
-        factory.target = _make_valid_target()
+        factory.target = make_valid_target()
         factory.beta = -0.1
         with pytest.raises(ValueError):
             factory.create()
 
     def test_factory_creates_correctly(self):
         factory = PMALAFactory()
-        factory.target = _make_valid_target()
+        factory.target = make_valid_target()
         factory.beta = 0.5
         sampler = factory.create()
         assert isinstance(sampler, PreconditionedMALA)

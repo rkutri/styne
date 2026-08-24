@@ -25,7 +25,7 @@ class MixedBackendError(BackendInferenceError):
 
 
 @dataclass
-class _Registration:
+class Registration:
     loader: Callable[[], Backend]
     arrayTypes: tuple[type, ...]
     arrayModules: tuple[str, ...]
@@ -36,7 +36,7 @@ class BackendRegistry:
     """Registry that discovers array backends through lazy registrations."""
 
     def __init__(self):
-        self._registrations: dict[str, _Registration] = {}
+        self._registrations: dict[str, Registration] = {}
 
     def register(
             self, name: str, loader: Callable[[], Backend], *,
@@ -64,7 +64,7 @@ class BackendRegistry:
                 "Backend arrayModules must contain non-empty strings."
             )
 
-        self._registrations[name] = _Registration(
+        self._registrations[name] = Registration(
             loader=loader,
             arrayTypes=typeHints,
             arrayModules=moduleHints,
@@ -138,7 +138,7 @@ class BackendRegistry:
         return name
 
     @staticmethod
-    def _matches_hint(array, registration: _Registration) -> bool:
+    def _matches_hint(array, registration: Registration) -> bool:
         if (
                 registration.arrayTypes
                 and isinstance(array, registration.arrayTypes)):

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from styne.model.representation.expansion import Expansion
-from styne.parameter.parameter import Parameter, _as_coordinate
+from styne.parameter.parameter import Parameter, as_coordinate
 
 
 class Function(Parameter):
@@ -55,7 +55,7 @@ class Function(Parameter):
 
     @staticmethod
     def _validate(coordinate, dimension):
-        coordinate = _as_coordinate(coordinate)
+        coordinate = as_coordinate(coordinate)
         if coordinate.ndim < 1 or coordinate.shape[-1] != dimension:
             raise ValueError(
                 "Function coordinate shape must be (..., dimension); "

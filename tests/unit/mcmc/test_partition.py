@@ -66,7 +66,7 @@ def setup_target():
     return surrogate, dnaInit
 
 
-def _test_sampler(name, factory, init_state, n_steps=200):
+def run_sampler(name, factory, init_state, n_steps=200):
     print(f"\n--- Testing {name} ---")
     sampler = factory.create()
     state = init_state.with_coordinate(
@@ -95,13 +95,13 @@ if __name__ == "__main__":
     f_mrw = MRWFactory()
     f_mrw.target = target
     f_mrw.proposalCovariance = IIDCovarianceMatrix(init_state.dimension, 1e-6) # Smaller noise
-    s_mrw = _test_sampler("MRW", f_mrw, init_state)
+    s_mrw = run_sampler("MRW", f_mrw, init_state)
 
     # MALA
     f_mala = MALAFactory()
     f_mala.target = target
     f_mala.stepSize = 1e-4
-    _test_sampler("MALA", f_mala, init_state)
+    run_sampler("MALA", f_mala, init_state)
 
     # pCN on the coarseSurrogate directly
     print("\n--- Testing pCN on CoarseSurrogate directly ---")
@@ -109,14 +109,14 @@ if __name__ == "__main__":
     f_pcn.target = target._densities[0] # The RadonNikodym coarse surrogate
     f_pcn.beta = 0.1
     coarse_init = Vector(target._partition._rule.extract(0, init_state.coordinate))
-    _test_sampler("pCN (Coarse)", f_pcn, coarse_init)
+    run_sampler("pCN (Coarse)", f_pcn, coarse_init)
 
     # PMALA on the coarseSurrogate directly
     print("\n--- Testing PMALA on CoarseSurrogate directly ---")
     f_pmala = PMALAFactory()
     f_pmala.target = target._densities[0]
     f_pmala.beta = 0.01
-    _test_sampler("PMALA (Coarse)", f_pmala, coarse_init)
+    run_sampler("PMALA (Coarse)", f_pmala, coarse_init)
 
 
     # Final check: does log-density vary?

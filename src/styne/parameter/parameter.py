@@ -14,7 +14,7 @@ from abc import ABC, abstractmethod
 from styne.backend import BackendInferenceError, get_backend, infer_backend
 
 
-def _as_coordinate(coordinate):
+def as_coordinate(coordinate):
     """Preserve native arrays and default non-array input to NumPy."""
     try:
         backend = infer_backend(coordinate)

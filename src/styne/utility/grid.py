@@ -10,7 +10,7 @@ from typing import Iterable, Iterator
 from styne.backend import BackendInferenceError, infer_backend
 
 
-def _as_array(value):
+def as_array(value):
     """Preserve registered backend arrays; convert Python values to NumPy."""
     try:
         infer_backend(value)
@@ -19,7 +19,7 @@ def _as_array(value):
     return value
 
 
-def _copy_array(array):
+def copy_array(array):
     if hasattr(array, "copy"):
         return array.copy()
     if hasattr(array, "clone"):
@@ -42,7 +42,7 @@ class Grid:
 
     def __init__(self, points: Iterable):
 
-        self._points = [_as_array(p).reshape(-1) for p in points]
+        self._points = [as_array(p).reshape(-1) for p in points]
 
         if len(self._points) == 0:
             self._dimension = 0
@@ -69,13 +69,13 @@ class Grid:
             return self.to_array()[idx]
 
         if isinstance(idx, int):
-            return _copy_array(self._points[idx])
+            return copy_array(self._points[idx])
 
         raise TypeError("index must be int or slice")
 
     def __iter__(self) -> Iterator:
         for p in self._points:
-            yield _copy_array(p)
+            yield copy_array(p)
 
     def to_array(self):
         """

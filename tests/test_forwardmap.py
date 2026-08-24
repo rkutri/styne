@@ -6,7 +6,7 @@ from styne.model.forwardmap import ForwardMap as DeepForwardMap
 from styne.parameter.vector import Vector
 
 
-class _ExplicitForwardMap(ForwardMap):
+class ExplicitForwardMap(ForwardMap):
     @property
     def pType(self):
         return Vector
@@ -41,7 +41,7 @@ def test_prepare_replaces_interpolate():
 
 
 def test_forward_map_uses_explicit_prepared_state():
-    model = _ExplicitForwardMap()
+    model = ExplicitForwardMap()
     firstState = model.prepare(Vector(np.array([1.0])))
     secondState = model.prepare(Vector(np.array([3.0])))
 

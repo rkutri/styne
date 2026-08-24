@@ -7,7 +7,7 @@ from styne.statistics.stationary import MaternCovariance1D
 from styne.utility.grid import UniformGrid
 
 
-def _setup(seed=42):
+def setup(seed=42):
     rng = default_rng(seed)
     grid = UniformGrid(0.0, 1.0, 30)
     covariance = MaternCovariance1D(0.2, 1.5, 1.0)
@@ -18,7 +18,7 @@ def _setup(seed=42):
 
 
 def test_direct_evaluation_matches_021_covariance_projection():
-    process, queryGrid, coefficient = _setup()
+    process, queryGrid, coefficient = setup()
 
     result = process.evaluate(coefficient, queryGrid)
 
@@ -33,7 +33,7 @@ def test_direct_evaluation_matches_021_covariance_projection():
 
 
 def test_direct_bound_evaluation_caches_covariance_basis():
-    process, queryGrid, coefficient = _setup()
+    process, queryGrid, coefficient = setup()
 
     first = process.bind(queryGrid)
     firstResult = first.evaluate(coefficient)
@@ -49,7 +49,7 @@ def test_direct_bound_evaluation_caches_covariance_basis():
 
 
 def test_direct_evaluation_uses_explicit_coordinates():
-    process, queryGrid, coefficient = _setup()
+    process, queryGrid, coefficient = setup()
     other = default_rng(7).standard_normal(process.parameterDimension)
 
     first = process.evaluate(coefficient, queryGrid)

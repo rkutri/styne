@@ -37,11 +37,11 @@ from styne.mcmc.method.ratio import RatioEstimator
 
 SEED = 20240607
 
-class _State:
+class State:
     def __init__(self, coordinate):
         self.coordinate = coordinate
 
-class _StubMeasure:
+class StubMeasure:
     """Minimal surrogate-measure stand-in for the one-sided estimators.
     Deliberately has NO location and NO generate_realisation, so any code
     path that is secretly two-sided will raise instead of passing silently."""
@@ -51,8 +51,8 @@ class _StubMeasure:
     class _Density:
         spectralWeights = None
     def __init__(self, trajectory, gamma):
-        self.chain = _StubMeasure._Chain(trajectory)
-        self.density = _StubMeasure._Density()
+        self.chain = StubMeasure._Chain(trajectory)
+        self.density = StubMeasure._Density()
         self.regularisation = gamma
 
 
@@ -60,7 +60,7 @@ class _StubMeasure:
 # Analytical reference
 # ---------------------------------------------------------------------------
 
-def _analytical_log_ratio(x, z, mu, gamma, theta):
+def analytical_log_ratio(x, z, mu, gamma, theta):
     """Exact log(N_z / N_x) for the Gaussian-product localised density."""
     norm_diff = np.sum((mu - z) ** 2) - np.sum((mu - x) ** 2)
     return -gamma * theta / (2.0 * (theta + 1.0)) * norm_diff
@@ -70,7 +70,7 @@ def _analytical_log_ratio(x, z, mu, gamma, theta):
 # Sample helpers
 # ---------------------------------------------------------------------------
 
-def _draw_pi(loc, mu, gamma, theta, n, rng):
+def draw_pi(loc, mu, gamma, theta, n, rng):
     """Draw n samples from Pi_loc = N((theta*mu + loc)/(theta+1), 1/((theta+1)*gamma)*I)."""
     d = len(loc)
     mean = (theta * mu + loc) / (theta + 1.0)
@@ -82,7 +82,7 @@ def _draw_pi(loc, mu, gamma, theta, n, rng):
 # Mock surrogate factory
 # ---------------------------------------------------------------------------
 
-def _make_surrogate(gamma, samplesX=None, samplesZ=None):
+def make_surrogate(gamma, samplesX=None, samplesZ=None):
     """
     Minimal surrogate mock.
 
@@ -125,12 +125,12 @@ class TestISCorrectionAccuracy:
         mu = np.zeros(d)
         mu[0] = self.MU_VAL
 
-        samplesX = _draw_pi(x, mu, self.GAMMA, self.THETA, n, rng)
-        surrogate = _make_surrogate(self.GAMMA, samplesX=samplesX)
+        samplesX = draw_pi(x, mu, self.GAMMA, self.THETA, n, rng)
+        surrogate = make_surrogate(self.GAMMA, samplesX=samplesX)
 
         est = RatioEstimator(surrogate, burnin=0, thinning=1, type='is')
         result = est.log_ratio_estimate(Vector(x), Vector(z))
-        truth = _analytical_log_ratio(x, z, mu, self.GAMMA, self.THETA)
+        truth = analytical_log_ratio(x, z, mu, self.GAMMA, self.THETA)
         return result, truth
 
     def test_accuracy_d5(self):
@@ -165,15 +165,15 @@ class TestGeometricBridgeCorrectionAccuracy:
         mu = np.zeros(d)
         mu[0] = self.MU_VAL
 
-        samplesX = _draw_pi(x, mu, self.GAMMA, self.THETA, n, rng)
-        samplesZ = _draw_pi(z, mu, self.GAMMA, self.THETA, n, rng)
-        surrogate = _make_surrogate(
+        samplesX = draw_pi(x, mu, self.GAMMA, self.THETA, n, rng)
+        samplesZ = draw_pi(z, mu, self.GAMMA, self.THETA, n, rng)
+        surrogate = make_surrogate(
             self.GAMMA, samplesX=samplesX, samplesZ=samplesZ)
 
         est = RatioEstimator(surrogate, burnin=0,
                              thinning=1, type='bridge')
         result = est.log_ratio_estimate(Vector(x), Vector(z))
-        truth = _analytical_log_ratio(x, z, mu, self.GAMMA, self.THETA)
+        truth = analytical_log_ratio(x, z, mu, self.GAMMA, self.THETA)
         return result, truth
 
     def test_accuracy_d5(self):
@@ -213,15 +213,15 @@ class TestGeometricBridgeVarianceReduction:
         isEsts, bridgeEsts = [], []
 
         for _ in range(nRep):
-            samplesX = _draw_pi(x, mu, self.GAMMA, self.THETA, n, rng)
-            samplesZ = _draw_pi(z, mu, self.GAMMA, self.THETA, n, rng)
+            samplesX = draw_pi(x, mu, self.GAMMA, self.THETA, n, rng)
+            samplesZ = draw_pi(z, mu, self.GAMMA, self.THETA, n, rng)
 
-            surrogateIS = _make_surrogate(self.GAMMA, samplesX=samplesX)
+            surrogateIS = make_surrogate(self.GAMMA, samplesX=samplesX)
             estIS = RatioEstimator(surrogateIS, burnin=0,
                                    thinning=1, type='is')
             isEsts.append(estIS.log_ratio_estimate(stateParam, propParam))
 
-            surrogateBr = _make_surrogate(
+            surrogateBr = make_surrogate(
                 self.GAMMA, samplesX=samplesX, samplesZ=samplesZ)
             estBr = RatioEstimator(surrogateBr, burnin=0,
                                    thinning=1, type='bridge')
@@ -261,12 +261,12 @@ class TestCumulantCorrectionAccuracy:
         mu = np.zeros(d)
         mu[0] = self.MU_VAL
 
-        samplesX = _draw_pi(x, mu, self.GAMMA, self.THETA, n, rng)
-        surrogate = _make_surrogate(self.GAMMA, samplesX=samplesX)
+        samplesX = draw_pi(x, mu, self.GAMMA, self.THETA, n, rng)
+        surrogate = make_surrogate(self.GAMMA, samplesX=samplesX)
 
         est = RatioEstimator(surrogate, burnin=0, thinning=1, type='cumulant')
         result = est.log_ratio_estimate(Vector(x), Vector(z))
-        truth = _analytical_log_ratio(x, z, mu, self.GAMMA, self.THETA)
+        truth = analytical_log_ratio(x, z, mu, self.GAMMA, self.THETA)
         return result, truth
 
     def test_accuracy_d5(self):
@@ -291,7 +291,7 @@ class TestCumulantCorrectionAccuracy:
         # w = gamma * ((samples - mid) @ diff)
         # If all samples in samplesX are identical, then all elements of w are identical.
         samplesX = np.ones((10, d)) * 2.0
-        surrogate = _make_surrogate(self.GAMMA, samplesX=samplesX)
+        surrogate = make_surrogate(self.GAMMA, samplesX=samplesX)
         
         est_is = RatioEstimator(surrogate, burnin=0, thinning=1, type='is')
         est_cum = RatioEstimator(surrogate, burnin=0, thinning=1, type='cumulant')
@@ -310,8 +310,8 @@ class TestCumulantCorrectionAccuracy:
         mu = np.zeros(d)
         mu[0] = self.MU_VAL
         
-        samplesX = _draw_pi(x, mu, self.GAMMA, self.THETA, 1, rng)
-        surrogate = _make_surrogate(self.GAMMA, samplesX=samplesX)
+        samplesX = draw_pi(x, mu, self.GAMMA, self.THETA, 1, rng)
+        surrogate = make_surrogate(self.GAMMA, samplesX=samplesX)
         
         est = RatioEstimator(surrogate, burnin=0, thinning=1, type='cumulant')
         result = est.log_ratio_estimate(Vector(x), Vector(z))
@@ -327,8 +327,8 @@ class TestCumulantCorrectionAccuracy:
         for _ in range(R):
             v = master.normal(0.0, tau, size=m)            # symmetric: isolates variance
             traj = list(v.reshape(-1, 1)) + [np.array([0.0])]
-            meas = _StubMeasure(traj, gamma=1.0)
-            x, z = _State(np.array([0.5])), _State(np.array([-0.5]))  # x-z=1, mid=0
+            meas = StubMeasure(traj, gamma=1.0)
+            x, z = State(np.array([0.5])), State(np.array([-0.5]))
             cum.append(RatioEstimator(meas, 0, 1, 'cumulant').log_ratio_estimate(x, z))
             isv.append(RatioEstimator(meas, 0, 1, 'is').log_ratio_estimate(x, z))
         vc, vi = float(np.var(cum, ddof=1)), float(np.var(isv, ddof=1))
@@ -343,11 +343,11 @@ class TestCumulantCorrectionAccuracy:
         assert skew > 0.5                      # sanity: the sample really is skewed
 
         traj = list(c.reshape(-1, 1)) + [np.array([0.0])]
-        meas = _StubMeasure(traj, gamma=1.0)
+        meas = StubMeasure(traj, gamma=1.0)
 
         def bias(delta):
-            x = _State(np.array([0.5 * delta]))
-            z = _State(np.array([-0.5 * delta]))            # x-z=delta, mid=0
+            x = State(np.array([0.5 * delta]))
+            z = State(np.array([-0.5 * delta]))
             cum = RatioEstimator(meas, 0, 1, 'cumulant').log_ratio_estimate(x, z)
             isv = RatioEstimator(meas, 0, 1, 'is').log_ratio_estimate(x, z)
             return cum - isv

@@ -11,7 +11,7 @@ from styne.statistics.radonnikodym import RadonNikodym
 from styne.parameter.vector import Vector
 
 
-def _gaussian_surrogate(dim):
+def gaussian_surrogate(dim):
     """Minimal RadonNikodym surrogate: N(0, I) prior, trivial likelihood."""
     cov = IIDCovarianceMatrix(dim, 1.0)
     prior = Gaussian(cov, Vector(np.zeros(dim)))
@@ -28,7 +28,7 @@ def test_iid_regularisation_penalty():
     """IID: log-ratio between location and off-location equals -gamma/2 * ||d||^2."""
     dim = 8
     gamma = 0.5
-    surr = _gaussian_surrogate(dim)
+    surr = gaussian_surrogate(dim)
     density = LocalisedSurrogateDensity(gamma, 1.0, surr)  # no spectralWeights
 
     rng = np.random.default_rng(42)
@@ -56,7 +56,7 @@ def test_weighted_regularisation_penalty():
     """Weighted: log-ratio equals -gamma/2 * ||W*d||^2."""
     dim = 8
     gamma = 0.5
-    surr = _gaussian_surrogate(dim)
+    surr = gaussian_surrogate(dim)
 
     rng = np.random.default_rng(7)
     weights = np.abs(rng.standard_normal(dim)) + 0.1
@@ -83,7 +83,7 @@ def test_weighted_less_penalising_than_iid():
     """For spectral weights << 1 (high-frequency modes), weighted penalty is smaller."""
     dim = 16
     gamma = 2.0
-    surr = _gaussian_surrogate(dim)
+    surr = gaussian_surrogate(dim)
 
     # Simulate DNA-like weights: mostly small, a few larger
     weights = np.full(dim, 0.01)
@@ -114,7 +114,7 @@ def test_weighted_less_penalising_than_iid():
 def test_spectralweights_property():
     """spectralWeights property returns the stored weights (or None)."""
     dim = 4
-    surr = _gaussian_surrogate(dim)
+    surr = gaussian_surrogate(dim)
     weights = np.array([1.0, 0.5, 0.1, 0.01])
 
     density_iid = LocalisedSurrogateDensity(1.0, 1.0, surr)
@@ -134,7 +134,7 @@ def test_sync_weights_updates_covariance():
     """sync_weights replaces the regularisation covariance in place."""
     dim = 4
     gamma = 1.0
-    surr = _gaussian_surrogate(dim)
+    surr = gaussian_surrogate(dim)
 
     w1 = np.array([1.0, 0.5, 0.1, 0.05])
     density = LocalisedSurrogateDensity(
@@ -169,7 +169,7 @@ def test_sync_weights_none_is_noop():
     """sync_weights(None) does not change anything."""
     dim = 4
     gamma = 1.0
-    surr = _gaussian_surrogate(dim)
+    surr = gaussian_surrogate(dim)
     weights = np.array([1.0, 0.5, 0.1, 0.05])
     density = LocalisedSurrogateDensity(
         gamma, 1.0, surr, spectralWeights=weights

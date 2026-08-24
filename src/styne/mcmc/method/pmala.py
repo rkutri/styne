@@ -13,7 +13,7 @@ from styne.statistics.gaussian import Gaussian
 from styne.statistics.radonnikodym import RadonNikodym
 
 
-def _validate_pmala_target(target) -> None:
+def validate_pmala_target(target) -> None:
     if not isinstance(target, RadonNikodym):
         raise TypeError("pMALA target must be a RadonNikodym instance.")
     if not isinstance(target.reference, Gaussian):
@@ -24,7 +24,7 @@ def _validate_pmala_target(target) -> None:
             "pMALA requires target.derivative to support evaluate_log_gradient.")
 
 
-def _validate_beta(beta) -> None:
+def validate_beta(beta) -> None:
     if not (0.0 < beta <= 1.0):
         raise ValueError(
             f"Step size must satisfy 0 < beta <= 1. Got {beta}.")
@@ -46,8 +46,8 @@ class PMALAProposal(ProposalMethod):
     def __init__(self, target: RadonNikodym, beta: float):
 
         super().__init__()
-        _validate_pmala_target(target)
-        _validate_beta(beta)
+        validate_pmala_target(target)
+        validate_beta(beta)
 
         self._beta = beta
         self._target = target
@@ -129,8 +129,8 @@ class PreconditionedMALA(MetropolisHastings):
                  acceptance: AcceptanceProbability = None,
                  rng: Optional[Generator] = None):
 
-        _validate_pmala_target(target)
-        _validate_beta(beta)
+        validate_pmala_target(target)
+        validate_beta(beta)
 
         proposalMethod = PMALAProposal(target, beta)
         super().__init__(target, proposalMethod, diagnostics,
@@ -196,10 +196,10 @@ class PMALAFactory(MHFactory):
 
     def _validate(self) -> None:
         super()._validate()
-        _validate_pmala_target(self._target)
+        validate_pmala_target(self._target)
         if self._beta is None:
             raise ValueError("Step size parameter (beta) not set for pMALA.")
-        _validate_beta(self._beta)
+        validate_beta(self._beta)
 
     def _create_sampler(self) -> PreconditionedMALA:
         return PreconditionedMALA(

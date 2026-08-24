@@ -10,11 +10,11 @@ from styne.gp.dna import (
 
 # ---- helpers ----
 
-def _bc1d(bcType):
+def bc1d(bcType):
     return BoundaryCondition((bcType,))
 
 
-def _bc2d(bcX, bcY):
+def bc2d(bcX, bcY):
     return BoundaryCondition((bcX, bcY))
 
 
@@ -26,32 +26,32 @@ class TestDNAFourierComponentExpansion1D:
         self.q = 5
 
     def test_neumann_dimension(self):
-        r = DNAFourierComponentExpansion(_bc1d(BC.NEUMANN), self.q)
+        r = DNAFourierComponentExpansion(bc1d(BC.NEUMANN), self.q)
         assert r.dimension == self.q + 1
 
     def test_dirichlet_dimension(self):
-        r = DNAFourierComponentExpansion(_bc1d(BC.DIRICHLET), self.q)
+        r = DNAFourierComponentExpansion(bc1d(BC.DIRICHLET), self.q)
         assert r.dimension == self.q
 
     def test_has_no_coefficient_state(self):
-        r = DNAFourierComponentExpansion(_bc1d(BC.NEUMANN), self.q)
+        r = DNAFourierComponentExpansion(bc1d(BC.NEUMANN), self.q)
         for name in ("coefficient", "project", "clone"):
             assert not hasattr(r, name)
 
     def test_evaluate_interior_shape_neumann(self):
-        r = DNAFourierComponentExpansion(_bc1d(BC.NEUMANN), self.q)
+        r = DNAFourierComponentExpansion(bc1d(BC.NEUMANN), self.q)
         assert r.evaluate_interior(
             np.zeros(self.q + 1)
         ).shape == (self.q + 2,)
 
     def test_evaluate_interior_shape_dirichlet(self):
-        r = DNAFourierComponentExpansion(_bc1d(BC.DIRICHLET), self.q)
+        r = DNAFourierComponentExpansion(bc1d(BC.DIRICHLET), self.q)
         assert r.evaluate_interior(
             np.zeros(self.q)
         ).shape == (self.q + 2,)
 
     def test_dirichlet_zero_at_endpoints(self):
-        r = DNAFourierComponentExpansion(_bc1d(BC.DIRICHLET), self.q)
+        r = DNAFourierComponentExpansion(bc1d(BC.DIRICHLET), self.q)
         vals = r.evaluate_interior(
             default_rng(0).standard_normal(self.q)
         )
@@ -59,26 +59,26 @@ class TestDNAFourierComponentExpansion1D:
         assert abs(vals[-1]) < 1e-14
 
     def test_zero_coefficient_zero_field_neumann(self):
-        r = DNAFourierComponentExpansion(_bc1d(BC.NEUMANN), self.q)
+        r = DNAFourierComponentExpansion(bc1d(BC.NEUMANN), self.q)
         np.testing.assert_allclose(
             r.evaluate_interior(np.zeros(self.q + 1)), 0.
         )
 
     def test_zero_coefficient_zero_field_dirichlet(self):
-        r = DNAFourierComponentExpansion(_bc1d(BC.DIRICHLET), self.q)
+        r = DNAFourierComponentExpansion(bc1d(BC.DIRICHLET), self.q)
         np.testing.assert_allclose(
             r.evaluate_interior(np.zeros(self.q)), 0.
         )
 
     def test_evaluate_at_coordinates(self):
-        r = DNAFourierComponentExpansion(_bc1d(BC.NEUMANN), self.q)
+        r = DNAFourierComponentExpansion(bc1d(BC.NEUMANN), self.q)
         result = r.evaluate(
             np.zeros(self.q + 1), np.linspace(0.1, 0.9, 15)
         )
         assert result.shape == (15,)
 
     def test_multiple_coefficients_do_not_mutate_expansion(self):
-        r = DNAFourierComponentExpansion(_bc1d(BC.NEUMANN), self.q)
+        r = DNAFourierComponentExpansion(bc1d(BC.NEUMANN), self.q)
         first = r.evaluate_native(np.ones(self.q + 1))
         r.evaluate_native(np.zeros(self.q + 1))
         np.testing.assert_allclose(
@@ -96,17 +96,17 @@ class TestDNAFourierComponentExpansion2D:
     def test_block_sizes(self):
         q = self.q
         assert DNAFourierComponentExpansion(
-            _bc2d(BC.NEUMANN, BC.NEUMANN),
+            bc2d(BC.NEUMANN, BC.NEUMANN),
             q).dimension == (
             q + 1) ** 2
         assert DNAFourierComponentExpansion(
-            _bc2d(BC.DIRICHLET, BC.NEUMANN), q).dimension == q * (q + 1)
+            bc2d(BC.DIRICHLET, BC.NEUMANN), q).dimension == q * (q + 1)
         assert DNAFourierComponentExpansion(
-            _bc2d(BC.NEUMANN, BC.DIRICHLET),
+            bc2d(BC.NEUMANN, BC.DIRICHLET),
             q).dimension == (
             q + 1) * q
         assert DNAFourierComponentExpansion(
-            _bc2d(BC.DIRICHLET, BC.DIRICHLET),
+            bc2d(BC.DIRICHLET, BC.DIRICHLET),
             q).dimension == q ** 2
 
     def test_evaluate_interior_shape(self):
@@ -119,7 +119,7 @@ class TestDNAFourierComponentExpansion2D:
 
     def test_dirichlet_x_zero_boundary(self):
         r = DNAFourierComponentExpansion(
-            _bc2d(BC.DIRICHLET, BC.NEUMANN), self.q)
+            bc2d(BC.DIRICHLET, BC.NEUMANN), self.q)
         vals = r.evaluate_interior(
             default_rng(1).standard_normal(r.dimension)
         )
@@ -128,7 +128,7 @@ class TestDNAFourierComponentExpansion2D:
 
     def test_dirichlet_y_zero_boundary(self):
         r = DNAFourierComponentExpansion(
-            _bc2d(BC.NEUMANN, BC.DIRICHLET), self.q)
+            bc2d(BC.NEUMANN, BC.DIRICHLET), self.q)
         vals = r.evaluate_interior(
             default_rng(2).standard_normal(r.dimension)
         )
@@ -145,7 +145,7 @@ class TestDNAFourierComponentExpansion2D:
 
     def test_evaluate_at_coordinates(self):
         r = DNAFourierComponentExpansion(
-            _bc2d(BC.NEUMANN, BC.NEUMANN), self.q)
+            bc2d(BC.NEUMANN, BC.NEUMANN), self.q)
         pts = np.stack(
             [np.linspace(0.1, 0.9, 8),
              np.linspace(0.1, 0.9, 8)],

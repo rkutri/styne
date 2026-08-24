@@ -177,7 +177,7 @@ def test_bspline_1d_gp_sampler_returns_function():
 # GaussianProcess.bspline_2d
 # ---------------------------------------------------------------------------
 
-def _make_bspline_2d_gp(nx=5, ny=5):
+def make_bspline_2d_gp(nx=5, ny=5):
     cov = MaternCovariance2D(lengthScale=0.3, smoothness=1.5, marginalVariance=1.)
     expansion = BSpline2D([nx, ny], degree=3, boundary=[[LB, RB], [LB, RB]])
     return GaussianProcess.bspline(cov, expansion)
@@ -185,24 +185,24 @@ def _make_bspline_2d_gp(nx=5, ny=5):
 
 def test_bspline_2d_gp_measure_dimension():
     nx, ny = 5, 5
-    gp = _make_bspline_2d_gp(nx, ny)
+    gp = make_bspline_2d_gp(nx, ny)
     assert gp.measure.density.domainDimension == nx * ny
 
 
 def test_bspline_2d_gp_measure_is_gaussian():
-    gp = _make_bspline_2d_gp()
+    gp = make_bspline_2d_gp()
     assert isinstance(gp.measure, Gaussian)
 
 
 def test_bspline_2d_gp_sampler_shares_expansion():
-    gp = _make_bspline_2d_gp()
+    gp = make_bspline_2d_gp()
     function = gp.sampler.generate_realisation(seed=13)
     assert function.expansion is gp.expansion
 
 
 def test_bspline_2d_gp_sampler_evaluate():
     nx, ny = 5, 5
-    gp = _make_bspline_2d_gp(nx, ny)
+    gp = make_bspline_2d_gp(nx, ny)
     function = gp.sampler.generate_realisation(seed=14)
 
     pts = UniformGrid((LB, RB, 4), (LB, RB, 4))
@@ -212,7 +212,7 @@ def test_bspline_2d_gp_sampler_evaluate():
 
 def test_bspline_2d_gp_parameter_reconstruction_shares_representation():
     nx, ny = 5, 5
-    gp = _make_bspline_2d_gp(nx, ny)
+    gp = make_bspline_2d_gp(nx, ny)
 
     coords = np.ones(nx * ny)
     replacement = gp.parameter.with_coordinate(coords)
@@ -227,7 +227,7 @@ def test_bspline_2d_gp_parameter_reconstruction_shares_representation():
 
 
 def test_bspline_2d_gp_covariance_update_inplace():
-    gp = _make_bspline_2d_gp()
+    gp = make_bspline_2d_gp()
     measure_ref = gp.measure
     cov2 = MaternCovariance2D(lengthScale=0.1, smoothness=1.5, marginalVariance=2.)
     gp.covarianceFunction = cov2

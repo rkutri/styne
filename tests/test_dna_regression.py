@@ -22,7 +22,7 @@ Q, D, ALPHA = 16, 2, 1.0
 ELL = 0.2
 
 
-def _outputs():
+def outputs():
     """Deterministic outputs for a fixed square configuration. No RNG."""
     cov = StubFourierCov(ELL)
     gp = GaussianProcess.dna(cov, Q, D, ALPHA)
@@ -36,13 +36,13 @@ def _outputs():
 
 
 def make_snapshot():
-    np.savez(SNAP, **_outputs())
+    np.savez(SNAP, **outputs())
 
 
 def test_scalar_path_unchanged():
     assert os.path.exists(SNAP), f"Missing committed DNA snapshot: {SNAP}"
     ref = np.load(SNAP)
-    out = _outputs()
+    out = outputs()
     for key, value in out.items():
         np.testing.assert_allclose(
             value, ref[key], rtol=0, atol=1e-12,

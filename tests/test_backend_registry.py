@@ -16,15 +16,15 @@ from styne.backend import (
 )
 
 
-class _FirstArray:
+class FirstArray:
     pass
 
 
-class _SecondArray:
+class SecondArray:
     pass
 
 
-class _FirstBackend(Backend):
+class FirstBackend(Backend):
     @property
     def name(self):
         return "first"
@@ -34,19 +34,19 @@ class _FirstBackend(Backend):
         return ArrayNamespace()
 
     def is_array(self, value):
-        return isinstance(value, _FirstArray)
+        return isinstance(value, FirstArray)
 
     def metadata(self, array):
         return BackendMetadata(dtype="float64", device="cpu")
 
 
-class _SecondBackend(_FirstBackend):
+class SecondBackend(FirstBackend):
     @property
     def name(self):
         return "second"
 
     def is_array(self, value):
-        return isinstance(value, _SecondArray)
+        return isinstance(value, SecondArray)
 
 
 def test_backend_package_does_not_import_optional_frameworks():
@@ -108,9 +108,9 @@ def test_registry_loads_backend_lazily_and_caches_it():
 
     def load_backend():
         loads.append(None)
-        return _FirstBackend()
+        return FirstBackend()
 
-    registry.register("first", load_backend, arrayTypes=(_FirstArray,))
+    registry.register("first", load_backend, arrayTypes=(FirstArray,))
 
     assert loads == []
     backend = registry.get_backend("first")
@@ -120,12 +120,12 @@ def test_registry_loads_backend_lazily_and_caches_it():
 
 def test_registry_infers_backend_from_registered_array_types():
     registry = BackendRegistry()
-    registry.register("first", _FirstBackend, arrayTypes=(_FirstArray,))
+    registry.register("first", FirstBackend, arrayTypes=(FirstArray,))
 
-    backend = registry.infer_backend(_FirstArray(), _FirstArray())
+    backend = registry.infer_backend(FirstArray(), FirstArray())
 
     assert backend.name == "first"
-    assert backend.metadata(_FirstArray()) == BackendMetadata(
+    assert backend.metadata(FirstArray()) == BackendMetadata(
         dtype="float64", device="cpu"
     )
 
@@ -136,7 +136,7 @@ def test_registry_uses_module_hints_without_loading_backend_eagerly():
 
     def load_backend():
         loads.append(None)
-        return _FirstBackend()
+        return FirstBackend()
 
     registry.register(
         "first",
@@ -145,22 +145,22 @@ def test_registry_uses_module_hints_without_loading_backend_eagerly():
     )
     assert loads == []
 
-    assert registry.infer_backend(_FirstArray()).name == "first"
+    assert registry.infer_backend(FirstArray()).name == "first"
     assert len(loads) == 1
 
 
 def test_registry_rejects_mixed_backends():
     registry = BackendRegistry()
-    registry.register("first", _FirstBackend, arrayTypes=(_FirstArray,))
-    registry.register("second", _SecondBackend, arrayTypes=(_SecondArray,))
+    registry.register("first", FirstBackend, arrayTypes=(FirstArray,))
+    registry.register("second", SecondBackend, arrayTypes=(SecondArray,))
 
     with pytest.raises(MixedBackendError, match="first, second"):
-        registry.infer_backend(_FirstArray(), _SecondArray())
+        registry.infer_backend(FirstArray(), SecondArray())
 
 
 def test_registry_reports_unknown_backends_and_arrays():
     registry = BackendRegistry()
-    registry.register("first", _FirstBackend, arrayTypes=(_FirstArray,))
+    registry.register("first", FirstBackend, arrayTypes=(FirstArray,))
 
     with pytest.raises(
             BackendNotFoundError, match="Available backends: first"):
@@ -175,15 +175,15 @@ def test_registry_validates_registration_and_loaded_backend():
     registry = BackendRegistry()
 
     with pytest.raises(BackendRegistryError, match="must declare"):
-        registry.register("first", _FirstBackend)
+        registry.register("first", FirstBackend)
 
-    registry.register("first", lambda: object(), arrayTypes=(_FirstArray,))
+    registry.register("first", lambda: object(), arrayTypes=(FirstArray,))
     with pytest.raises(TypeError, match="did not return a Backend"):
         registry.get_backend("first")
 
 
 def test_unsupported_capabilities_raise_backend_specific_error():
-    backend = _FirstBackend()
+    backend = FirstBackend()
 
     with pytest.raises(BackendCapabilityError, match="'first'.*compilation"):
         backend.compile(lambda value: value)
@@ -194,4 +194,4 @@ def test_namespace_has_no_implicit_delegation():
 
     assert not hasattr(namespace, "undeclared_operation")
     with pytest.raises(NotImplementedError):
-        namespace.exp(_FirstArray())
+        namespace.exp(FirstArray())

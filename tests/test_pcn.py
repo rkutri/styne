@@ -19,7 +19,7 @@ from styne.utility.postprocessing import integrated_autocorrelation
 from styne.utility.tuning import PCNTuner
 
 
-def _make_valid_target(dim=2):
+def make_valid_target(dim=2):
     refCov = IIDCovarianceMatrix(dim, 1.0)
     refMean = Vector(np.zeros(dim))
     prior = Gaussian(refCov, refMean)
@@ -29,7 +29,7 @@ def _make_valid_target(dim=2):
     return RadonNikodym(prior, derivative)
 
 
-class _NonGaussianMeasure(AbsolutelyContinuousProbabilityMeasure):
+class NonGaussianMeasure(AbsolutelyContinuousProbabilityMeasure):
     class _Density(DensityInterface):
         @property
         def domainType(self):
@@ -55,7 +55,7 @@ class _NonGaussianMeasure(AbsolutelyContinuousProbabilityMeasure):
 class TestPCNSetup:
 
     def test_rejects_non_gaussian_reference(self):
-        stub = _NonGaussianMeasure()
+        stub = NonGaussianMeasure()
         with pytest.raises(NotImplementedError):
             PCNProposal(stub, 0.5)
 
@@ -122,20 +122,20 @@ class TestPCNFactorySetup:
 
     def test_factory_rejects_missing_beta(self):
         factory = PCNFactory()
-        factory.target = _make_valid_target()
+        factory.target = make_valid_target()
         with pytest.raises(ValueError):
             factory.create()
 
     def test_factory_rejects_invalid_beta(self):
         factory = PCNFactory()
-        factory.target = _make_valid_target()
+        factory.target = make_valid_target()
         factory.beta = 0.0
         with pytest.raises(ValueError):
             factory.create()
 
     def test_factory_creates_correctly(self):
         factory = PCNFactory()
-        factory.target = _make_valid_target()
+        factory.target = make_valid_target()
         factory.beta = 0.5
         sampler = factory.create()
         assert isinstance(sampler, PreconditionedCrankNicolson)
@@ -187,7 +187,7 @@ class TestPCNProposalStep:
 class TestPCNLogMHRatio:
 
     def test_log_mh_ratio_equals_derivative_difference(self):
-        target = _make_valid_target(dim=2)
+        target = make_valid_target(dim=2)
         sampler = PreconditionedCrankNicolson(
             target, 0.5, AcceptanceRateDiagnostics()
         )

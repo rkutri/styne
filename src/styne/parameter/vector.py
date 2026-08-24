@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from styne.parameter.parameter import Parameter, _as_coordinate
+from styne.parameter.parameter import Parameter, as_coordinate
 
 
 class Vector(Parameter):
@@ -19,7 +19,7 @@ class Vector(Parameter):
 
     @staticmethod
     def _validate(coordinate):
-        coordinate = _as_coordinate(coordinate)
+        coordinate = as_coordinate(coordinate)
         if coordinate.ndim not in (1, 2):
             raise ValueError(
                 "Vector coordinate shape must be (dimension,) or "

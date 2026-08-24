@@ -7,7 +7,7 @@ from styne.statistics.gaussian import Gaussian
 from styne.statistics.measure import ConditionalMeasure
 
 
-class _ConditionalGaussian(ConditionalMeasure):
+class ConditionalGaussian(ConditionalMeasure):
     def __init__(self):
         self._gaussian = Gaussian(
             IIDCovarianceMatrix(1, 1.0), Vector(np.zeros(1))
@@ -29,7 +29,7 @@ class _ConditionalGaussian(ConditionalMeasure):
 
 
 def test_condition_returns_independent_state():
-    conditional = _ConditionalGaussian()
+    conditional = ConditionalGaussian()
     firstState = BlockParameter([Vector([1.0])])
     secondState = BlockParameter([Vector([2.0])])
 

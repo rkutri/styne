@@ -20,13 +20,13 @@ from styne.backend.registry import (
 )
 
 
-def _load_numpy_backend():
+def load_numpy_backend():
     from styne.backend.numpy import NumPyBackend
 
     return NumPyBackend()
 
 
-def _load_jax_backend():
+def load_jax_backend():
     try:
         from styne.backend.jax import JAXBackend
     except ModuleNotFoundError as error:
@@ -40,7 +40,7 @@ def _load_jax_backend():
     return JAXBackend()
 
 
-def _load_pytorch_backend():
+def load_pytorch_backend():
     try:
         from styne.backend.pytorch import PyTorchBackend
     except ModuleNotFoundError as error:
@@ -56,17 +56,17 @@ def _load_pytorch_backend():
 
 register_backend(
     "numpy",
-    _load_numpy_backend,
+    load_numpy_backend,
     arrayModules=("numpy",),
 )
 register_backend(
     "jax",
-    _load_jax_backend,
+    load_jax_backend,
     arrayModules=("jax", "jaxlib"),
 )
 register_backend(
     "pytorch",
-    _load_pytorch_backend,
+    load_pytorch_backend,
     arrayModules=("torch",),
 )
 

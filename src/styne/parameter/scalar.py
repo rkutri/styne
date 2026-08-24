@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from styne.parameter.parameter import Parameter, _as_coordinate
+from styne.parameter.parameter import Parameter, as_coordinate
 
 
 class Scalar(Parameter):
@@ -11,7 +11,7 @@ class Scalar(Parameter):
 
     @staticmethod
     def _validate(coordinate):
-        coordinate = _as_coordinate(coordinate)
+        coordinate = as_coordinate(coordinate)
         if coordinate.ndim not in (1, 2) or coordinate.shape[-1] != 1:
             raise ValueError(
                 "Scalar coordinate shape must be (1,) or (batch, 1); "

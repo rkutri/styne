@@ -5,7 +5,7 @@ import numpy as np
 from styne.gp.dna import BC, BoundaryCondition
 
 
-def _axis_synthesis_matrix(q, boundaryCondition):
+def axis_synthesis_matrix(q, boundaryCondition):
     """Direct DNA sine/cosine basis on the native grid."""
     gridIndices = np.arange(q + 2)
     if boundaryCondition == BC.NEUMANN:
@@ -26,7 +26,7 @@ def dna_synthesis_matrix(q, d):
     blocks = []
     for boundary in BoundaryCondition.all_combinations(d):
         axisMatrices = [
-            _axis_synthesis_matrix(q[axis], boundary[axis])
+            axis_synthesis_matrix(q[axis], boundary[axis])
             for axis in range(d)
         ]
         block = axisMatrices[0]

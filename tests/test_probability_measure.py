@@ -8,12 +8,12 @@ from styne.statistics.gaussian import Gaussian
 from styne.statistics.covariance import IIDCovarianceMatrix
 
 
-def _gaussian():
+def gaussian():
     return Gaussian(IIDCovarianceMatrix(2, 1.5), Vector(np.zeros(2)))
 
 
 def test_gaussian_sample_propagates_numpy_random_state():
-    measure = _gaussian()
+    measure = gaussian()
     firstState = get_backend("numpy").random_state(123)
     secondState = get_backend("numpy").random_state(123)
 
@@ -26,7 +26,7 @@ def test_gaussian_sample_propagates_numpy_random_state():
 
 
 def test_generate_realisation_accepts_explicit_backend_state():
-    measure = _gaussian()
+    measure = gaussian()
     state = get_backend("numpy").random_state(9)
 
     sample = measure.generate_realisation(randomState=state)

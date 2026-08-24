@@ -10,7 +10,7 @@ from styne.statistics.likelihood import RegressionLikelihood
 from styne.statistics.response import GaussianResponse
 
 
-class _DifferentiableMock(ForwardMap):
+class DifferentiableMock(ForwardMap):
     """Identity model that satisfies DifferentiableModel."""
 
     def __init__(self, dim=2):
@@ -40,7 +40,7 @@ class _DifferentiableMock(ForwardMap):
         return np.asarray(cotangent)
 
 
-class _NonDifferentiableMock(ForwardMap):
+class NonDifferentiableMock(ForwardMap):
 
     @property
     def pType(self):
@@ -74,7 +74,7 @@ def test_generic_evaluation_cache_is_removed():
 
 def test_log_likelihood_does_not_cache_parameter_evaluations(
         mock_data, mock_noise):
-    model = _DifferentiableMock(dim=2)
+    model = DifferentiableMock(dim=2)
     likelihood = RegressionLikelihood(
         mock_data,
         model,
@@ -91,7 +91,7 @@ def test_log_likelihood_does_not_cache_parameter_evaluations(
 
 def test_log_gradient_does_not_cache_parameter_evaluations(
         mock_data, mock_noise):
-    model = _DifferentiableMock(dim=2)
+    model = DifferentiableMock(dim=2)
     likelihood = RegressionLikelihood(
         mock_data,
         model,
@@ -109,7 +109,7 @@ def test_log_gradient_does_not_cache_parameter_evaluations(
 def test_non_differentiable_model_exception(mock_data, mock_noise):
     likelihood = RegressionLikelihood(
         mock_data,
-        _NonDifferentiableMock(),
+        NonDifferentiableMock(),
         GaussianResponse(mock_noise.density.covariance),
     )
     parameter = Vector(np.array([0.5, 0.5]))

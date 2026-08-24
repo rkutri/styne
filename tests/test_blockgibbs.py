@@ -58,7 +58,7 @@ class CorrelatedGaussianConditional(ConditionalMeasure):
         return self._gaussian.draw(rng)
 
 
-def _make_model(rho: float) -> HierarchicalBayes:
+def make_model(rho: float) -> HierarchicalBayes:
     """Build a HierarchicalBayes for a 2D correlated Gaussian with correlation rho."""
     root = Gaussian(IIDCovarianceMatrix(1, 1.0), Vector(np.zeros(1)))
     return (
@@ -70,7 +70,7 @@ def _make_model(rho: float) -> HierarchicalBayes:
     )
 
 
-def _make_init() -> BlockParameter:
+def make_init() -> BlockParameter:
     return BlockParameter([Vector(np.zeros(1)), Vector(np.zeros(1))])
 
 
@@ -82,22 +82,22 @@ class TestBlockGibbsStructure:
 
     def setup_method(self):
         np.random.seed(0)
-        self.model = _make_model(rho=0.5)
+        self.model = make_model(rho=0.5)
         self.sampler = BlockGibbs(self.model)
 
     def test_chain_length(self):
         N = 50
-        self.sampler.run(N, _make_init())
+        self.sampler.run(N, make_init())
         assert self.sampler.chain.length == N + 1
 
     def test_block_entry_count(self):
         N = 50
-        self.sampler.run(N, _make_init())
+        self.sampler.run(N, make_init())
         assert len(self.sampler.chain.block(0).trajectory) == N + 1
         assert len(self.sampler.chain.block(1).trajectory) == N + 1
 
     def test_last_state_is_block_parameter(self):
-        self.sampler.run(10, _make_init())
+        self.sampler.run(10, make_init())
         assert isinstance(self.sampler.lastState, BlockParameter)
         assert self.sampler.lastState.nBlocks == 2
 
@@ -105,7 +105,7 @@ class TestBlockGibbsStructure:
         builder = GibbsBuilder()
         builder.model = self.model
         sampler = builder.build()
-        sampler.run(10, _make_init())
+        sampler.run(10, make_init())
         assert sampler.chain.length == 11
 
 
@@ -122,9 +122,9 @@ class TestBlockGibbsInvariantMeasure:
 
     def setup_method(self):
         np.random.seed(self.SEED)
-        model = _make_model(rho=self.RHO)
+        model = make_model(rho=self.RHO)
         sampler = BlockGibbs(model)
-        sampler.run(self.N_STEPS, _make_init())
+        sampler.run(self.N_STEPS, make_init())
 
         traj0 = np.array(sampler.chain.block(0).trajectory)[self.BURNIN:, 0]
         traj1 = np.array(sampler.chain.block(1).trajectory)[self.BURNIN:, 0]

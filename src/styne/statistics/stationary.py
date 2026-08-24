@@ -17,7 +17,7 @@ _MATERN_MAX_SCALED_DISTANCE = 800.0
 _MATERN_MIN_SCALED_DISTANCE = 1e-8
 
 
-def _as_point_array(points, backend, metadata):
+def as_point_array(points, backend=None, metadata=None):
     """Coerce a Grid or raw array to a dense `(nPoints, dimension)` array.
 
     'Grid.to_array' already returns this shape, `(n, 1)` in 1D and `(n, 2)`
@@ -27,7 +27,12 @@ def _as_point_array(points, backend, metadata):
     if isinstance(points, (Grid, UniformGrid)):
         points = points.to_array()
 
-    array = backend.asarray(points, dtype=metadata.dtype, device=metadata.device)
+    if backend is None:
+        array = np.asarray(points)
+    else:
+        array = backend.asarray(
+            points, dtype=metadata.dtype, device=metadata.device
+        )
     if array.ndim == 1:
         return array.reshape((-1, 1))
     return array
@@ -74,8 +79,8 @@ class StationaryCovariance(CovarianceFunctionInterface):
             reference = reference.to_array()
         backend = infer_backend(reference)
         metadata = backend.metadata(reference)
-        xPoints = _as_point_array(x, backend, metadata)
-        yPoints = _as_point_array(y, backend, metadata)
+        xPoints = as_point_array(x, backend, metadata)
+        yPoints = as_point_array(y, backend, metadata)
         delta = xPoints[:, None, :] - yPoints[None, :, :]
         distances = backend.namespace.sqrt(
             backend.namespace.sum(delta * delta, axis=-1)
@@ -345,7 +350,7 @@ class MaternCovariance2D(StationaryCovariance):
         self._marginalVariance = marginalVariance
 
     def evaluate_covariance_gradient(self, x: np.ndarray, y: np.ndarray) -> dict:
-        distances = cdist(_as_point_array(x), _as_point_array(y))
+        distances = cdist(as_point_array(x), as_point_array(y))
         rhoGrad = matern_log_rho_gradient(
             distances.ravel(), self._lengthScale, self._smoothness,
             self._marginalVariance

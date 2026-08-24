@@ -7,7 +7,7 @@ from styne.model.representation.bspline import BSpline1D
 from styne.utility.grid import UniformGrid
 
 
-def _bound_expansions():
+def bound_expansions():
     anchorGrid = UniformGrid(0.0, 1.0, 5)
     evaluationGrid = UniformGrid(0.1, 0.9, 7)
     return (
@@ -19,7 +19,7 @@ def _bound_expansions():
     )
 
 
-@pytest.mark.parametrize("evaluation", _bound_expansions())
+@pytest.mark.parametrize("evaluation", bound_expansions())
 def test_jax_expansions_are_jittable_and_automatically_differentiable(
         evaluation):
     jax = pytest.importorskip("jax", reason="JAX is an optional backend")
@@ -46,7 +46,7 @@ def test_jax_expansions_are_jittable_and_automatically_differentiable(
     )
 
 
-@pytest.mark.parametrize("evaluation", _bound_expansions())
+@pytest.mark.parametrize("evaluation", bound_expansions())
 def test_pytorch_expansions_preserve_graph_and_use_automatic_derivatives(
         evaluation):
     torch = pytest.importorskip(

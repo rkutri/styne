@@ -16,7 +16,7 @@ from styne.statistics.stationary import MaternCovariance2D
 from styne.model.sglmm import SGLMM
 from styne.utility.grid import Grid
 
-def _compute_jacobian(model: SGLMM) -> np.ndarray:
+def compute_jacobian(model: SGLMM) -> np.ndarray:
     """Construct the full Jacobian matrix using directional derivatives."""
     latentDim = model._gp.parameter.dimension
     nParam = model.pDim
@@ -57,7 +57,7 @@ def _compute_jacobian(model: SGLMM) -> np.ndarray:
 # Shared helpers
 # ---------------------------------------------------------------------------
 
-def _make_sglmm_setup(resolution=3, alpha=1.0, ell=0.3, nu=1.5,
+def make_sglmm_setup(resolution=3, alpha=1.0, ell=0.3, nu=1.5,
                       margVar=1.0, noiseVar=0.05, nObs=15, seed=42):
     rng = default_rng(seed)
     covFcn = MaternCovariance2D(ell, nu, margVar)
@@ -68,7 +68,7 @@ def _make_sglmm_setup(resolution=3, alpha=1.0, ell=0.3, nu=1.5,
     obsSites = Grid(rng.uniform(0., alpha, (nObs, 2)))
     model = SGLMM(gp, obsSites)
     prior = gp.measure
-    J = _compute_jacobian(model)
+    J = compute_jacobian(model)
     zetaTrue = prior.generate_realisation()
     uTrue = J @ zetaTrue.coordinate
     y = noiseModel.simulate(uTrue, rng=rng).coordinate
@@ -83,7 +83,7 @@ def _make_sglmm_setup(resolution=3, alpha=1.0, ell=0.3, nu=1.5,
     )
 
 
-def _make_sglmm_fixed_effects_setup(p=2, resolution=3, alpha=1.0, ell=0.3,
+def make_sglmm_fixed_effects_setup(p=2, resolution=3, alpha=1.0, ell=0.3,
                                     nu=1.5, margVar=1.0, noiseVar=0.05,
                                     nObs=15, seed=42):
     rng = default_rng(seed)
@@ -96,7 +96,7 @@ def _make_sglmm_fixed_effects_setup(p=2, resolution=3, alpha=1.0, ell=0.3,
     X = rng.standard_normal((nObs, p))
     model = SGLMM(gp, obsSites, features=X)
     prior = gp.measure
-    J = _compute_jacobian(model)
+    J = compute_jacobian(model)
     latentDim = gp.parameter.dimension
     zetaTrue = prior.generate_realisation()
     betaTrue = rng.standard_normal(p)
@@ -122,7 +122,7 @@ def _make_sglmm_fixed_effects_setup(p=2, resolution=3, alpha=1.0, ell=0.3,
 class TestSGLMMForwardMap:
 
     def setup_method(self):
-        self.s = _make_sglmm_setup()
+        self.s = make_sglmm_setup()
 
     def test_jacobian_times_zeta_matches_model_evaluation(self):
         s = self.s
@@ -137,7 +137,7 @@ class TestSGLMMForwardMap:
 class TestSGLMMPosteriorGradient:
 
     def setup_method(self):
-        self.s = _make_sglmm_setup()
+        self.s = make_sglmm_setup()
 
     def test_gradient_matches_finite_differences(self):
         s = self.s
@@ -154,7 +154,7 @@ class TestSGLMMPosteriorGradient:
 class TestSGLMMPosteriorAccuracy:
 
     def setup_method(self):
-        self.s = _make_sglmm_setup()
+        self.s = make_sglmm_setup()
 
     def _build_prediction(self):
         s = self.s
@@ -176,7 +176,7 @@ class TestSGLMMPosteriorAccuracy:
         predSites = Grid(np.array([[px, py] for px in pCoords for py in pCoords]))
 
         predModel = SGLMM(s['gp'], predSites)
-        Jp = _compute_jacobian(predModel)
+        Jp = compute_jacobian(predModel)
 
         muDNA = Jp @ zetaPost
         stdDNA = np.sqrt(np.diag(Jp @ sigmaPost @ Jp.T))
@@ -211,7 +211,7 @@ class TestSGLMMPosteriorAccuracy:
 class TestSGLMMFixedEffectsStructure:
 
     def setup_method(self):
-        self.s = _make_sglmm_fixed_effects_setup(p=2)
+        self.s = make_sglmm_fixed_effects_setup(p=2)
 
     def test_ptype_is_block_parameter(self):
         assert self.s['model'].pType is BlockParameter
@@ -237,7 +237,7 @@ class TestSGLMMFixedEffectsStructure:
 class TestSGLMMFixedEffectsForwardMap:
 
     def setup_method(self):
-        self.s = _make_sglmm_fixed_effects_setup(p=2)
+        self.s = make_sglmm_fixed_effects_setup(p=2)
 
     def test_jacobian_times_full_param_matches_model_evaluation(self):
         s = self.s
@@ -252,7 +252,7 @@ class TestSGLMMFixedEffectsForwardMap:
 class TestSGLMMFixedEffectsLikelihoodGradient:
 
     def setup_method(self):
-        self.s = _make_sglmm_fixed_effects_setup(p=2)
+        self.s = make_sglmm_fixed_effects_setup(p=2)
 
     def test_gradient_matches_finite_differences(self):
         s = self.s

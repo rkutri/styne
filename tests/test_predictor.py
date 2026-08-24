@@ -23,7 +23,7 @@ def test_dna_out_of_sample_evaluation_batches_coordinates():
     assert prediction.shape == (5, 20)
 
 
-def _sglmm_with_features():
+def sglmm_with_features():
     grid = UniformGrid(0.0, 1.0, 30)
     gp = GaussianProcess.direct(
         grid, MaternCovariance1D(1.0, 1.5, 1.5)
@@ -32,7 +32,7 @@ def _sglmm_with_features():
 
 
 def test_sglmm_prediction_requires_out_of_sample_features():
-    gp, model = _sglmm_with_features()
+    gp, model = sglmm_with_features()
     state = model.prepare(BlockParameter([
         Vector(np.zeros(gp.parameterDimension)),
         Vector(np.zeros(2)),
@@ -44,7 +44,7 @@ def test_sglmm_prediction_requires_out_of_sample_features():
 
 
 def test_sglmm_prediction_validates_out_of_sample_feature_shape():
-    gp, model = _sglmm_with_features()
+    gp, model = sglmm_with_features()
     state = model.prepare(BlockParameter([
         Vector(np.zeros(gp.parameterDimension)),
         Vector(np.zeros(2)),
@@ -59,7 +59,7 @@ def test_sglmm_prediction_validates_out_of_sample_feature_shape():
 
 
 def test_sglmm_prediction_composes_latent_and_fixed_effects():
-    gp, model = _sglmm_with_features()
+    gp, model = sglmm_with_features()
     queryGrid = UniformGrid(0.0, 1.0, 8)
     queryFeatures = np.arange(16, dtype=float).reshape(8, 2)
     coefficient = np.linspace(-0.5, 0.8, gp.parameterDimension)

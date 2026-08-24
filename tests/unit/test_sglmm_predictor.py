@@ -5,7 +5,7 @@ from styne.gp.gaussianprocess import GaussianProcess
 from styne.statistics.stationary import MaternCovariance1D
 from styne.utility.grid import UniformGrid
 
-def _numerical_jacobian(f, x, epsilon=1e-6):
+def numerical_jacobian(f, x, epsilon=1e-6):
     n = len(x)
     m = len(f(x))
     J = np.zeros((m, n))

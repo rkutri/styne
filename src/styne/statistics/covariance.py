@@ -5,7 +5,7 @@ from styne.backend import BackendInferenceError, get_backend, infer_backend
 from styne.statistics.interface import CovarianceOperatorInterface
 
 
-def _backend_array(value):
+def backend_array(value):
     try:
         return infer_backend(value), value
     except BackendInferenceError:
@@ -13,7 +13,7 @@ def _backend_array(value):
         return backend, backend.asarray(value)
 
 
-def _scaling_array(backend, reference, scaling):
+def scaling_array(backend, reference, scaling):
     try:
         scalingBackend = infer_backend(scaling)
     except BackendInferenceError:
@@ -26,7 +26,7 @@ def _scaling_array(backend, reference, scaling):
     return scaling
 
 
-def _matrix_apply(matrix, vector):
+def matrix_apply(matrix, vector):
     return (matrix @ vector[..., None])[..., 0]
 
 
@@ -35,7 +35,7 @@ class CovarianceMatrix(CovarianceOperatorInterface):
 
     def __init__(self, backend, reference, scaling=1.0):
         self._backend = backend
-        self._scaling = _scaling_array(backend, reference, scaling)
+        self._scaling = scaling_array(backend, reference, scaling)
         if backend.name == "numpy" and np.any(self._scaling <= 0.0):
             raise ValueError(f"Scaling must be positive. Got {scaling}.")
 
@@ -81,7 +81,7 @@ class DiagonalCovarianceMatrix(CovarianceMatrix):
     """Covariance matrix of independent random variables."""
 
     def __init__(self, marginalVariance, scaling=1.0):
-        backend, marginalVariance = _backend_array(marginalVariance)
+        backend, marginalVariance = backend_array(marginalVariance)
         if marginalVariance.ndim != 1:
             raise ValueError("Marginal variances must be one-dimensional.")
         if backend.name == "numpy" and np.any(marginalVariance <= 0.0):
@@ -143,7 +143,7 @@ class IIDCovarianceMatrix(DiagonalCovarianceMatrix):
     """Covariance matrix with one marginal variance repeated by dimension."""
 
     def __init__(self, dimension, variance, scaling=1.0):
-        backend, variance = _backend_array(variance)
+        backend, variance = backend_array(variance)
         metadata = backend.metadata(variance)
         marginalVariance = backend.ones(
             dimension, dtype=metadata.dtype, device=metadata.device
@@ -160,7 +160,7 @@ class DenseCovarianceMatrix(CovarianceMatrix):
     """Dense symmetric positive-definite covariance matrix."""
 
     def __init__(self, denseCovMat, scaling=1.0):
-        backend, denseCovMat = _backend_array(denseCovMat)
+        backend, denseCovMat = backend_array(denseCovMat)
         if (
                 denseCovMat.ndim < 2
                 or denseCovMat.shape[-2] != denseCovMat.shape[-1]):
@@ -190,14 +190,14 @@ class DenseCovarianceMatrix(CovarianceMatrix):
 
     def apply_chol_factor(self, x):
         infer_backend(self._cholFactor, x)
-        return self._backend.namespace.sqrt(self.scaling) * _matrix_apply(
+        return self._backend.namespace.sqrt(self.scaling) * matrix_apply(
             self._cholFactor, x
         )
 
     def apply_chol_factor_transpose(self, x):
         infer_backend(self._cholFactor, x)
         transpose = self._backend.namespace.swapaxes(self._cholFactor, -1, -2)
-        return self._backend.namespace.sqrt(self.scaling) * _matrix_apply(
+        return self._backend.namespace.sqrt(self.scaling) * matrix_apply(
             transpose, x
         )
 
@@ -225,7 +225,7 @@ class DenseCovarianceMatrix(CovarianceMatrix):
 
     def apply(self, x):
         infer_backend(self._cholFactor, x)
-        return self.scaling * _matrix_apply(self.to_dense(), x)
+        return self.scaling * matrix_apply(self.to_dense(), x)
 
     def to_dense(self):
         transpose = self._backend.namespace.swapaxes(self._cholFactor, -1, -2)

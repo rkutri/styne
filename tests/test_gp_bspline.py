@@ -10,21 +10,21 @@ from styne.statistics.stationary import MaternCovariance1D, MaternCovariance2D
 
 # ---- helpers ----
 
-def _make_bsp1d(n=6):
+def make_bsp1d(n=6):
     return BSpline1D(n, degree=3, boundary=[0., 1.])
 
 
-def _make_bsp2d(nx=5, ny=5):
+def make_bsp2d(nx=5, ny=5):
     return BSpline2D(
         [nx, ny], degree=3, boundary=[[0., 1.], [0., 1.]]
     )
 
 
-def _cov1d(ell=0.3, nu=1.5, variance=0.7):
+def cov1d(ell=0.3, nu=1.5, variance=0.7):
     return MaternCovariance1D(ell, nu, variance)
 
 
-def _cov2d(ell=0.3, nu=1.5, variance=0.7):
+def cov2d(ell=0.3, nu=1.5, variance=0.7):
     return MaternCovariance2D(ell, nu, variance)
 
 
@@ -33,7 +33,7 @@ def _cov2d(ell=0.3, nu=1.5, variance=0.7):
 class TestBSplineExpansion1DAPI:
 
     def setup_method(self):
-        self.bsp = _make_bsp1d(n=6)
+        self.bsp = make_bsp1d(n=6)
     def test_dimension(self):
         assert self.bsp.dimension == 6
 
@@ -49,7 +49,7 @@ class TestBSplineExpansion1DAPI:
 class TestBSplineExpansion2DAPI:
 
     def test_dimension(self):
-        bsp = _make_bsp2d(nx=5, ny=4)
+        bsp = make_bsp2d(nx=5, ny=4)
         assert bsp.dimension == 20
 
 
@@ -59,8 +59,8 @@ class TestBSpline1DGPMeasure:
 
     def setup_method(self):
         self.grid = np.linspace(0., 1., 20)
-        self.bsp = _make_bsp1d(n=6)
-        self.gp = GaussianProcess.bspline(_cov1d(), self.bsp)
+        self.bsp = make_bsp1d(n=6)
+        self.gp = GaussianProcess.bspline(cov1d(), self.bsp)
 
     def test_measure_dimension(self):
         assert self.gp.measure.covariance.to_dense().shape == (6, 6)
@@ -78,8 +78,8 @@ class TestBSpline1DGPMeasure:
 class TestBSpline2DGPMeasure:
 
     def setup_method(self):
-        self.bsp2d = _make_bsp2d(nx=5, ny=5)
-        self.gp = GaussianProcess.bspline(_cov2d(), self.bsp2d)
+        self.bsp2d = make_bsp2d(nx=5, ny=5)
+        self.gp = GaussianProcess.bspline(cov2d(), self.bsp2d)
         self.dim = 25
 
     def test_measure_dimension(self):
@@ -102,8 +102,8 @@ class TestBSpline1DGPCorrectness:
     def setup_method(self):
         self.n = 6
         self.grid = np.linspace(0., 1., 20)
-        self.bsp = _make_bsp1d(n=self.n)
-        self.gp = GaussianProcess.bspline(_cov1d(), self.bsp)
+        self.bsp = make_bsp1d(n=self.n)
+        self.gp = GaussianProcess.bspline(cov1d(), self.bsp)
         self.nSamples = 1000
         self.rng = default_rng(7)
 
@@ -138,8 +138,8 @@ class TestBSpline2DGPCorrectness:
         self.nx = 5
         self.ny = 5
         self.dim = self.nx * self.ny
-        self.bsp2d = _make_bsp2d(nx=self.nx, ny=self.ny)
-        self.gp = GaussianProcess.bspline(_cov2d(), self.bsp2d)
+        self.bsp2d = make_bsp2d(nx=self.nx, ny=self.ny)
+        self.gp = GaussianProcess.bspline(cov2d(), self.bsp2d)
         self.nSamples = 1000
         self.rng = default_rng(13)
 

@@ -11,11 +11,11 @@ from styne.utility.grid import Grid, UniformGrid
 
 # ---- helpers ----
 
-def _cov1d():
+def cov1d():
     return MaternCovariance1D(0.3, 1.5, 1.0)
 
 
-def _cov2d():
+def cov2d():
     return MaternCovariance2D(0.3, 1.5, 1.0)
 
 
@@ -111,7 +111,7 @@ class TestDNAGaussianProcess1D:
 
     def setup_method(self):
         self.q = 5
-        self.covFcn = _cov1d()
+        self.covFcn = cov1d()
         self.gp = GaussianProcess.dna(self.covFcn, self.q, d=1)
 
     def test_build_expansion_type(self):
@@ -139,7 +139,7 @@ class TestDNAGaussianProcess2D:
 
     def setup_method(self):
         self.q = 4
-        self.covFcn = _cov2d()
+        self.covFcn = cov2d()
         self.gp = GaussianProcess.dna(self.covFcn, self.q, d=2)
 
     def test_build_expansion_type(self):
@@ -188,10 +188,10 @@ class TestDNAFourierGPSampler:
         np.testing.assert_allclose(result1, result2, rtol=1e-12)
 
     def test_gp_sampler_equivalence_1d(self):
-        self._check_equivalence(q=6, d=1, covFcn=_cov1d(), pts=self.pts1d)
+        self._check_equivalence(q=6, d=1, covFcn=cov1d(), pts=self.pts1d)
 
     def test_gp_sampler_equivalence_2d(self):
-        self._check_equivalence(q=5, d=2, covFcn=_cov2d(), pts=self.pts2d)
+        self._check_equivalence(q=5, d=2, covFcn=cov2d(), pts=self.pts2d)
 
 
 # ---- Spectral structure ----
@@ -261,14 +261,14 @@ class TestDNASpectralStructure:
         )
 
     def test_spectral_structure_1d(self):
-        gp = GaussianProcess.dna(_cov1d(), 10, 1)
+        gp = GaussianProcess.dna(cov1d(), 10, 1)
         cov, coefficients = self._sample_coefficients(
             gp, nSamples=5000)
         self._assert_spectral_variances(cov, coefficients)
         self._assert_independence(cov, coefficients)
 
     def test_spectral_structure_2d(self):
-        gp = GaussianProcess.dna(_cov2d(), 7, 2)
+        gp = GaussianProcess.dna(cov2d(), 7, 2)
         cov, coefficients = self._sample_coefficients(
             gp, nSamples=4000)
         self._assert_spectral_variances(cov, coefficients)
@@ -283,7 +283,7 @@ class TestDNAIsotropy2D:
         q = 10
         nSamples = 2000
         rng = default_rng(42)
-        gp = GaussianProcess.dna(_cov2d(), q=q, d=2)
+        gp = GaussianProcess.dna(cov2d(), q=q, d=2)
 
         xs = np.linspace(0.1, 0.9, 10)
         ys = np.linspace(0.1, 0.9, 10)
@@ -301,7 +301,7 @@ class TestDNAIsotropy2D:
         q = 10
         nSamples = 2000
         rng = default_rng(43)
-        gp = GaussianProcess.dna(_cov2d(), q=q, d=2)
+        gp = GaussianProcess.dna(cov2d(), q=q, d=2)
 
         xs = np.linspace(0.2, 0.8, 6)
         ys = np.linspace(0.2, 0.8, 6)

@@ -3,7 +3,7 @@ import numpy as np
 from styne.backend import BackendInferenceError, infer_backend
 
 
-def _as_array(value):
+def as_array(value):
     """Preserve registered backend arrays; convert Python values to NumPy."""
     try:
         infer_backend(value)
@@ -27,7 +27,7 @@ class Data:
 
     def __init__(self, dimension: int, design):
         self._dimension = int(dimension)
-        self._design = _as_array(design)
+        self._design = as_array(design)
         self._measurement = None
 
     @property
@@ -45,7 +45,7 @@ class Data:
     @measurement.setter
     def measurement(self, measurement) -> None:
 
-        m = _as_array(measurement)
+        m = as_array(measurement)
         if m.ndim == 1:
             m = m.reshape(1, -1)
 

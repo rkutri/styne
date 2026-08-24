@@ -177,7 +177,7 @@ def test_density_and_manual_gradient_reference_values():
     )
 
 
-def _reduced_quickstart():
+def reduced_quickstart():
     features = np.array([[1.0, 0.0], [1.0, 0.5], [1.0, 1.0]])
     data = Data(1, np.array([[0.0], [0.5], [1.0]]))
     data.measurement = np.array([[0.2], [1.1], [1.7]])
@@ -192,7 +192,7 @@ def _reduced_quickstart():
 
 
 def test_reduced_quickstart_density_and_gradient_output():
-    posterior, parameter = _reduced_quickstart()
+    posterior, parameter = reduced_quickstart()
     assert np.isclose(posterior.evaluate_log(parameter), -0.6675)
     np.testing.assert_allclose(
         posterior.evaluate_log_gradient(parameter), [1.45, 0.175],

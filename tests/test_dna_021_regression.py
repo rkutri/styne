@@ -7,14 +7,14 @@ from styne.gp.gaussianprocess import GaussianProcess
 from styne.gp.dnautility import BC, BoundaryCondition
 from styne.statistics.stationary import MaternCovariance1D
 from tests.reference_oracles import (
-    _axis_synthesis_matrix,
+    axis_synthesis_matrix,
     compute_log_length_multiplier,
     dna_adjoint_synthesis,
     dna_synthesis_matrix,
 )
 
 
-def _boundary(*conditions):
+def boundary(*conditions):
     return BoundaryCondition(list(conditions))
 
 
@@ -22,10 +22,10 @@ def _boundary(*conditions):
 @pytest.mark.parametrize("condition", [BC.NEUMANN, BC.DIRICHLET])
 def test_1d_component_matches_021_type_one_transform(q, condition):
     """Pin the 0.2.1 DCT-I/DST-I extension and normalization exactly."""
-    expansion = DNAFourierComponentExpansion(_boundary(condition), q)
+    expansion = DNAFourierComponentExpansion(boundary(condition), q)
     coefficient = np.linspace(-0.7, 1.1, expansion.dimension)
 
-    expected = _axis_synthesis_matrix(q, condition) @ coefficient
+    expected = axis_synthesis_matrix(q, condition) @ coefficient
     np.testing.assert_allclose(
         expansion.evaluate_native(coefficient), expected,
         rtol=2e-14, atol=2e-14,
@@ -35,7 +35,7 @@ def test_1d_component_matches_021_type_one_transform(q, condition):
 def test_neumann_padding_preserves_type_one_endpoint_values():
     """The last padded coefficient is zero; a DCT-II gives different ends."""
     q = 5
-    expansion = DNAFourierComponentExpansion(_boundary(BC.NEUMANN), q)
+    expansion = DNAFourierComponentExpansion(boundary(BC.NEUMANN), q)
     coefficient = np.zeros(q + 1)
     coefficient[-1] = 1.0
 
@@ -49,14 +49,14 @@ def test_neumann_padding_preserves_type_one_endpoint_values():
 
 def test_dirichlet_padding_restores_zero_boundary_values():
     q = 5
-    expansion = DNAFourierComponentExpansion(_boundary(BC.DIRICHLET), q)
+    expansion = DNAFourierComponentExpansion(boundary(BC.DIRICHLET), q)
     coefficient = np.linspace(0.2, 1.0, q)
     value = expansion.evaluate_native(coefficient)
 
     assert value.shape == (q + 2,)
     np.testing.assert_array_equal(value[[0, -1]], 0.0)
     np.testing.assert_allclose(
-        value, _axis_synthesis_matrix(q, BC.DIRICHLET) @ coefficient,
+        value, axis_synthesis_matrix(q, BC.DIRICHLET) @ coefficient,
         rtol=2e-14, atol=2e-14,
     )
 
@@ -72,11 +72,11 @@ def test_dirichlet_padding_restores_zero_boundary_values():
 )
 def test_rectangular_2d_components_match_021_tensor_product(conditions):
     q = (2, 4)
-    expansion = DNAFourierComponentExpansion(_boundary(*conditions), q)
+    expansion = DNAFourierComponentExpansion(boundary(*conditions), q)
     coefficient = np.linspace(-0.4, 0.9, expansion.dimension)
     basis = np.kron(
-        _axis_synthesis_matrix(q[0], conditions[0]),
-        _axis_synthesis_matrix(q[1], conditions[1]),
+        axis_synthesis_matrix(q[0], conditions[0]),
+        axis_synthesis_matrix(q[1], conditions[1]),
     )
 
     np.testing.assert_allclose(

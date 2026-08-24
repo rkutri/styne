@@ -20,7 +20,7 @@ from styne.parameter import (  # noqa: E402
 )
 
 
-class _StaticExpansion(Expansion):
+class StaticExpansion(Expansion):
 
     @property
     def dimension(self):
@@ -257,7 +257,7 @@ def test_jax_capabilities_are_explicit():
 
 
 def test_jax_parameter_containers_transform_as_pytrees():
-    expansion = _StaticExpansion()
+    expansion = StaticExpansion()
     parameter = BlockParameter(
         [
             Vector(jnp.array([

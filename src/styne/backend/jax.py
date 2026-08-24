@@ -11,7 +11,7 @@ from styne.backend.interface import (
 )
 
 
-def _register_parameter_containers():
+def register_parameter_containers():
     """Register Styne's public parameters as JAX pytrees."""
     from styne.parameter.block import BlockParameter
     from styne.parameter.function import Function
@@ -156,7 +156,7 @@ class JAXBackend(Backend):
 
     def __init__(self):
         if not type(self)._parameterContainersRegistered:
-            _register_parameter_containers()
+            register_parameter_containers()
             type(self)._parameterContainersRegistered = True
 
     @property

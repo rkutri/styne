@@ -3,7 +3,7 @@ from __future__ import annotations
 import numpy as np
 
 from styne.backend import infer_backend
-from styne.parameter.parameter import Parameter, _as_coordinate
+from styne.parameter.parameter import Parameter, as_coordinate
 
 
 class BlockParameter(Parameter):
@@ -76,7 +76,7 @@ class BlockParameter(Parameter):
         )
 
     def with_coordinate(self, coordinate) -> BlockParameter:
-        coordinate = _as_coordinate(coordinate)
+        coordinate = as_coordinate(coordinate)
         if coordinate.shape[-1] != self.dimension:
             raise ValueError(
                 "BlockParameter coordinate must have trailing dimension "
