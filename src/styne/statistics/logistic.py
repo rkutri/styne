@@ -11,8 +11,9 @@ algorithms are fast!', JMLR, and is exact for this label convention.
 """
 
 import numpy as np
-from scipy.special import expit
 
+from styne.backend import infer_backend
+from styne.model.representation.expansion import backend_constant
 from styne.parameter.vector import Vector
 from styne.statistics.interface import DensityInterface
 from styne.statistics.stationary import MaternCovariance1D
@@ -74,20 +75,32 @@ class LogisticPosterior(DensityInterface):
     def domainDimension(self) -> int:
         return self._d
 
-    def evaluate_log(self, beta: Vector) -> float:
+    def evaluate_log(self, beta: Vector):
         b = beta.coordinate
-        linPred = self._X @ b
+        backend = infer_backend(b)
+        namespace = backend.namespace
+        features = backend_constant(self._X, b)
+        labels = backend_constant(self._y, b)
+        linPred = b @ features.T
 
-        logLik = float(np.sum(self._y * linPred - np.logaddexp(0., linPred)))
-        logPrior = -0.5 * self._lambda * float(np.dot(b, b))
+        logLik = namespace.sum(
+            labels * linPred - namespace.logaddexp(0., linPred),
+            axis=-1,
+        )
+        logPrior = -0.5 * self._lambda * namespace.sum(
+            b * b, axis=-1
+        )
 
         return logLik + logPrior
 
-    def evaluate_log_gradient(self, beta: Vector) -> np.ndarray:
+    def evaluate_log_gradient(self, beta: Vector):
         b = beta.coordinate
-        linPred = self._X @ b
+        backend = infer_backend(b)
+        features = backend_constant(self._X, b)
+        labels = backend_constant(self._y, b)
+        linPred = b @ features.T
 
-        gradLogLik = self._X.T @ (self._y - expit(linPred))
+        gradLogLik = (labels - backend.namespace.sigmoid(linPred)) @ features
         gradLogPrior = -self._lambda * b
 
         return gradLogLik + gradLogPrior

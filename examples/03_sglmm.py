@@ -75,6 +75,7 @@ posterior = UnnormalisedPosterior(prior, likelihood)
 factory = MALAFactory()
 factory.target = posterior
 factory.stepSize = 0.08
+factory.gradient = posterior.evaluate_log_gradient
 factory.rng = rng
 
 sampler = factory.create()

@@ -150,8 +150,10 @@ class MetropolisHastings(MCMCSampler):
         logAcceptanceProbability = self._acceptance.log_probability(logMHRatio)
         backend = infer_backend(currentState.parameter.coordinate)
         metadata = backend.metadata(currentState.parameter.coordinate)
+        batchShape = currentState.parameter.coordinate.shape[:-1]
         acceptanceUniform, nextRng = backend.uniform(
-            proposalRng, (), dtype=metadata.dtype, device=metadata.device
+            proposalRng, batchShape,
+            dtype=metadata.dtype, device=metadata.device,
         )
         outcome = backend.namespace.log(acceptanceUniform) \
             <= logAcceptanceProbability
@@ -162,8 +164,14 @@ class MetropolisHastings(MCMCSampler):
             logAcceptanceProbability=logAcceptanceProbability,
             auxiliary=proposedTransition.auxiliary,
         )
+        coordinateOutcome = outcome
+        while coordinateOutcome.ndim \
+                < proposedState.parameter.coordinate.ndim:
+            coordinateOutcome = backend.namespace.expand_dims(
+                coordinateOutcome, axis=-1
+            )
         nextCoordinate = backend.namespace.where(
-            outcome,
+            coordinateOutcome,
             proposedState.parameter.coordinate,
             currentState.parameter.coordinate,
         )

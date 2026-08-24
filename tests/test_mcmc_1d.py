@@ -192,8 +192,8 @@ def test_metropolis_within_gibbs():
     assert len(gibbs.chain.block(0).trajectory) == nSteps + 1
 
 
-def test_metropolis_within_gibbs_chain_continuity():
-    """Inner sampler accumulates nSteps per sweep, not resetting between sweeps."""
+def test_metropolis_within_gibbs_does_not_mutate_template_sampler():
+    """Each conditioned inner sampler is isolated from the template."""
     from styne.model.trend import ConstantTrend
     from styne.model.sglmm import SGLMM
     from styne.statistics.likelihood import SGLMMLikelihood
@@ -243,12 +243,7 @@ def test_metropolis_within_gibbs_chain_continuity():
     initState = BlockParameter([latentInit])
     gibbs.run(nGibbsSweeps, initState)
 
-    # Inner chain must accumulate: 1 initial + nGibbsSweeps * nStepsPerSweep
-    expected_inner_len = 1 + nGibbsSweeps * nStepsPerSweep
-    assert len(mcmc.chain.trajectory) == expected_inner_len, (
-        f"Expected inner chain length {expected_inner_len}, "
-        f"got {len(mcmc.chain.trajectory)}"
-    )
+    assert len(mcmc.chain.trajectory) == 0
 
 
 

@@ -11,6 +11,7 @@ Covers:
 import numpy as np
 import pytest
 
+from styne.backend import infer_backend
 from styne.mcmc.method.gibbs import BlockGibbs, GibbsBuilder
 from styne.statistics.bayes import HierarchicalBayes, HierarchicalBayesModelBuilder
 from styne.statistics.measure import ConditionalMeasure
@@ -56,6 +57,35 @@ class CorrelatedGaussianConditional(ConditionalMeasure):
 
     def draw(self, rng):
         return self._gaussian.draw(rng)
+
+
+class BackendConditional(ConditionalMeasure):
+    """Test conditional that samples on the state array's backend."""
+
+    def __init__(self, blockIdx):
+        self._blockIdx = blockIdx
+        self._state = None
+
+    @property
+    def blockDimension(self):
+        return 1
+
+    @property
+    def density(self):
+        raise NotImplementedError
+
+    def condition_on(self, state):
+        self._state = state
+
+    def sample(self, randomState):
+        coordinate = self._state.block(self._blockIdx).coordinate
+        backend = infer_backend(coordinate)
+        metadata = backend.metadata(coordinate)
+        noise, nextRng = backend.normal(
+            randomState, coordinate.shape,
+            dtype=metadata.dtype, device=metadata.device,
+        )
+        return Vector(coordinate + noise), nextRng
 
 
 def make_model(rho: float) -> HierarchicalBayes:
@@ -107,6 +137,68 @@ class TestBlockGibbsStructure:
         sampler = builder.build()
         sampler.run(10, make_init())
         assert sampler.chain.length == 11
+
+    def test_step_does_not_condition_model_templates(self):
+        templates = [BackendConditional(0), BackendConditional(1)]
+
+        class Model:
+            nBlocks = 2
+
+            @staticmethod
+            def conditional(index, state):
+                return templates[index].condition(state)
+
+        sampler = BlockGibbs(Model())
+        nextState, _, _ = sampler.step(make_init(), np.random.default_rng(3))
+
+        assert all(template._state is None for template in templates)
+        assert isinstance(nextState, BlockParameter)
+
+    def test_step_preserves_jax_blocks_and_random_state(self):
+        jax = pytest.importorskip("jax")
+        jnp = pytest.importorskip("jax.numpy")
+        templates = [BackendConditional(0), BackendConditional(1)]
+
+        class Model:
+            nBlocks = 2
+
+            @staticmethod
+            def conditional(index, state):
+                return templates[index].condition(state)
+
+        sampler = BlockGibbs(Model())
+        initialState = BlockParameter([
+            Vector(jnp.zeros(1)), Vector(jnp.zeros(1)),
+        ])
+
+        nextState, _, nextRng = sampler.step(initialState, jax.random.key(2))
+
+        assert isinstance(nextState.block(0).coordinate, jax.Array)
+        assert isinstance(nextState.block(1).coordinate, jax.Array)
+        assert isinstance(nextRng, jax.Array)
+
+    def test_step_preserves_pytorch_blocks(self):
+        torch = pytest.importorskip("torch")
+        templates = [BackendConditional(0), BackendConditional(1)]
+
+        class Model:
+            nBlocks = 2
+
+            @staticmethod
+            def conditional(index, state):
+                return templates[index].condition(state)
+
+        sampler = BlockGibbs(Model())
+        initialState = BlockParameter([
+            Vector(torch.zeros(1)), Vector(torch.zeros(1)),
+        ])
+
+        nextState, _, _ = sampler.step(
+            initialState, torch.Generator().manual_seed(2)
+        )
+
+        assert isinstance(nextState.block(0).coordinate, torch.Tensor)
+        assert isinstance(nextState.block(1).coordinate, torch.Tensor)
 
 
 # ---------------------------------------------------------------------------

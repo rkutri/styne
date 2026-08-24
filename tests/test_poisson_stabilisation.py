@@ -102,8 +102,7 @@ def test_poisson_score_limits():
 
 
 
-def test_pmala_drift_non_finite_fallback():
-    """Verify PMALA proposal falls back to pCN drift when gradient is non-finite."""
+def test_pmala_drift_preserves_non_finite_gradient():
     refCovariance = IIDCovarianceMatrix(2, 1.0)
     refMean = Vector(np.zeros(2))
     priorVal = Gaussian(refCovariance, refMean)
@@ -114,15 +113,12 @@ def test_pmala_drift_non_finite_fallback():
     targetVal = RadonNikodym(priorVal, derivVal)
 
     betaVal = 0.5
-    proposalVal = PMALAProposal(targetVal, betaVal)
+    proposalVal = PMALAProposal(
+        targetVal, betaVal, derivVal.evaluate_log_gradient
+    )
     stateVal = Vector(np.array([2.0, 3.0]))
 
     # Compute proposal drift
     computedDrift = proposalVal._drift(stateVal)
 
-    # Expected drift is pCN drift since gradient is non-finite: m + sqrt(1 - beta^2) * (x - m)
-    expectedDrift = refMean.coordinate + np.sqrt(1.0 - betaVal**2) * (
-        stateVal.coordinate - refMean.coordinate
-    )
-
-    assert np.allclose(computedDrift, expectedDrift)
+    assert not np.all(np.isfinite(computedDrift))

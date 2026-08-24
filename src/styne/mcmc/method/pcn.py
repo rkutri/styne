@@ -1,7 +1,7 @@
-from numpy import sqrt
 from typing import Optional
 from numpy.random import Generator
 
+from styne.backend import infer_backend
 from styne.mcmc.metropolishastings import MetropolisHastings
 from styne.mcmc.acceptance import AcceptanceProbability
 from styne.mcmc.transition import TransitionData
@@ -62,18 +62,22 @@ class PCNProposal(ProposalMethod):
         return self._beta
 
     def propose(self, state: Parameter, rng):
-        x = state.coordinate
-        xi, nextRng = self._refMeasure.sample(rng)
-        xi = xi.coordinate
-        m = self._refMeasure.mean.coordinate
-
-        xCentred = x - m
-        xiCentred = xi - m
-
-        zCentred = sqrt(1. - self._beta**2) * xCentred \
-            + self._beta * xiCentred
-
-        proposal = state.with_coordinate(m + zCentred)
+        coordinate = state.coordinate
+        backend = infer_backend(coordinate)
+        metadata = backend.metadata(coordinate)
+        noise, nextRng = backend.normal(
+            rng, coordinate.shape,
+            dtype=metadata.dtype, device=metadata.device,
+        )
+        mean = self._refMeasure.mean.coordinate
+        priorNoise = self._refMeasure.covariance.apply_chol_factor(noise)
+        persistence = backend.namespace.sqrt(backend.asarray(
+            1. - self._beta ** 2,
+            dtype=metadata.dtype, device=metadata.device,
+        ))
+        proposal = state.with_coordinate(
+            mean + persistence * (coordinate - mean) + self._beta * priorNoise
+        )
 
         return TransitionData(state, proposal), nextRng
 

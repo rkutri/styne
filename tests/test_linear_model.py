@@ -22,7 +22,12 @@ def test_linear_forward_map_prepare_evaluate():
         rtol=0.0, atol=1e-12,
     )
 
-    assert not isinstance(model, DifferentiableModel)
+    assert isinstance(model, DifferentiableModel)
+    cotangent = np.array([0.5, -1.0, 2.0])
+    np.testing.assert_allclose(
+        model.adjoint_derivative(parameter, cotangent),
+        cotangent @ features,
+    )
 
 
 def test_linear_forward_map_rejects_non_2d_features():

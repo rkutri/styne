@@ -73,12 +73,15 @@ class TestPMALASetup:
         with pytest.raises(TypeError):
             PreconditionedMALA(density, 0.5, AcceptanceRateDiagnostics())
 
-    def test_rejects_non_differentiable_derivative(self):
+    def test_numpy_requires_explicit_gradient(self):
         refCov = IIDCovarianceMatrix(2, 1.0)
         prior = Gaussian(refCov, Vector(np.zeros(2)))
         target = RadonNikodym(prior, NonDifferentiableDensity())
+
         with pytest.raises(ValueError):
-            PreconditionedMALA(target, 0.5, AcceptanceRateDiagnostics())
+            PreconditionedMALA(
+                target, 0.5, AcceptanceRateDiagnostics()
+            )
 
     def test_rejects_beta_zero(self):
         with pytest.raises(ValueError):
@@ -122,10 +125,20 @@ class TestPMALASetup:
 
     def test_factory_creates_correctly(self):
         factory = PMALAFactory()
-        factory.target = make_valid_target()
+        target = make_valid_target()
+        factory.target = target
         factory.beta = 0.5
+        factory.gradient = target.derivative.evaluate_log_gradient
         sampler = factory.create()
         assert isinstance(sampler, PreconditionedMALA)
+
+    def test_factory_gradient_round_trip(self):
+        factory = PMALAFactory()
+        gradient = make_valid_target().derivative.evaluate_log_gradient
+
+        factory.gradient = gradient
+
+        assert factory.gradient is gradient
 
 
 # ---------------------------------------------------------------------------
@@ -153,7 +166,9 @@ class TestPMALAProposalStep:
         likMean = Vector(np.ones(self.DIM))
         deriv = GaussianDensity(likCov, likMean)
         self.target = RadonNikodym(prior, deriv)
-        self.proposal = PMALAProposal(self.target, self.BETA)
+        self.proposal = PMALAProposal(
+            self.target, self.BETA, deriv.evaluate_log_gradient
+        )
         self.state = Vector(self.STATE_COORD.copy())
 
         gradLogPsi = np.array([1., 1.]) - np.array([2., 3.])  # [-1, -2]
@@ -183,6 +198,82 @@ class TestPMALAProposalStep:
         sampleCov = np.cov(proposals, rowvar=False)
         expected = self.BETA**2 * np.eye(self.DIM)
         assert np.allclose(sampleCov, expected, atol=0.05)
+
+    def test_drift_compiles_with_jax_autodiff(self):
+        jax = pytest.importorskip("jax")
+        jnp = pytest.importorskip("jax.numpy")
+
+        prior = Gaussian(
+            IIDCovarianceMatrix(self.DIM, jnp.array(1.)),
+            Vector(jnp.zeros(self.DIM)),
+        )
+        derivative = GaussianDensity(
+            IIDCovarianceMatrix(self.DIM, jnp.array(1.)),
+            Vector(jnp.ones(self.DIM)),
+        )
+        proposal = PMALAProposal(
+            RadonNikodym(prior, derivative), self.BETA
+        )
+        compiled = jax.jit(
+            lambda coordinate: proposal._drift(Vector(coordinate))
+        )
+
+        drift = compiled(jnp.array(self.STATE_COORD))
+
+        np.testing.assert_allclose(drift, self.expectedDrift)
+
+    def test_drift_compiles_with_pytorch_autodiff(self):
+        torch = pytest.importorskip("torch")
+        from styne.backend import get_backend
+
+        backend = get_backend("pytorch")
+        prior = Gaussian(
+            IIDCovarianceMatrix(self.DIM, torch.tensor(1.)),
+            Vector(torch.zeros(self.DIM)),
+        )
+        derivative = GaussianDensity(
+            IIDCovarianceMatrix(self.DIM, torch.tensor(1.)),
+            Vector(torch.ones(self.DIM)),
+        )
+        proposal = PMALAProposal(
+            RadonNikodym(prior, derivative), self.BETA
+        )
+        compiled = backend.compile(
+            lambda coordinate: proposal._drift(Vector(coordinate)),
+            backend="eager",
+            fullgraph=True,
+        )
+
+        drift = compiled(torch.tensor(self.STATE_COORD))
+
+        torch.testing.assert_close(
+            drift, torch.tensor(self.expectedDrift)
+        )
+
+    def test_drift_retains_pytorch_gradient_connectivity(self):
+        torch = pytest.importorskip("torch")
+
+        prior = Gaussian(
+            IIDCovarianceMatrix(self.DIM, torch.tensor(1.)),
+            Vector(torch.zeros(self.DIM)),
+        )
+        derivative = GaussianDensity(
+            IIDCovarianceMatrix(self.DIM, torch.tensor(1.)),
+            Vector(torch.ones(self.DIM)),
+        )
+        proposal = PMALAProposal(
+            RadonNikodym(prior, derivative), self.BETA
+        )
+        coordinate = torch.tensor(self.STATE_COORD, requires_grad=True)
+
+        drift = proposal._drift(Vector(coordinate))
+        gradient, = torch.autograd.grad(drift.sum(), coordinate)
+
+        expected = np.sqrt(1. - self.BETA ** 2) - 0.5 * self.BETA ** 2
+        torch.testing.assert_close(
+            gradient,
+            torch.full((self.DIM,), expected, dtype=coordinate.dtype),
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -228,6 +319,7 @@ class TestPMALAInvariantMeasure:
         factory = PMALAFactory()
         factory.target = target
         factory.beta = self.BETA
+        factory.gradient = deriv.evaluate_log_gradient
         sampler = factory.create()
         sampler.run(self.N_STEPS, Vector(np.zeros(self.DIM)))
 
@@ -267,6 +359,7 @@ class TestPMALATuner:
     def test_tuner_returns_preconditioned_mala(self):
         factory = PMALAFactory()
         factory.target = self.target
+        factory.gradient = self.target.derivative.evaluate_log_gradient
         init = Vector(np.zeros(self.DIM))
         tuner = PMALATuner(factory, init)
         sampler = tuner.tune()
@@ -275,6 +368,7 @@ class TestPMALATuner:
     def test_tuned_acceptance_rate_in_range(self):
         factory = PMALAFactory()
         factory.target = self.target
+        factory.gradient = self.target.derivative.evaluate_log_gradient
         init = Vector(np.zeros(self.DIM))
         tuner = PMALATuner(factory, init)
         sampler = tuner.tune()

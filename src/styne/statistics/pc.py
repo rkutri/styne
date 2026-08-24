@@ -1,3 +1,5 @@
+from math import log
+
 from styne.backend import infer_backend
 from styne.statistics.interface import DensityInterface
 from styne.parameter.parameter import Parameter
@@ -43,11 +45,26 @@ class MaternRangePCPrior(DensityInterface):
         -------
         float
         """
-        rho = parameter.coordinate.reshape((-1,))[0]
-        backend = infer_backend(rho)
-        ns = backend.namespace
-        value = ns.log(self._rateParam) - 2. * ns.log(rho) - self._rateParam / rho
-        return ns.where(rho > 0, value, backend.asarray(float("-inf"), dtype=backend.metadata(rho).dtype, device=backend.metadata(rho).device))
+        coordinate = parameter.coordinate
+        rho = coordinate[..., 0]
+        backend = infer_backend(coordinate)
+        namespace = backend.namespace
+        metadata = backend.metadata(coordinate)
+        rate = backend.asarray(
+            self._rateParam,
+            dtype=metadata.dtype,
+            device=metadata.device,
+        )
+        one = backend.ones(
+            rho.shape, dtype=metadata.dtype, device=metadata.device
+        )
+        safeRho = namespace.where(rho > 0, rho, one)
+        value = namespace.log(rate) - 2. * namespace.log(safeRho) \
+            - rate / safeRho
+        negativeInfinity = backend.asarray(
+            float("-inf"), dtype=metadata.dtype, device=metadata.device
+        )
+        return namespace.where(rho > 0, value, negativeInfinity)
 
 
 class MaternSigmaPCPrior(DensityInterface):
@@ -90,11 +107,21 @@ class MaternSigmaPCPrior(DensityInterface):
         -------
         float
         """
-        sigma = parameter.coordinate.reshape((-1,))[0]
-        backend = infer_backend(sigma)
-        ns = backend.namespace
-        value = ns.log(self._rateParam) - self._rateParam * sigma
-        return ns.where(sigma >= 0, value, backend.asarray(float("-inf"), dtype=backend.metadata(sigma).dtype, device=backend.metadata(sigma).device))
+        coordinate = parameter.coordinate
+        sigma = coordinate[..., 0]
+        backend = infer_backend(coordinate)
+        namespace = backend.namespace
+        metadata = backend.metadata(coordinate)
+        rate = backend.asarray(
+            self._rateParam,
+            dtype=metadata.dtype,
+            device=metadata.device,
+        )
+        value = namespace.log(rate) - rate * sigma
+        negativeInfinity = backend.asarray(
+            float("-inf"), dtype=metadata.dtype, device=metadata.device
+        )
+        return namespace.where(sigma >= 0, value, negativeInfinity)
 
 
 class JointMaternPCPrior(DensityInterface):
@@ -141,28 +168,64 @@ class JointMaternPCPrior(DensityInterface):
         -------
         float
         """
-        coord = parameter.coordinate.reshape((-1,))
-        rho, sigma = coord[0], coord[1]
-        backend = infer_backend(coord)
-        ns = backend.namespace
-        logRho = ns.log(self._rhoPrior._rateParam) - 2. * ns.log(rho) - self._rhoPrior._rateParam / rho
-        logSigma = ns.log(self._sigmaPrior._rateParam) - self._sigmaPrior._rateParam * sigma
+        coordinate = parameter.coordinate
+        rho, sigma = coordinate[..., 0], coordinate[..., 1]
+        backend = infer_backend(coordinate)
+        namespace = backend.namespace
+        metadata = backend.metadata(coordinate)
+        rhoRate = backend.asarray(
+            self._rhoPrior._rateParam,
+            dtype=metadata.dtype,
+            device=metadata.device,
+        )
+        sigmaRate = backend.asarray(
+            self._sigmaPrior._rateParam,
+            dtype=metadata.dtype,
+            device=metadata.device,
+        )
+        one = backend.ones(
+            rho.shape, dtype=metadata.dtype, device=metadata.device
+        )
+        safeRho = namespace.where(rho > 0, rho, one)
+        logRho = namespace.log(rhoRate) - 2. * namespace.log(safeRho) \
+            - rhoRate / safeRho
+        logSigma = namespace.log(sigmaRate) - sigmaRate * sigma
         value = logRho + logSigma
         invalid = (rho <= 0) | (sigma < 0)
-        return ns.where(invalid, backend.asarray(float("-inf"), dtype=backend.metadata(coord).dtype, device=backend.metadata(coord).device), value)
+        negativeInfinity = backend.asarray(
+            float("-inf"), dtype=metadata.dtype, device=metadata.device
+        )
+        return namespace.where(invalid, negativeInfinity, value)
 
     def evaluate_log_gradient(self, parameter: Parameter):
         """Gradient of log-prior with respect to [rho, sigma]."""
-        coord = parameter.coordinate.reshape((-1,))
-        rho, sigma = coord[0], coord[1]
-
-        if rho <= 0 or sigma < 0:
-            backend = infer_backend(coord)
-            metadata = backend.metadata(coord)
-            return backend.zeros((2,), dtype=metadata.dtype, device=metadata.device)
-
-        gradRho = -2.0 / rho + self._rhoPrior._rateParam / rho**2
-        gradSigma = -self._sigmaPrior._rateParam
-
-        backend = infer_backend(coord)
-        return backend.namespace.stack([gradRho, gradSigma])
+        coordinate = parameter.coordinate
+        rho, sigma = coordinate[..., 0], coordinate[..., 1]
+        backend = infer_backend(coordinate)
+        namespace = backend.namespace
+        metadata = backend.metadata(coordinate)
+        rhoRate = backend.asarray(
+            self._rhoPrior._rateParam,
+            dtype=metadata.dtype,
+            device=metadata.device,
+        )
+        sigmaRate = backend.asarray(
+            self._sigmaPrior._rateParam,
+            dtype=metadata.dtype,
+            device=metadata.device,
+        )
+        one = backend.ones(
+            rho.shape, dtype=metadata.dtype, device=metadata.device
+        )
+        safeRho = namespace.where(rho > 0, rho, one)
+        gradRho = -2.0 / safeRho + rhoRate / safeRho**2
+        gradSigma = backend.ones(
+            rho.shape, dtype=metadata.dtype, device=metadata.device
+        ) * -sigmaRate
+        gradient = namespace.stack([gradRho, gradSigma], axis=-1)
+        invalid = (rho <= 0) | (sigma < 0)
+        invalid = namespace.expand_dims(invalid, axis=-1)
+        zeros = backend.zeros(
+            gradient.shape, dtype=metadata.dtype, device=metadata.device
+        )
+        return namespace.where(invalid, zeros, gradient)

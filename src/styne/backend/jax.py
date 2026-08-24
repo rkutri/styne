@@ -48,12 +48,21 @@ def register_parameter_containers():
             list(children), dict(names)
         ),
     )
-    from styne.mcmc.transition import EvaluatedState, TransitionData
+    from styne.mcmc.transition import (
+        EvaluatedState, RobbinsMonroState, TransitionData,
+    )
 
     jax.tree_util.register_pytree_node(
         EvaluatedState,
         lambda state: ((state.parameter, state.logDensity), None),
         lambda metadata, children: EvaluatedState(*children),
+    )
+    jax.tree_util.register_pytree_node(
+        RobbinsMonroState,
+        lambda state: (
+            (state.evaluatedState, state.logVariance, state.stepCount), None
+        ),
+        lambda metadata, children: RobbinsMonroState(*children),
     )
     jax.tree_util.register_pytree_node(
         TransitionData,

@@ -38,3 +38,13 @@ class LinearForwardMap(ForwardMap):
     def _evaluate(self, preparedState):
         features = backend_constant(self._features, preparedState)
         return preparedState @ features.T
+
+    def directional_derivative(self, parameter, direction):
+        features = backend_constant(
+            self._features, direction.coordinate
+        )
+        return direction.coordinate @ features.T
+
+    def adjoint_derivative(self, parameter, cotangent):
+        features = backend_constant(self._features, cotangent)
+        return cotangent @ features

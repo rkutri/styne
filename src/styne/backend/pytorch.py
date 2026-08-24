@@ -151,7 +151,9 @@ class PyTorchBackend(Backend):
 
     @staticmethod
     def _register_parameter_containers():
-        from styne.mcmc.transition import EvaluatedState, TransitionData
+        from styne.mcmc.transition import (
+            EvaluatedState, RobbinsMonroState, TransitionData,
+        )
         from styne.parameter.block import BlockParameter
         from styne.parameter.function import Function
         from styne.parameter.scalar import Scalar
@@ -193,6 +195,13 @@ class PyTorchBackend(Backend):
             EvaluatedState,
             lambda state: ((state.parameter, state.logDensity), None),
             lambda children, metadata: EvaluatedState(*children),
+        )
+        _pytree.register_pytree_node(
+            RobbinsMonroState,
+            lambda state: (
+                (state.evaluatedState, state.logVariance, state.stepCount), None
+            ),
+            lambda children, metadata: RobbinsMonroState(*children),
         )
         _pytree.register_pytree_node(
             TransitionData,

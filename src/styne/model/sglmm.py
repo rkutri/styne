@@ -124,6 +124,34 @@ class SGLMM(ForwardMap):
 
         return evaluation
 
+    def directional_derivative(self, parameter, direction):
+        latentCoordinate, _ = self._prepare(parameter)
+        directionCoordinate, _ = self._prepare(direction)
+        derivative = self._gp.directional_derivative(
+            latentCoordinate, directionCoordinate, self._obsSites
+        )
+
+        if self._features is not None:
+            fixedDirection = direction.block(1).coordinate
+            features = backend_constant(self._features, fixedDirection)
+            derivative = derivative + fixedDirection @ features.T
+        return derivative
+
+    def adjoint_derivative(self, parameter, cotangent):
+        latentCoordinate, _ = self._prepare(parameter)
+        latentAdjoint = self._gp.adjoint_derivative(
+            latentCoordinate, cotangent, self._obsSites
+        )
+
+        if self._features is None:
+            return latentAdjoint
+
+        features = backend_constant(self._features, cotangent)
+        fixedAdjoint = cotangent @ features
+        return parameter.backend.namespace.concatenate(
+            (latentAdjoint, fixedAdjoint), axis=-1
+        )
+
     def predict(self, preparedState, queryGrid: Grid, features=None):
         """
         Evaluate the linear predictor at new sites.

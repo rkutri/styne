@@ -4,7 +4,6 @@ from numpy.random import Generator
 
 from styne.mcmc.sampler import MCMCSampler
 from styne.mcmc.chain import GibbsChain
-from styne.parameter.parameter import Parameter
 from styne.parameter.block import BlockParameter
 
 
@@ -38,36 +37,41 @@ class GibbsSampler(MCMCSampler):
     def _validate_initial(self, initialState):
         if not isinstance(initialState, BlockParameter):
             raise ValueError(
-                f"GibbsSampler requires a BlockParameter initial state. Got {type(initialState)}."
+                "GibbsSampler requires a BlockParameter initial state. "
+                f"Got {type(initialState)}."
             )
 
     def _append_initial(self, initialState):
         if self._storeChain:
             self._chain.append(
-                [initialState.block(i).coordinate for i in range(self._nBlocks)]
+                [initialState.block(i).coordinate
+                 for i in range(self._nBlocks)]
             )
 
-
-    def _iterate(self) -> BlockParameter:
-        state = self._lastState
+    def step(self, currentState: BlockParameter, rng):
+        """Return one immutable Gibbs sweep and its propagated random state."""
+        state = currentState
         for i in range(self._nBlocks):
-            newBlock = self._sample_block(i, state)
+            newBlock, rng = self._sample_block(i, state, rng)
             blocks = [state.block(j) for j in range(self._nBlocks)]
             blocks[i] = newBlock
             state = BlockParameter(blocks, state.names)
+
+        return state, None, rng
+
+    def _record_transition(self, transitionData, nextState):
         if self._storeChain:
-            self._chain.append(
-                [state.block(i).coordinate for i in range(self._nBlocks)]
-            )
-        return state
+            self._chain.append([
+                nextState.block(i).coordinate for i in range(self._nBlocks)
+            ])
 
     def clear(self):
         super().clear()
         self._chain.clear()
 
     @abstractmethod
-    def _sample_block(self, idx: int, state: BlockParameter) -> Parameter:
-        """Draw the idx-th block conditional on the current compound state."""
+    def _sample_block(self, idx: int, state: BlockParameter, rng):
+        """Draw the idx-th block and return its propagated random state."""
         ...
 
 
@@ -93,8 +97,9 @@ class BlockGibbs(GibbsSampler):
         super().__init__(model.nBlocks, rng=rng)
         self._model = model
 
-    def _sample_block(self, idx: int, state: BlockParameter) -> Parameter:
-        return self._model.conditional(idx, state).generate_realisation(rng=self._rng)
+    def _sample_block(self, idx: int, state: BlockParameter, rng):
+        """Sample an independently conditioned block measure."""
+        return self._model.conditional(idx, state).sample(rng)
 
 
 class GibbsBuilder:

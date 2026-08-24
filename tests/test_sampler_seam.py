@@ -78,8 +78,11 @@ def test_gibbs_seam():
         nBlocks = 2
         def conditional(self, idx, state):
             class Conditional:
-                def generate_realisation(self, rng=None):
-                    return DummyParameter(state.block(idx).coordinate + 1.0)
+                def sample(self, randomState):
+                    return (
+                        DummyParameter(state.block(idx).coordinate + 1.0),
+                        randomState,
+                    )
             return Conditional()
 
     builder = GibbsBuilder()

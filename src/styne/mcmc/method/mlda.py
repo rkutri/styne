@@ -56,13 +56,12 @@ class MLDAProposal(PartitionedProposalMixin, ProposalMethod):
 
     def propose(self, state: Parameter, rng):
         if self.isPartitioned:
-            self._surrogateMeasure.initialMeasure.location = (
-                self._coarse_from(state))
+            initialState = self._coarse_from(state)
         else:
-            self._surrogateMeasure.initialMeasure.location = state
+            initialState = state
 
-        coarseProposal, nextRng = self._surrogateMeasure.sample(
-            rng
+        coarseProposal, nextRng = self._surrogateMeasure.transition(
+            initialState, rng
         )
         if not self.isPartitioned:
             return TransitionData(state, coarseProposal), nextRng
@@ -79,6 +78,7 @@ class MLDAProposal(PartitionedProposalMixin, ProposalMethod):
     @property
     def measure(self) -> SurrogateTransitionMeasure:
         return self._surrogateMeasure
+
 
 class MultilevelDelayedAcceptanceMCMC(MetropolisHastings):
     """Multilevel Delayed Acceptance MCMC.

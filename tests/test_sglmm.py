@@ -61,7 +61,10 @@ def test_numpy_sglmm_value_matches_explicit_components(responseName):
 
     np.testing.assert_allclose(evaluation, expected)
     assert np.isfinite(likelihood.evaluate_log(parameter))
-    assert not isinstance(model, DifferentiableModel)
+    assert isinstance(model, DifferentiableModel)
+    assert np.all(np.isfinite(
+        likelihood.evaluate_log_gradient(parameter)
+    ))
 
 
 @pytest.mark.parametrize("responseName", ["gaussian", "poisson", "binomial"])

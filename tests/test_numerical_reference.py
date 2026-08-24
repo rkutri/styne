@@ -212,6 +212,7 @@ def test_deterministic_proposal_reference_calculations():
 
     mala = MetropolisAdjustedLangevinAlgorithm(
         density, 0.3, AcceptanceRateDiagnostics(),
+        gradient=density.evaluate_log_gradient,
     )
     transition = TransitionData(
         state,
@@ -232,9 +233,18 @@ def test_deterministic_proposal_reference_calculations():
     pcn = PCNProposal(reference, 0.4)
     pcnState = Vector(np.array([0.8, -0.5]))
     fixedReferenceInput = Vector(np.array([1.1, 0.3]))
-    reference.generate_realisation = lambda rng: fixedReferenceInput
+    fixedNoise = (
+        fixedReferenceInput.coordinate - reference.mean.coordinate
+    ) / np.sqrt(reference.covariance.marginalVariance)
+
+    class FixedNormalRng:
+
+        def standard_normal(self, size):
+            assert size == fixedNoise.shape
+            return fixedNoise
+
     np.testing.assert_allclose(
-        pcn.propose(pcnState, None)[0].proposal.coordinate,
+        pcn.propose(pcnState, FixedNormalRng())[0].proposal.coordinate,
         [1.109909083394701, -0.30660605559646714],
         rtol=0.0, atol=1e-12,
     )

@@ -1,4 +1,3 @@
-import numpy as np
 from typing import Optional
 from styne.statistics.interface import DensityInterface
 from styne.statistics.measure import (
@@ -28,19 +27,21 @@ class SurrogateTransitionMeasure(AbsolutelyContinuousProbabilityMeasure):
         Number of transitions in each surrogate chain run.
     """
 
-    def __init__(self,
-        surrogateMCMC: MetropolisHastings,
-        nChain: int,
-        initialMeasure: Optional[ProbabilityMeasure] = None
+    def __init__(
+            self,
+            surrogateMCMC: MetropolisHastings,
+            nChain: int,
+            initialMeasure: Optional[ProbabilityMeasure] = None,
     ):
         if not isinstance(nChain, int) or nChain < 0:
             raise ValueError(
                 f"nChain must be a non-negative integer. Got {nChain}.")
 
-        self._initialMeasure = initialMeasure if initialMeasure is not None else DiracMeasure()
+        self._initialMeasure = (
+            initialMeasure if initialMeasure is not None else DiracMeasure()
+        )
         self._mcmc = surrogateMCMC
         self._nChain = nChain
-
 
     @property
     def mcmc(self):
@@ -63,7 +64,25 @@ class SurrogateTransitionMeasure(AbsolutelyContinuousProbabilityMeasure):
     def initialMeasure(self) -> ProbabilityMeasure:
         return self._initialMeasure
 
-    def draw(self, rng) -> Parameter:
+    def transition(self, initialState: Parameter, randomState):
+        """Run the surrogate transition from an explicit initial state.
+
+        This is the numerical path used by delayed-acceptance proposals. It
+        does not populate the wrapped sampler's chain or alter its runner
+        state, so one surrogate measure can safely be reused by independent
+        outer transitions.
+        """
+        if not self._mcmc._uses_pure_step():
+            raise RuntimeError(
+                "Surrogate transitions require a sampler with step()."
+            )
+
+        state = self._mcmc.initial_state(initialState)
+        for _ in range(self._nChain):
+            state, _, randomState = self._mcmc.step(state, randomState)
+        return self._mcmc._parameter_from_state(state), randomState
+
+    def sample(self, randomState) -> tuple[Parameter, object]:
         """
         Generate a realisation by running the surrogate chain.
 
@@ -72,22 +91,13 @@ class SurrogateTransitionMeasure(AbsolutelyContinuousProbabilityMeasure):
 
         Parameters
         ----------
-        rng : Generator
-            NumPy random generator, used for the initial measure draw.
+        randomState : object
+            Backend-native random state for both the initial draw and chain.
 
         Returns
         -------
-        Parameter
-            Final state of the surrogate chain.
-
-        Note
-        ----
-        The 'rng' parameter is used to draw the initial state but
-        is not propagated into the surrogate MCMC run, which uses its
-        own internal RNG. Passing a seeded generator therefore does not
-        make the full draw reproducible.
+        (Parameter, object)
+            Final state and propagated random state.
         """
-        init = self.initialMeasure.draw(rng)
-        self._mcmc.run(self._nChain, init)
-
-        return init.with_coordinate(self.chain.trajectory[-1])
+        initialState, nextState = self.initialMeasure.sample(randomState)
+        return self.transition(initialState, nextState)

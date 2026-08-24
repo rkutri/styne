@@ -72,6 +72,16 @@ class BoundLinearExpansion(BoundExpansion):
     def _directional_derivative(self, coefficient, direction):
         return self.evaluate(direction)
 
+    def _adjoint_derivative(self, coefficient, cotangent):
+        backend = infer_backend(coefficient, cotangent)
+        metadata = backend.metadata(coefficient)
+        basis = backend.eye(
+            self.dimension, dtype=metadata.dtype, device=metadata.device
+        )
+        evaluations = self.evaluate(basis)
+        transpose = backend.namespace.swapaxes(evaluations, -1, -2)
+        return cotangent @ transpose
+
 
 class Expansion(ABC):
     """Static strategy for evaluating finite-dimensional coefficients.

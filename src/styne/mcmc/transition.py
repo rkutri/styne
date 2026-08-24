@@ -20,6 +20,19 @@ class EvaluatedState:
     logDensity: Any = None
 
 
+@dataclass(frozen=True)
+class RobbinsMonroState:
+    """Evaluated MRW state together with its adaptive proposal scale."""
+
+    evaluatedState: EvaluatedState
+    logVariance: Any
+    stepCount: Any
+
+    @property
+    def parameter(self):
+        return self.evaluatedState.parameter
+
+
 @dataclass(frozen=True, init=False)
 class TransitionData:
     """Immutable current/proposed states and transition outcome.

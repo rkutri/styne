@@ -184,6 +184,23 @@ class TestPCNProposalStep:
         expected = self.BETA**2 * np.eye(self.DIM)
         assert np.allclose(sampleCov, expected, atol=0.05)
 
+    def test_proposal_compiles_with_jax(self):
+        jax = pytest.importorskip("jax")
+        jnp = pytest.importorskip("jax.numpy")
+        from styne.backend import get_backend
+
+        prior = Gaussian(
+            IIDCovarianceMatrix(self.DIM, jnp.array(1.0)),
+            Vector(jnp.zeros(self.DIM)),
+        )
+        proposal = PCNProposal(prior, self.BETA)
+
+        transition, _ = jax.jit(proposal.propose)(
+            Vector(jnp.array(self.STATE_COORD)), jax.random.key(7)
+        )
+
+        assert get_backend("jax").is_array(transition.proposal.coordinate)
+
 
 class TestPCNLogMHRatio:
 
