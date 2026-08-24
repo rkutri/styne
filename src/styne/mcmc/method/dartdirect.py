@@ -1,7 +1,8 @@
-import numpy as np
 from typing import Optional
+
 from numpy.random import Generator
 
+from styne.backend import infer_backend
 from styne.mcmc.proposal import ProposalMethod
 from styne.mcmc.metropolishastings import MetropolisHastings
 from styne.mcmc.transition import TransitionData
@@ -14,55 +15,27 @@ from styne.statistics.covariance import DenseCovarianceMatrix
 
 
 class DirectDARTProposal(ProposalMethod):
-    """
-    Exact Gaussian proposal for the DART sampler.
+    """Gaussian DART proposal based on a fixed surrogate."""
 
-    Given a surrogate Gaussian (the Laplace approximation at the MAP), a tempering 
-    parameter theta, and a regularisation parameter gamma, the proposal draws from 
-    N(mu_x, P^{-1}), where:
-        P = theta * A + gamma * I
-        mu_x = P^{-1} b_x
-        b_x = theta * A * x_hat + gamma * x
-
-    Here, x_hat and A are the mean and precision (inverse covariance) of the 
-    surrogate Gaussian.
-
-    Parameters
-    ----------
-    tempering : float
-        Tempering parameter theta in (0, 1].
-    gamma : float
-        Regularisation strength gamma > 0.
-    surrogate : Gaussian
-        Gaussian representing the Laplace approximation.
-    proposalCovariance : DenseCovarianceMatrix
-        The precomputed covariance of the proposal, P^{-1}.
-    """
-
-    def __init__(self, tempering: float, gamma: float, surrogate: Gaussian,
-                 proposalCovariance: DenseCovarianceMatrix):
+    def __init__(
+            self, tempering: float, gamma: float, surrogate: Gaussian,
+            proposalCovariance: DenseCovarianceMatrix):
         self._tempering = tempering
         self._gamma = gamma
         self._surrogate = surrogate
-        
-        # Precompute A * x_hat (where A is surrogate precision).
-        # We can apply the precision matrix A via apply_inverse on the surrogate covariance.
-        self._aTimesXhat = self._surrogate.covariance.apply_inverse(self._surrogate.mean.coordinate)
-        
+        self._precisionMean = self._surrogate.covariance.apply_inverse(
+            self._surrogate.mean.coordinate
+        )
         self._proposalMeasure = Gaussian(proposalCovariance)
 
     def propose(self, state: Parameter, rng):
         x = state.coordinate
-        bx = self._tempering * self._aTimesXhat + self._gamma * x
-        
-        # Apply P^{-1} to get mu_x
+        bx = self._tempering * self._precisionMean + self._gamma * x
         mux = self._proposalMeasure.covariance.apply(bx)
-        
         propMean = state.with_coordinate(mux)
         proposal, nextRng = self._proposalMeasure.with_mean(propMean).sample(
             rng
         )
-        
         return (
             TransitionData(state, proposal, auxiliary={'bx': bx, 'mux': mux}),
             nextRng,
@@ -70,80 +43,74 @@ class DirectDARTProposal(ProposalMethod):
 
 
 class DirectDART(MetropolisHastings):
-    """
-    DART (Data-Assimilation based Regularised Transition) sampler.
+    """Data-assimilation based regularised transition sampler."""
 
-    Exact implementation of the DART log-acceptance ratio using a Gaussian 
-    surrogate for the local structure. 
-
-    Parameters
-    ----------
-    targetDensity : DensityInterface
-        Target density to sample from.
-    tempering : float
-        Tempering parameter theta.
-    gamma : float
-        Regularisation strength gamma.
-    surrogate : Gaussian
-        Gaussian representing the Laplace approximation at the MAP.
-    proposalCovariance : DenseCovarianceMatrix
-        Precomputed covariance matrix P^{-1} of the proposal.
-    diagnostics : ChainDiagnostics
-        Tracks transition statistics.
-    acceptance : AcceptanceProbability, optional
-        Acceptance rule (defaults to standard Metropolis-Hastings).
-    """
-
-    def __init__(self, targetDensity: DensityInterface, tempering: float,
-                 gamma: float, surrogate: Gaussian, 
-                 proposalCovariance: DenseCovarianceMatrix, 
-                 diagnostics: ChainDiagnostics,
-                 acceptance: AcceptanceProbability = None,
-                 rng: Optional[Generator] = None):
-        
+    def __init__(
+            self, targetDensity: DensityInterface, tempering: float,
+            gamma: float, surrogate: Gaussian,
+            proposalCovariance: DenseCovarianceMatrix,
+            diagnostics: ChainDiagnostics,
+            acceptance: AcceptanceProbability = None,
+            rng: Optional[Generator] = None):
         if tempering <= 0.0 or tempering > 1.0:
-            raise ValueError("Tempering parameter must be in (0, 1].")
+            raise ValueError('Tempering parameter must be in (0, 1].')
         if gamma <= 0.0:
-            raise ValueError("Regularisation gamma must be strictly positive.")
+            raise ValueError('Regularisation gamma must be strictly positive.')
 
         self._tempering = tempering
         self._gamma = gamma
         self._surrogate = surrogate
 
-        proposalMethod = DirectDARTProposal(tempering, gamma, surrogate, proposalCovariance)
-        super().__init__(targetDensity, proposalMethod, diagnostics, acceptance=acceptance, rng=rng)
+        proposalMethod = DirectDARTProposal(
+            tempering, gamma, surrogate, proposalCovariance
+        )
+        super().__init__(
+            targetDensity,
+            proposalMethod,
+            diagnostics,
+            acceptance=acceptance,
+            rng=rng,
+        )
 
     def _log_mh_ratio(self, transition: TransitionData):
-        
         x = transition.state.coordinate
         z = transition.proposal.coordinate
+        backend = infer_backend(x)
+        namespace = backend.namespace
+        metadata = backend.metadata(x)
+        negativeInfinity = backend.asarray(
+            float('-inf'), dtype=metadata.dtype, device=metadata.device
+        )
 
-        # 1. Target density difference
         logTargetDiff = (
             transition.proposed.logDensity - transition.current.logDensity
         )
-        if logTargetDiff == -np.inf:
-            return -np.inf
 
         xHat = self._surrogate.mean.coordinate
 
-        # 2. Quadratic surrogate correction
-        # We need: (theta / 2) * ( (z - xHat)^T A (z - xHat) - (x - xHat)^T A (x - xHat) )
-        # A is the precision of the surrogate. We use dual_quadratic_form on surrogate covariance.
         diffZ = z - xHat
         diffX = x - xHat
         quadDiffZ = self._surrogate.covariance.dual_quadratic_form(diffZ)
         quadDiffX = self._surrogate.covariance.dual_quadratic_form(diffX)
         quadSurrogateDiff = 0.5 * self._tempering * (quadDiffZ - quadDiffX)
 
-        # 3. Normalisation ratio log(N_x / N_z)
         bx = transition.auxiliary['bx']
         mux = transition.auxiliary['mux']
-        
-        # Need to compute b_z and mu_z for the reverse proposal
-        bz = self._tempering * self._proposalMethod._aTimesXhat + self._gamma * z
+        bz = (
+            self._tempering * self._proposalMethod._precisionMean
+            + self._gamma * z
+        )
         muz = self._proposalMethod._proposalMeasure.covariance.apply(bz)
 
-        normDiff = 0.5 * (mux.dot(bx) - muz.dot(bz)) - 0.5 * self._gamma * (x.dot(x) - z.dot(z))
+        normDiff = 0.5 * (
+            namespace.sum(mux * bx, axis=-1)
+            - namespace.sum(muz * bz, axis=-1)
+        ) - 0.5 * self._gamma * (
+            namespace.sum(x * x, axis=-1)
+            - namespace.sum(z * z, axis=-1)
+        )
 
-        return logTargetDiff + quadSurrogateDiff + normDiff
+        logRatio = logTargetDiff + quadSurrogateDiff + normDiff
+        return namespace.where(
+            logTargetDiff == negativeInfinity, negativeInfinity, logRatio
+        )

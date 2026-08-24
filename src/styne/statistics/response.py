@@ -5,10 +5,6 @@ from styne.parameter.vector import Vector
 from styne.statistics.gaussian import Gaussian
 from styne.statistics.measure import ProbabilityMeasure
 
-_etaFloor = -500.0
-_etaCeil = 30.0
-
-
 class ResponseFamily(ProbabilityMeasure):
     """Backend-native, stateless observation response family."""
 
@@ -68,7 +64,7 @@ class GaussianResponse(ResponseFamily):
 class PoissonResponse(ResponseFamily):
     def inverse_link(self, eta):
         ns = infer_backend(eta).namespace
-        return ns.exp(ns.clip(eta.reshape((-1,)), _etaFloor, _etaCeil))
+        return ns.exp(eta.reshape((-1,)))
 
     def sample(self, eta, randomState):
         backend = infer_backend(eta)
@@ -77,7 +73,7 @@ class PoissonResponse(ResponseFamily):
 
     def log_likelihood(self, y, eta):
         ns = infer_backend(eta).namespace
-        eta = ns.clip(eta.reshape((-1,)), _etaFloor, _etaCeil)
+        eta = eta.reshape((-1,))
         return ns.sum(y.reshape((-1,)) * eta - ns.exp(eta))
 
     def score(self, y, evaluation):
