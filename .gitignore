@@ -183,8 +183,7 @@ cython_debug/
 uv.lock
 
 
-# agent rules 
-.agents/rules
+# local caches
 joblib_caches/
 
 # reproducibility figures
