@@ -38,6 +38,9 @@ class DummyParameter(Parameter):
         v = DummyParameter(self.coordinate.copy())
         return v
 
+    def with_coordinate(self, coordinate):
+        return DummyParameter(coordinate)
+
 
 class DummySampler(MCMCSampler):
     def __init__(self):

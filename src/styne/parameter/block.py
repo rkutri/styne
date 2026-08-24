@@ -102,11 +102,11 @@ class BlockParameter(Parameter):
             )
         
         offset = 0
-        for block, dim in zip(self._blocks, self._dims):
+        for idx, (block, dim) in enumerate(zip(self._blocks, self._dims)):
             # uses ellipsis for axis-agnostic slicing (offset is always on the parameter axis)
             sl = [slice(None)] * value.ndim
             sl[-1] = slice(offset, offset + dim)
-            block.coordinate = value[tuple(sl)]
+            self._blocks[idx] = block.with_coordinate(value[tuple(sl)])
             offset += dim
 
     def clone(self) -> BlockParameter:
@@ -121,6 +121,11 @@ class BlockParameter(Parameter):
             [b.clone() for b in self._blocks],
             dict(self._names)
         )
+
+    def with_coordinate(self, coordinate: np.ndarray) -> BlockParameter:
+        result = self.clone()
+        result.coordinate = coordinate
+        return result
 
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, BlockParameter):

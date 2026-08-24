@@ -63,8 +63,9 @@ class MALAProposal(ProposalMethod):
             )
 
         driftVector = self._drift(self._state)
-        propMean = self._state.clone()
-        propMean.coordinate = np.asarray(driftVector, dtype=np.float64)
+        propMean = self._state.with_coordinate(
+            np.asarray(driftVector, dtype=np.float64)
+        )
 
         self._proposalMeasure.mean = propMean
         proposal = self._proposalMeasure.generate_realisation(rng=rng)

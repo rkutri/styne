@@ -91,8 +91,9 @@ class PMALAProposal(ProposalMethod):
         # refCov.apply, which uses the current scaling. Setting scaling = β²
         # first would double-count the factor in the drift term.
         driftVector = self._drift(self._state)
-        drift = self._state.clone()
-        drift.coordinate = np.asarray(driftVector, dtype=np.float64)
+        drift = self._state.with_coordinate(
+            np.asarray(driftVector, dtype=np.float64)
+        )
         self._proposalMeasure.mean = drift
 
         refCov = self._target.reference.covariance

@@ -50,7 +50,6 @@ directGP = GaussianProcess.direct(
 
 # B-spline engine: coefficient vector in a spline expansion
 bsplineExpansion = BSpline1D(resolution, degree=3, boundary=[0.0, 1.0])
-bsplineExpansion.project(np.zeros(resolution))
 bsplineGP = GaussianProcess.bspline(covariance1D, bsplineExpansion)
 
 # DNA engine: Fourier-based white-noise parametrisation
@@ -79,7 +78,7 @@ samplerVar = {}
 for name, gp in engines.items():
 
     samples = np.array([
-        gp.sampler.generate_realisation(rng=rng).function.evaluate(sites)
+        gp.sampler.generate_realisation(rng=rng).evaluate(sites)
         for _ in range(nSamples)
     ])
 
@@ -124,7 +123,7 @@ if hasMatplotlib:
         # independent prior realisations
         for _ in range(nPaths):
             path = gp.sampler.generate_realisation(
-                rng=rng).function.evaluate(sites)
+                rng=rng).evaluate(sites)
             axes[0, col].plot(sites.axis, path, lw=0.7, alpha=0.7)
 
         axes[0, col].plot(sites.axis, samplerVar[name],
@@ -180,7 +179,9 @@ resolution2D = 100
 gp2D = GaussianProcess.dna(covariance2D, q=resolution2D, d=2)
 
 realisation2D = gp2D.sampler.generate_realisation(rng=rng)
-nativeField = realisation2D.function.evaluate_native()
+nativeField = realisation2D.expansion.evaluate_native(
+    realisation2D.coordinate
+)
 
 nGrid = resolution2D + 2
 field = nativeField.reshape(nGrid, nGrid)

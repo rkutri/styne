@@ -91,7 +91,7 @@ algorithm developed alongside the library.
 
 **Gaussian-process simulation and priors.** Dense Cholesky, B-spline and DNA
 parametrisations provide interchangeable ways to sample Gaussian-process
-realisations, evaluate them on spatial grids and use the corresponding Gaussian
+functions, evaluate them on spatial grids and use the corresponding Gaussian
 measures as priors in Bayesian inverse problems. DNA is particularly useful when
 efficient simulation of high-dimensional Gaussian fields is itself part of the
 workflow.
@@ -168,9 +168,43 @@ law.
 
 The Gaussian-process layer follows a similar convention. A `GaussianProcess`
 combines a covariance function with a parametrisation engine. The engine maps
-white-noise coordinates to a GP realisation, while `gp.measure` supplies the
-corresponding Gaussian reference measure. Dense Cholesky, B-spline and DNA are
-therefore different parametrisations of the prior, not different model classes.
+white-noise coordinates to coefficients and chooses an `Expansion`, while
+`gp.measure` supplies the corresponding Gaussian reference measure. Dense
+Cholesky, B-spline and DNA are therefore different parametrisations of the
+prior, not different model classes.
+
+### Functions and expansions
+
+A `Function` is a parameter that can also be evaluated on a grid. It binds a
+coordinate vector $\theta$ to an `Expansion` $E$, with
+
+$$u_\theta(x) = E(\theta, x).$$
+
+The coordinate belongs to the `Function`; the `Expansion` contains only the
+static evaluation strategy and representation data, such as a Fourier basis,
+B-spline knots or explicit sites. Expansions are therefore reusable and do not
+change when a function is evaluated. Coordinates consistently use a trailing
+feature axis, `(..., dimension)`, and evaluation preserves every leading batch
+dimension. The same convention applies to GP Jacobian and adjoint operations,
+matching JAX and PyTorch batching without transposes at the public boundary.
+
+```python
+field = Function(coordinate, expansion)
+values = field.evaluate(grid)
+
+updated = field.with_coordinate(new_coordinate)
+assert updated.expansion is field.expansion
+```
+
+The refactored API replaces the previous mutable-realisation interface:
+
+| Previous API | Current API |
+| ------------ | ----------- |
+| `function.function` | `function.expansion` |
+| `function.function.evaluate(grid)` | `function.evaluate(grid)` |
+| assign `expansion.coefficient` or call `project(...)` | `expansion.evaluate(coefficient, grid)` |
+| `engine.build_realisation()` | `engine.build_expansion()` |
+| representation-specific `*Realisation` classes | stateless `*Expansion` classes |
 
 ## Citation
 

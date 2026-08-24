@@ -1,70 +1,40 @@
 from __future__ import annotations
 
-from numpy import ndarray, asarray, atleast_1d
-
-from styne.parameter.parameter import Parameter
+from styne.parameter.parameter import Parameter, _as_coordinate
 
 
 class Vector(Parameter):
-    """
-    Finite-dimensional parameter vector.
+    """Finite-dimensional vector or batch of vectors."""
 
-    Parameters
-    ----------
-    coordinate : ndarray
-        1D vector or 2D batch matrix, coerced to float and validated on
-        every set, not just at construction.
-    """
-
-    def __init__(self, coordinate: ndarray):
-        self._coordinate = self.validate(coordinate)
+    def __init__(self, coordinate):
+        self._coordinate = self._validate(coordinate)
 
     @property
     def dimension(self) -> int:
-        return self._coordinate.size
+        return self._coordinate.shape[-1]
 
     @property
-    def coordinate(self) -> ndarray:
+    def coordinate(self):
         return self._coordinate
 
-    @coordinate.setter
-    def coordinate(self, coordinate: ndarray) -> None:
-        self._coordinate = self.validate(coordinate)
-
     @staticmethod
-    def validate(coordinate: ndarray):
-        """
-        Coerce to a float array and check it's 1D or 2D.
-
-        Parameters
-        ----------
-        coordinate : ndarray
-
-        Returns
-        -------
-        ndarray
-
-        Raises
-        ------
-        ValueError
-            If the array isn't 1D or 2D after coercion.
-        """
-
-        coordinate = atleast_1d(asarray(coordinate, dtype=float))
-
-        if coordinate.ndim not in [1, 2]:
+    def _validate(coordinate):
+        coordinate = _as_coordinate(coordinate)
+        if coordinate.ndim not in (1, 2):
             raise ValueError(
-                "Parameter coordinates must be 1D vector or 2D batch matrix."
+                "Vector coordinate shape must be (dimension,) or "
+                "(batch, dimension)."
             )
-
         return coordinate
 
     def clone(self) -> Parameter:
-        """
-        Return an independent copy with the same coordinate.
+        """Return an equivalent parameter with independent array storage."""
+        backend = self.backend
+        metadata = backend.metadata(self._coordinate)
+        zero = backend.zeros(
+            (), dtype=metadata.dtype, device=metadata.device
+        )
+        return self.with_coordinate(self._coordinate + zero)
 
-        Returns
-        -------
-        Vector
-        """
-        return self.__class__(self._coordinate.copy())
+    def with_coordinate(self, coordinate) -> Vector:
+        return self.__class__(coordinate)

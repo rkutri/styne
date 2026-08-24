@@ -40,10 +40,8 @@ class PartitionedProposalMixin:
         return self._pFinePrior.generate_realisation(rng=rng)
 
     def _merge(self, coarseCoord, fineCoord, template: Parameter) -> Parameter:
-        result = template.clone()
-        result.coordinate = self._pPartition.rule.merge(
-            [coarseCoord, fineCoord])
-        return result
+        coordinate = self._pPartition.rule.merge([coarseCoord, fineCoord])
+        return template.with_coordinate(coordinate)
 
 
 class ProposalMethod(ABC):
@@ -137,8 +135,9 @@ class BlockProposal(ProposalMethod):
             m.generate_proposal(rng).proposal.coordinate for m in self._pMethods
         ]
 
-        result = self._state.clone()
-        result.coordinate = self._partition.merge(components)
+        result = self._state.with_coordinate(
+            self._partition.merge(components)
+        )
 
         return TransitionData(self._state, result)
 

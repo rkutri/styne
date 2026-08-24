@@ -69,10 +69,9 @@ def setup_target():
 def _test_sampler(name, factory, init_state, n_steps=200):
     print(f"\n--- Testing {name} ---")
     sampler = factory.create()
-    state = init_state.clone()
-    
-    # Initialize randomly
-    state.coordinate = np.random.randn(state.dimension) * 0.01
+    state = init_state.with_coordinate(
+        np.random.randn(init_state.dimension) * 0.01
+    )
 
     sampler.run(n_steps, state)
     acc_rate = sampler.diagnostics.global_acceptance_rate()
@@ -123,6 +122,5 @@ if __name__ == "__main__":
     # Final check: does log-density vary?
     print("\nChecking log-density variation in MRW trajectory:")
     for i in [0, 10, 50, 100]:
-        param = init_state.clone()
-        param.coordinate = s_mrw.chain.trajectory[i]
+        param = init_state.with_coordinate(s_mrw.chain.trajectory[i])
         print(f"Step {i:3d}: log-density = {target.evaluate_log(param):.6f}")

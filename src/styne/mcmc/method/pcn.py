@@ -80,8 +80,7 @@ class PCNProposal(ProposalMethod):
         zCentred = sqrt(1. - self._beta**2) * xCentred \
             + self._beta * xiCentred
 
-        proposal = self._state.clone()
-        proposal.coordinate = m + zCentred
+        proposal = self._state.with_coordinate(m + zCentred)
 
         return TransitionData(self._state, proposal)
 

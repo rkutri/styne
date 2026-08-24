@@ -1,14 +1,10 @@
 import numpy as np
-import pytest
-from scipy.fft import dct, dst
 from styne.gp.dnautility import (
-    cos_series, sin_series, 
+    cos_series, sin_series,
     adj_cos_series_1d, adj_sin_series_1d,
-    BC, BoundaryCondition
 )
 from styne.gp.dna import (
-    DNAFourierComponentRealisation,
-    DNAFourierRealisation,
+    DNAFourierExpansion,
     DNAFourierEngine
 )
 from styne.utility.grid import UniformGrid
@@ -75,35 +71,32 @@ def test_adjoint_series_1d_batch():
     
     assert np.allclose(resBatch, resLoop, rtol=1e-13, atol=1e-13)
 
-def test_dna_realisation_batch_1d():
-    """Verify DNAFourierRealisation handles batch evaluation in 1D."""
+def test_dna_expansion_batch_1d():
+    """Verify one DNA expansion evaluates single and batched coefficients."""
     q = 10
     nBatch = 5
     nG = q + 2
     rng = np.random.default_rng(44)
     
-    real = DNAFourierRealisation(q, d=1)
-    nParam = real.dimension
+    expansion = DNAFourierExpansion(q, d=1)
+    nParam = expansion.dimension
     
     # 1. Single sample check
     theta = rng.standard_normal(nParam)
-    real.coefficient = theta
-    u_single = real.evaluate_native()
+    u_single = expansion.evaluate_native(theta)
     assert u_single.shape == (nG,)
     
     # 2. Batch sample check
     thetas = rng.standard_normal((nBatch, nParam))
-    real.coefficient = thetas
-    u_batch = real.evaluate_native()
+    u_batch = expansion.evaluate_native(thetas)
     assert u_batch.shape == (nBatch, nG)
     
     # Verify correspondence
     for i in range(nBatch):
-        real.coefficient = thetas[i]
-        u_truth = real.evaluate_native()
+        u_truth = expansion.evaluate_native(thetas[i])
         assert np.allclose(u_batch[i], u_truth, rtol=1e-13, atol=1e-13)
     
-    print("DNA Realisation 1D Batch PASSED")
+    print("DNA Expansion 1D Batch PASSED")
 
 def test_adjoint_inner_product_consistency():
     """Rigorous check: <Jv, w> == <v, J^T w> for DNA engine."""
@@ -114,8 +107,8 @@ def test_adjoint_inner_product_consistency():
     sites = UniformGrid(0.1, 0.9, 15)
     engine.set_sites(sites)
     
-    real = engine.build_realisation()
-    nParam = real.dimension
+    expansion = engine.build_expansion()
+    nParam = expansion.dimension
     nSites = len(sites)
     
     rng = np.random.default_rng(45)
@@ -138,27 +131,25 @@ def test_adjoint_inner_product_consistency():
     assert np.isclose(lhs, rhs, rtol=1e-12, atol=1e-12)
     print("Adjoint Inner-Product Consistency PASSED")
 
-def test_engine_at_sites_batch():
-    """Verify DNAFourierEngine.at_sites handles batches."""
+def test_engine_evaluate_batch():
+    """Verify DNAFourierEngine evaluates batched explicit coefficients."""
     q = 10
     d = 1
     engine = DNAFourierEngine(q, d)
     sites = UniformGrid(0.1, 0.9, 8)
     engine.set_sites(sites)
     
-    real = engine.build_realisation()
+    expansion = engine.build_expansion()
     nBatch = 4
     rng = np.random.default_rng(46)
-    thetas = rng.standard_normal((nBatch, real.dimension))
-    
-    real.coefficient = thetas
-    u_batch = engine.at_sites(real, sites)
+    thetas = rng.standard_normal((nBatch, expansion.dimension))
+
+    u_batch = engine.evaluate(thetas, None)
     assert u_batch.shape == (nBatch, len(sites))
     
     # Loop verify
     for i in range(nBatch):
-        real.coefficient = thetas[i]
-        u_truth = engine.at_sites(real, sites)
+        u_truth = engine.evaluate(thetas[i], None)
         assert np.allclose(u_batch[i], u_truth, rtol=1e-13, atol=1e-13)
     
     print("DNA Engine at_sites Batch PASSED")
@@ -166,7 +157,7 @@ def test_engine_at_sites_batch():
 if __name__ == "__main__":
     test_series_1d_batch()
     test_adjoint_series_1d_batch()
-    test_dna_realisation_batch_1d()
+    test_dna_expansion_batch_1d()
     test_adjoint_inner_product_consistency()
-    test_engine_at_sites_batch()
+    test_engine_evaluate_batch()
     print("\nALL VECTORIZATION TESTS PASSED")

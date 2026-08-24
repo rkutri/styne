@@ -90,7 +90,4 @@ class SurrogateTransitionMeasure(AbsolutelyContinuousProbabilityMeasure):
         init = self.initialMeasure.draw(rng)
         self._mcmc.run(self._nChain, init)
 
-        realisation = init.clone()
-        realisation.coordinate = self.chain.trajectory[-1]
-
-        return realisation
+        return init.with_coordinate(self.chain.trajectory[-1])

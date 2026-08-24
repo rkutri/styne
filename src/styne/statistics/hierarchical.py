@@ -167,11 +167,9 @@ class SGLMMHyperConditionalDensity(DensityInterface):
         )
 
         if hasattr(self._gp.engine, 'evaluate_hyper_gradient'):
-            # Engine expects the Expansion representation
-            latentExpansion = self._latentState.function \
-                if isinstance(self._latentState, Function) else self._latentState
             hyperparameterGradients = self._gp.engine.evaluate_hyper_gradient(
-                latentExpansion, linearPredictorScore, self._gp.covarianceFunction
+                self._latentState, linearPredictorScore,
+                self._gp.covarianceFunction
             )
             gradLogLengthScale = hyperparameterGradients.get('log_rho', 0.0) \
                 + priorGradient[0] * lengthScale + 1.0

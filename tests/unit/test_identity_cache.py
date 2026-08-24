@@ -71,10 +71,12 @@ class TestForwardMapExplicitState:
         model = SGLMM(gp, grid)
 
         rng = np.random.default_rng(20240720)
-        firstParameter = gp.parameter.clone()
-        firstParameter.coordinate = rng.standard_normal(firstParameter.dimension)
-        secondParameter = gp.parameter.clone()
-        secondParameter.coordinate = rng.standard_normal(secondParameter.dimension)
+        firstParameter = gp.parameter.with_coordinate(
+            rng.standard_normal(gp.parameter.dimension)
+        )
+        secondParameter = gp.parameter.with_coordinate(
+            rng.standard_normal(gp.parameter.dimension)
+        )
 
         firstState = model.prepare(firstParameter)
         secondState = model.prepare(secondParameter)

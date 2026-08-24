@@ -186,7 +186,4 @@ class Gaussian(AbsolutelyContinuousProbabilityMeasure):
         xi = rng.standard_normal(self.density.domainDimension)
         colouredXi = self.density.covariance.apply_chol_factor(xi)
 
-        realisation = self.mean.clone()
-        realisation.coordinate = m + colouredXi
-
-        return realisation
+        return self.mean.with_coordinate(m + colouredXi)

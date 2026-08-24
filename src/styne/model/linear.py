@@ -56,9 +56,9 @@ class LinearForwardMap(ForwardMap):
         Vector
         """
 
-        v = parameter.clone()
-        v.coordinate = self._features @ parameter.coordinate
-        return v
+        return parameter.with_coordinate(
+            self._features @ parameter.coordinate
+        )
 
     def adjoint_directional_derivative(self, w: np.ndarray) -> np.ndarray:
         """

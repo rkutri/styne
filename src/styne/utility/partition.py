@@ -116,6 +116,11 @@ class IndependentPartitionDensity(DensityInterface):
         return self._partition.global_domain_type()
 
     @property
+    def parameter(self) -> Parameter:
+        """Parameter template retaining the partition's static metadata."""
+        return self._partition.parameter
+
+    @property
     def domainDimension(self) -> int:
         return self._partition.global_dimension()
 

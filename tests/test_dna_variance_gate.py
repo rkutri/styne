@@ -24,8 +24,7 @@ SEED = 12345
 def _center_variance(q, alpha, d):
     eng = DNAFourierEngine(q, d, alpha)
     eng.build_covariance(StubFourierCov(ELL))
-    real = eng.build_realisation()
-    real.spectralWeights = eng.spectralWeights
+    expansion = eng.build_expansion()
     n = np.asarray(eng.spectralWeights).size
 
     nG = tuple(qj + 2 for qj in (q if not np.isscalar(q) else (q,) * d))
@@ -34,8 +33,10 @@ def _center_variance(q, alpha, d):
     rng = np.random.default_rng(SEED)
     acc = 0.0
     for _ in range(K):
-        real.coefficient = rng.standard_normal(n)
-        field = np.asarray(real.evaluate_native()).reshape(nG)
+        coefficient = rng.standard_normal(n)
+        field = np.asarray(
+            expansion.evaluate_native(coefficient)
+        ).reshape(nG)
         acc += field[centre]**2
     return acc / K
 

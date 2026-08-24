@@ -1,6 +1,5 @@
 from abc import ABC, abstractmethod
 
-import numpy as np
 from numpy import ndarray
 
 from styne.model.representation.expansion import Expansion
@@ -28,7 +27,7 @@ class GPEngine(ABC):
     Base class for Gaussian process parametrisation engines.
 
     The engine defines the mapping between latent coefficients (parameters) and 
-    the GP realisation. Implementations must follow the **whitening contract**: 
+    the GP function. Implementations must follow the **whitening contract**:
     the latent parameters are assumed to be independent white noise vectors 
     sampled from a standard normal distribution. The engine is responsible for 
     applying the square root of the covariance operator (e.g. Cholesky factor 
@@ -42,16 +41,14 @@ class GPEngine(ABC):
     def requires_covariance_rebuild(self) -> bool:
         return False
 
-    def at_sites(self, realisation: Expansion, sites: Grid) -> ndarray:
-        return realisation.evaluate(sites)
-
     def evaluate(
             self, coefficient: ndarray,
             covariance: CovarianceMatrix) -> ndarray:
         """Synthesise values from an explicit whitened coefficient.
 
-        GP synthesis is linear under the engine whitening contract, so the
-        evaluation operator is also its own parameter Jacobian action.
+        All engine operations use a trailing feature axis. Coefficients have
+        shape ``(..., parameter_dimension)`` and the result has shape
+        ``(..., site_count)``.
         """
         return self.apply_jacobian(coefficient, covariance)
 
@@ -62,7 +59,7 @@ class GPEngine(ABC):
         ...
 
     @abstractmethod
-    def build_realisation(self) -> Expansion:
+    def build_expansion(self) -> Expansion:
         ...
 
     @abstractmethod
@@ -72,12 +69,16 @@ class GPEngine(ABC):
 
     @abstractmethod
     def apply_jacobian(
-            self, v: ndarray, covariance: CovarianceMatrix) -> ndarray:
+            self, vector: ndarray,
+            covariance: CovarianceMatrix) -> ndarray:
+        """Map ``(..., parameter_dimension)`` to ``(..., site_count)``."""
         ...
 
     @abstractmethod
     def apply_adjoint_jacobian(
-            self, w: ndarray, covariance: CovarianceMatrix) -> ndarray:
+            self, cotangent: ndarray,
+            covariance: CovarianceMatrix) -> ndarray:
+        """Map ``(..., site_count)`` to ``(..., parameter_dimension)``."""
         ...
 
     @abstractmethod

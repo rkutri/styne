@@ -2,7 +2,7 @@ import numpy as np
 from scipy.sparse.linalg import spsolve
 
 from styne.gp import GaussianProcess
-from styne.gp.dna import DNAFourierEngine, DNAFourierRealisation
+from styne.gp.dna import DNAFourierEngine, DNAFourierExpansion
 from styne.mcmc.diagnostics import AcceptanceRateDiagnostics
 from styne.mcmc.method.mala import (
     MALAProposal,
@@ -123,18 +123,17 @@ def test_direct_and_dna_gp_reference_evaluations():
 
 def test_dna_transform_and_adjoint_closed_form_oracle():
     q = (2, 1)
-    realisation = DNAFourierRealisation(q, d=2, alpha=(1.0, 1.5))
-    coefficient = np.linspace(-0.8, 1.1, realisation.dimension)
+    expansion = DNAFourierExpansion(q, d=2, alpha=(1.0, 1.5))
+    coefficient = np.linspace(-0.8, 1.1, expansion.dimension)
     residual = np.linspace(-0.4, 0.7, 12)
-    realisation.coefficient = coefficient
 
     synthesisMatrix = dna_synthesis_matrix(q, d=2)
     np.testing.assert_allclose(
-        realisation.evaluate_native(), synthesisMatrix @ coefficient,
+        expansion.evaluate_native(coefficient), synthesisMatrix @ coefficient,
         rtol=0.0, atol=1e-12,
     )
     np.testing.assert_allclose(
-        realisation.adjoint_synthesis(residual),
+        expansion.adjoint_synthesis(residual),
         dna_adjoint_synthesis(q, 2, residual),
         rtol=0.0, atol=1e-12,
     )

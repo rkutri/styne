@@ -4,7 +4,6 @@ import numpy as np
 from numpy.random import Generator
 from styne.gp.engine import GPEngine
 from styne.parameter.function import Function
-from styne.parameter.vector import Vector
 from styne.model.representation.expansion import Expansion
 from styne.statistics.gaussian import Gaussian
 from styne.statistics.interface import CovarianceFunctionInterface
@@ -18,19 +17,15 @@ from styne.gp.dna import DNAFourierEngine
 
 class GPSampler(ProbabilityMeasure):
 
-    def __init__(self, realisation: Expansion, measure: Gaussian):
+    def __init__(self, expansion: Expansion, measure: Gaussian):
 
-        self._realisation = realisation
+        self._expansion = expansion
         self._measure = measure
 
     def draw(self, rng: Generator) -> Function:
 
         sample = self._measure.draw(rng)
-
-        result = self._realisation.clone()
-        result.coefficient = sample.coordinate
-
-        return Function(result)
+        return Function(sample.coordinate, self._expansion)
 
 
 class GaussianProcess:
@@ -38,22 +33,20 @@ class GaussianProcess:
     A Gaussian process defined by a covariance function and a GPEngine.
 
     The engine handles the parametrisation. `parameter` exposes the
-    current realisation as a `Function` parameter for use in forward models.
-    `sampler` returns a `GPSampler` for drawing independent realisations.
+    current field as a `Function` parameter for use in forward models.
+    `sampler` returns a `GPSampler` for drawing independent functions.
     """
 
     def __init__(self, covFcn: CovarianceFunctionInterface, engine: GPEngine):
 
         measureCov = engine.build_covariance(covFcn)
-        self._realisation = engine.build_realisation()
-        self._param = Function(self._realisation)
+        self._expansion = engine.build_expansion()
+        self._param = Function(
+            np.zeros(self._expansion.dimension), self._expansion
+        )
 
         self._measure = Gaussian(measureCov)
         self._measure.mean = self._param.clone()
-        self._measure.mean.coordinate = np.zeros(self._realisation.dimension)
-
-        if hasattr(engine, 'spectralWeights'):
-            self._realisation.spectralWeights = engine.spectralWeights
 
         self._covFcn = covFcn
         self._engine = engine
@@ -97,12 +90,15 @@ class GaussianProcess:
 
         self._covFcn = covFcn
         self._measure.covariance = self._engine.build_covariance(covFcn)
-        if hasattr(self._engine, 'spectralWeights'):
-            self._realisation.spectralWeights = self._engine.spectralWeights
+        self._replace_expansion(self._engine.build_expansion())
 
     @property
     def parameter(self) -> Function:
         return self._param
+
+    @property
+    def expansion(self) -> Expansion:
+        return self._expansion
 
     @property
     def resolution(self) -> tuple:
@@ -147,13 +143,11 @@ class GaussianProcess:
         if self._engine.requires_covariance_rebuild():
 
             self._measure.covariance = self._engine.build_covariance(self._covFcn)
-            self._realisation = self._engine.build_realisation()
-            if hasattr(self._engine, 'spectralWeights'):
-                self._realisation.spectralWeights = self._engine.spectralWeights
-                
-            self._param = Function(self._realisation)
+            self._expansion = self._engine.build_expansion()
+            self._param = Function(
+                np.zeros(self._expansion.dimension), self._expansion
+            )
             self._measure.mean = self._param.clone()
-            self._measure.mean.coordinate = np.zeros(self._realisation.dimension)
 
     @property
     def engine(self):
@@ -161,7 +155,14 @@ class GaussianProcess:
 
     @property
     def sampler(self) -> GPSampler:
-        return GPSampler(self._realisation, self._measure)
+        return GPSampler(self._expansion, self._measure)
+
+    def _replace_expansion(self, expansion: Expansion) -> None:
+        coordinate = self._param.coordinate
+        meanCoordinate = self._measure.mean.coordinate
+        self._expansion = expansion
+        self._param = Function(coordinate, expansion)
+        self._measure.mean = Function(meanCoordinate, expansion)
 
     def at_sites(self, coefficient: np.ndarray) -> np.ndarray:
         """Evaluate an explicit latent coefficient at the configured sites.
@@ -174,13 +175,13 @@ class GaussianProcess:
             raise ValueError("sites not set on GaussianProcess")
 
         return self._engine.evaluate(
-            np.asarray(coefficient), self._measure.covariance)
+            coefficient, self._measure.covariance)
 
-    def directional_derivative(self, v: np.ndarray) -> np.ndarray:
+    def directional_derivative(self, vector: np.ndarray) -> np.ndarray:
         return self._engine.apply_jacobian(
-            np.asarray(v), self._measure.covariance)
+            vector, self._measure.covariance)
 
-    def adjoint_directional_derivative(self, w: np.ndarray) -> np.ndarray:
+    def adjoint_directional_derivative(
+            self, cotangent: np.ndarray) -> np.ndarray:
         return self._engine.apply_adjoint_jacobian(
-            np.asarray(w), self._measure.covariance)
-
+            cotangent, self._measure.covariance)

@@ -52,7 +52,9 @@ class GibbsSampler(MCMCSampler):
         state = self._lastState.clone()
         for i in range(self._nBlocks):
             newBlock = self._sample_block(i, state)
-            state.block(i).coordinate = newBlock.coordinate
+            blocks = [state.block(j) for j in range(self._nBlocks)]
+            blocks[i] = newBlock
+            state = BlockParameter(blocks, state.names)
         if self._storeChain:
             self._chain.append(
                 [state.block(i).coordinate for i in range(self._nBlocks)]

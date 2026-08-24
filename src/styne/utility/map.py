@@ -29,13 +29,11 @@ def determine_map(density: DensityInterface, initial_guess: Parameter, method: s
         raise TypeError("Density must satisfy DifferentiableDensity protocol to compute MAP.")
 
     def objective(x: np.ndarray) -> float:
-        p = initial_guess.clone()
-        p.coordinate = x
+        p = initial_guess.with_coordinate(x)
         return -density.evaluate_log(p)
 
     def jacobian(x: np.ndarray) -> np.ndarray:
-        p = initial_guess.clone()
-        p.coordinate = x
+        p = initial_guess.with_coordinate(x)
         return -density.evaluate_log_gradient(p)
 
     res = minimize(
@@ -48,8 +46,7 @@ def determine_map(density: DensityInterface, initial_guess: Parameter, method: s
     if not res.success:
         raise RuntimeError(f"Optimization failed: {res.message}")
 
-    x_map = initial_guess.clone()
-    x_map.coordinate = res.x
+    x_map = initial_guess.with_coordinate(res.x)
 
     if isinstance(density, TwiceDifferentiableDensity):
         hessian = -density.evaluate_log_hessian(x_map)

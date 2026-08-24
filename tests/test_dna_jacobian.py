@@ -20,12 +20,12 @@ class TestDNAJacobian(unittest.TestCase):
         n_total = engine.spectralWeights.size
         n_dir = 5
         
-        # Matrix input: (spectral_dim, n_directions)
-        v = np.random.randn(n_total, n_dir)
+        # Batched input: (n_directions, spectral_dim)
+        v = np.random.randn(n_dir, n_total)
         
         try:
-            res = engine.apply_jacobian(v, None)
-            self.assertEqual(res.shape, (len(sites), n_dir))
+            res = engine.apply_jacobian(vector=v, covariance=None)
+            self.assertEqual(res.shape, (n_dir, len(sites)))
         except ValueError as e:
             self.fail(f"apply_jacobian failed with multiple directions: {e}")
 
@@ -43,12 +43,14 @@ class TestDNAJacobian(unittest.TestCase):
         n_total = engine.spectralWeights.size
         n_dir = 5
         
-        # Matrix input: (n_sites, n_directions)
-        w = np.random.randn(len(sites), n_dir)
+        # Batched input: (n_directions, n_sites)
+        w = np.random.randn(n_dir, len(sites))
         
         try:
-            res = engine.apply_adjoint_jacobian(w, None)
-            self.assertEqual(res.shape, (n_total, n_dir))
+            res = engine.apply_adjoint_jacobian(
+                cotangent=w, covariance=None
+            )
+            self.assertEqual(res.shape, (n_dir, n_total))
         except ValueError as e:
             self.fail(f"apply_adjoint_jacobian failed with multiple directions: {e}")
 
@@ -69,11 +71,11 @@ class TestDNAJacobian(unittest.TestCase):
         n_total = engine.spectralWeights.size
         n_dir = 3
         
-        v = np.random.randn(n_total, n_dir)
+        v = np.random.randn(n_dir, n_total)
         
         try:
             res = engine.apply_jacobian(v, None)
-            self.assertEqual(res.shape, (len(sites), n_dir))
+            self.assertEqual(res.shape, (n_dir, len(sites)))
         except ValueError as e:
             self.fail(f"apply_jacobian failed in 2D with multiple directions: {e}")
 
@@ -93,11 +95,11 @@ class TestDNAJacobian(unittest.TestCase):
         n_total = engine.spectralWeights.size
         n_dir = 3
         
-        w = np.random.randn(len(sites), n_dir)
+        w = np.random.randn(n_dir, len(sites))
         
         try:
             res = engine.apply_adjoint_jacobian(w, None)
-            self.assertEqual(res.shape, (n_total, n_dir))
+            self.assertEqual(res.shape, (n_dir, n_total))
         except ValueError as e:
             self.fail(f"apply_adjoint_jacobian failed in 2D with multiple directions: {e}")
 

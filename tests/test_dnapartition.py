@@ -69,8 +69,7 @@ def test_independent_partition_density_equivalence():
     
     # Merge
     mergedCoord = partition._rule.merge([coarseSample.coordinate, fineSample.coordinate])
-    mergedParam = dnaGP.parameter.clone()
-    mergedParam.coordinate = mergedCoord
+    mergedParam = dnaGP.parameter.with_coordinate(mergedCoord)
     
     # Independent Partition Density
     partDens = IndependentPartitionDensity(

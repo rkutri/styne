@@ -28,14 +28,14 @@ def test_sglmm_predictor_identical_sites():
     
 
     
-    parameter = gp.parameter.clone()
-    parameter.coordinate = np.random.randn(parameter.dimension)
+    parameter = gp.parameter.with_coordinate(
+        np.random.randn(gp.parameter.dimension)
+    )
     
     v = np.random.randn(parameter.dimension)
     w = np.random.randn(len(obsGrid))
     
-    vParam = parameter.clone()
-    vParam.coordinate = v
+    vParam = parameter.with_coordinate(v)
     deriv = predictor.directional_derivative(vParam)
     
     assert deriv.shape == (len(obsGrid),)
@@ -46,7 +46,6 @@ def test_sglmm_predictor_identical_sites():
     innerFwd = np.dot(deriv, w)
     innerBwd = np.dot(v, adj)
     np.testing.assert_allclose(innerFwd, innerBwd, rtol=1e-5)
-
 
 
 

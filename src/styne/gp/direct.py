@@ -8,99 +8,84 @@ from styne.utility.grid import Grid
 from styne.utility.interpolation import Interpolation1D
 
 
-class DirectRealisation(Expansion):
+class DirectExpansion(Expansion):
     """
     A Gaussian process parametrisation where the coordinates directly
-    correspond to the values of the realisation at the grid points.
+    correspond to function values at the representation grid points.
 
     Parameters
     ----------
     grid : Grid
-        The grid the realisation's coefficients live on.
+        The grid on which the direct coefficients live.
     dimension : int
         Number of coefficients (grid points).
     """
 
-    def __init__(self, grid: Grid, dimension: int):
+    def __init__(
+            self, grid: Grid, dimension: int,
+            shapeCovariance: CovarianceMatrix = None):
 
         self._dim = dimension
         self._grid = grid
-        self._coeff = None
-        self._shapeCov = None
+        self._shapeCov = shapeCovariance
 
     @property
     def dimension(self) -> int:
         return self._dim
 
-    @property
-    def coefficient(self) -> np.ndarray:
-
-        if self._coeff is None:
-            raise ValueError("DirectRealisation has no coefficient set.")
-
-        return self._coeff.copy()
-
-    @coefficient.setter
-    def coefficient(self, coeff: np.ndarray) -> None:
-        self.project(self.validate(coeff))
-
-    def validate(self, coeff: np.ndarray) -> np.ndarray:
-
+    def _validate(self, coeff: np.ndarray) -> np.ndarray:
         coeff = np.asarray(coeff, dtype=float)
-
-        if coeff.size != self._dim:
+        if coeff.ndim < 1 or coeff.shape[-1] != self._dim:
             raise ValueError(
-                f"Expected {self._dim} values, got {coeff.size}.")
-
+                f"Expected coefficient shape (..., {self._dim}); "
+                f"got {coeff.shape}."
+            )
         return coeff
 
-    def project(self, coeff: np.ndarray) -> None:
-
-        if coeff.size != self._dim:
-            raise ValueError(
-                f"Expected {self._dim} values, got {coeff.size}.")
-
-        self._coeff = coeff
-
-    def evaluate(self, queryGrid: Grid) -> np.ndarray:
+    def evaluate(self, coefficient, grid: Grid) -> np.ndarray:
         """
-        Linearly interpolate the realisation onto a query grid.
+        Linearly interpolate explicit coefficients onto a query grid.
 
         Parameters
         ----------
-        queryGrid : Grid
-            Sites to evaluate the realisation at.
+        grid : Grid
+            Sites at which to evaluate the coefficients.
 
         Returns
         -------
         np.ndarray
-            Interpolated field values at `queryGrid`.
+            Interpolated field values at `grid`.
 
         Raises
         ------
         NotImplementedError
-            If the realisation's own grid is 2D. Off-grid evaluation is
+            If the representation grid is 2D. Off-grid evaluation is
             currently only implemented in 1D.
         """
 
         if self._grid.dimension != 1:
             raise NotImplementedError(
-                "DirectRealisation does not support evaluate() in 2D."
+                "DirectExpansion does not support evaluate() in 2D."
             )
 
         gridArr = self._grid.to_array().ravel()
-        fieldValues = self._coeff
-        if self._shapeCov is not None:
-            fieldValues = self._shapeCov.apply_chol_factor(fieldValues)
+        coefficient = self._validate(coefficient)
 
-        return Interpolation1D(gridArr, fieldValues, degree=1).evaluate(queryGrid)
+        def evaluate_one(values):
+            if self._shapeCov is not None:
+                values = self._shapeCov.apply_chol_factor(values)
+            return Interpolation1D(
+                gridArr, values, degree=1
+            ).evaluate(grid)
 
-    def clone(self) -> 'DirectRealisation':
-        result = DirectRealisation(self._grid, self._dim)
-        if self._coeff is not None:
-            result._coeff = self._coeff.copy()
-        result._shapeCov = self._shapeCov
-        return result
+        if coefficient.ndim == 1:
+            return evaluate_one(coefficient)
+        batchShape = coefficient.shape[:-1]
+        values = np.stack([
+            evaluate_one(row)
+            for row in coefficient.reshape(-1, self._dim)
+        ])
+        return values.reshape(batchShape + (values.shape[-1],))
 
 
 class DirectGPEngine(GPEngine):
@@ -142,18 +127,18 @@ class DirectGPEngine(GPEngine):
         if sites is not None:
             self._grid = sites
 
-    def build_realisation(self) -> DirectRealisation:
+    def build_expansion(self) -> DirectExpansion:
         """
-        Construct a new `DirectRealisation` on the engine's current grid.
+        Construct a new `DirectExpansion` on the engine's current grid.
 
         Returns
         -------
-        DirectRealisation
-            A fresh, uninitialised realisation matching the engine's grid.
+        DirectExpansion
+            Static direct representation matching the engine's grid.
         """
-        result = DirectRealisation(self._grid, len(self._grid))
-        result._shapeCov = self._shapeCovariance
-        return result
+        return DirectExpansion(
+            self._grid, len(self._grid), self._shapeCovariance
+        )
 
     def build_covariance(
             self, covarianceFunction: CovarianceFunctionInterface
@@ -175,19 +160,34 @@ class DirectGPEngine(GPEngine):
 
 
     def apply_jacobian(
-            self, v: np.ndarray, covariance: CovarianceMatrix) -> np.ndarray:
-        return self._shapeCovariance.apply_chol_factor(v)
+            self, vector: np.ndarray,
+            covariance: CovarianceMatrix) -> np.ndarray:
+        if vector.ndim == 1:
+            return self._shapeCovariance.apply_chol_factor(vector)
+        batchShape = vector.shape[:-1]
+        result = np.stack([
+            self._shapeCovariance.apply_chol_factor(row)
+            for row in vector.reshape(-1, vector.shape[-1])
+        ])
+        return result.reshape(batchShape + (result.shape[-1],))
 
     def apply_adjoint_jacobian(
-            self, w: np.ndarray, covariance: CovarianceMatrix) -> np.ndarray:
-        return self._shapeCovariance.apply_chol_factor_transpose(w)
+            self, cotangent: np.ndarray,
+            covariance: CovarianceMatrix) -> np.ndarray:
+        if cotangent.ndim == 1:
+            return self._shapeCovariance.apply_chol_factor_transpose(cotangent)
+        batchShape = cotangent.shape[:-1]
+        result = np.stack([
+            self._shapeCovariance.apply_chol_factor_transpose(row)
+            for row in cotangent.reshape(-1, cotangent.shape[-1])
+        ])
+        return result.reshape(batchShape + (result.shape[-1],))
 
     def evaluate_exact_conditional(self, queryGrid: Grid, state, covFcn: CovarianceFunctionInterface) -> np.ndarray:
         """ Exact conditional mean projection for Direct engine. """
-        from scipy.linalg import cholesky, cho_solve
-        
         # Determine coordinate (handle both Expansion and Function)
-        z = state.coordinate if hasattr(state, 'coordinate') else state.coefficient
+        z = state.coordinate if hasattr(state, 'coordinate') \
+            else np.asarray(state)
         
         kStar = covFcn.evaluate_covariance(queryGrid, self._grid)
         kStarArr = kStar.to_dense() if isinstance(kStar, DenseCovarianceMatrix) else np.asarray(kStar)
@@ -209,7 +209,8 @@ class DirectGPEngine(GPEngine):
              raise NotImplementedError("Hyper gradient requires dense covariance matrix.")
              
         L = self._shapeCovariance._cholFactor
-        z = state.coefficient
+        z = state.coordinate if hasattr(state, 'coordinate') \
+            else np.asarray(state)
         result = {}
         for paramName, dK in gradK.items():
             dKArr = dK.to_dense() if isinstance(dK, DenseCovarianceMatrix) else np.asarray(dK)

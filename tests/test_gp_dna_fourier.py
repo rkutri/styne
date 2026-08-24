@@ -1,12 +1,8 @@
 import numpy as np
-import pytest
 
 from numpy.random import default_rng
 
-from styne.gp.dna import (
-    BC, BoundaryCondition,
-    DNAFourierRealisation, DNAFourierEngine
-)
+from styne.gp.dna import DNAFourierExpansion, DNAFourierEngine
 from styne.gp.gaussianprocess import GaussianProcess, GPSampler
 from styne.parameter.function import Function
 from styne.statistics.gaussian import Gaussian
@@ -25,86 +21,90 @@ def _cov2d():
     return MaternCovariance2D(0.3, 1.5, 1.0)
 
 
-# ---- DNAFourierRealisation API (1D) ----
+# ---- DNAFourierExpansion API (1D) ----
 
-class TestDNAFourierRealisation1D:
+class TestDNAFourierExpansion1D:
 
     def setup_method(self):
         self.q = 5
-        self.r = DNAFourierRealisation(self.q, d=1)
+        self.expansion = DNAFourierExpansion(self.q, d=1)
 
     def test_dimension(self):
-        assert self.r.dimension == 2 * self.q + 1
+        assert self.expansion.dimension == 2 * self.q + 1
 
-    # (Removed coefficient unset test since DNAFourierRealisation initializes to zero)
-
-    def test_coefficient_round_trip(self):
-        coeff = np.arange(2 * self.q + 1, dtype=float)
-        self.r.coefficient = coeff
-        np.testing.assert_allclose(self.r.coefficient, coeff)
-
-    def test_coefficient_propagates_to_components(self):
-        coeff = np.arange(self.r.dimension, dtype=float)
-        self.r.coefficient = coeff
-        offset = 0
-        for i in range(self.r._param.nBlocks):
-            dim = self.r._param._dims[i]
-            np.testing.assert_allclose(
-                self.r._param.block(i).function.coefficient,
-                coeff[offset:offset + dim]
-            )
-            offset += dim
+    def test_has_no_coefficient_state(self):
+        for name in ("coefficient", "project", "clone"):
+            assert not hasattr(self.expansion, name)
+        assert "_param" not in vars(self.expansion)
+        assert "_nativeBuffer" not in vars(self.expansion)
 
     def test_zero_coefficient_zero_field(self):
-        self.r.coefficient = np.zeros(self.r.dimension)
         pts = UniformGrid(0.1, 0.9, 10)
-        np.testing.assert_allclose(self.r.evaluate(pts), 0.)
+        np.testing.assert_allclose(
+            self.expansion.evaluate(
+                np.zeros(self.expansion.dimension), pts
+            ),
+            0.,
+        )
 
     def test_evaluate_shape(self):
-        self.r.coefficient = np.zeros(self.r.dimension)
         pts = UniformGrid(0.1, 0.9, 15)
-        assert self.r.evaluate(pts).shape == (15,)
+        assert self.expansion.evaluate(
+            coefficient=np.zeros((2, 3, self.expansion.dimension)),
+            grid=pts,
+        ).shape == (2, 3, 15)
 
-    def test_clone_independence(self):
-        self.r.coefficient = np.ones(self.r.dimension)
-        clone = self.r.clone()
-        clone.coefficient = np.zeros(self.r.dimension)
-        np.testing.assert_allclose(self.r.coefficient, 1.)
+    def test_native_evaluation_preserves_leading_batch_dimensions(self):
+        coefficient = np.zeros((2, 3, self.expansion.dimension))
+
+        assert self.expansion.evaluate_native(
+            coefficient
+        ).shape == (2, 3, self.q + 2)
+
+    def test_multiple_coefficients_are_independent(self):
+        first = self.expansion.evaluate_native(
+            np.ones(self.expansion.dimension)
+        )
+        self.expansion.evaluate_native(np.zeros(self.expansion.dimension))
+        np.testing.assert_allclose(
+            first,
+            self.expansion.evaluate_native(
+                np.ones(self.expansion.dimension)
+            ),
+        )
 
 
-# ---- DNAFourierRealisation API (2D) ----
+# ---- DNAFourierExpansion API (2D) ----
 
-class TestDNAFourierRealisation2D:
+class TestDNAFourierExpansion2D:
 
     def setup_method(self):
         self.q = 4
-        self.r = DNAFourierRealisation(self.q, d=2)
+        self.expansion = DNAFourierExpansion(self.q, d=2)
 
     def test_dimension(self):
-        assert self.r.dimension == (2 * self.q + 1)**2
-
-    # (Removed coefficient unset test since DNAFourierRealisation initializes to zero)
-
-    def test_coefficient_round_trip(self):
-        coeff = np.arange((2 * self.q + 1)**2, dtype=float)
-        self.r.coefficient = coeff
-        np.testing.assert_allclose(self.r.coefficient, coeff)
+        assert self.expansion.dimension == (2 * self.q + 1)**2
 
     def test_zero_coefficient_zero_field(self):
-        self.r.coefficient = np.zeros(self.r.dimension)
         pts = Grid(np.stack(
             [np.linspace(0.1, 0.9, 6),
              np.linspace(0.1, 0.9, 6)],
             axis=1))
-        np.testing.assert_allclose(self.r.evaluate(pts), 0.)
+        np.testing.assert_allclose(
+            self.expansion.evaluate(
+                np.zeros(self.expansion.dimension), pts
+            ),
+            0.,
+        )
 
     def test_evaluate_shape(self):
-        self.r.coefficient = np.zeros(self.r.dimension)
         pts = Grid(np.stack(
             [np.linspace(0.1, 0.9, 8),
              np.linspace(0.1, 0.9, 8)],
             axis=1))
-        assert self.r.evaluate(pts).shape == (8,)
+        assert self.expansion.evaluate(
+            np.zeros(self.expansion.dimension), pts
+        ).shape == (8,)
 
 
 # ---- DNAFourierEngine API ----
@@ -116,10 +116,10 @@ class TestDNAFourierEngine1D:
         self.engine = DNAFourierEngine(self.q, d=1)
         self.covFcn = _cov1d()
 
-    def test_build_realisation_type(self):
+    def test_build_expansion_type(self):
         assert isinstance(
-            self.engine.build_realisation(),
-            DNAFourierRealisation)
+            self.engine.build_expansion(),
+            DNAFourierExpansion)
 
     def test_covariance_type(self):
         assert isinstance(
@@ -134,9 +134,9 @@ class TestDNAFourierEngine1D:
         cov = self.engine.build_covariance(self.covFcn)
         assert np.all(cov.marginalVariance > 0.)
 
-    def test_covariance_matches_realisation_dimension(self):
+    def test_covariance_matches_expansion_dimension(self):
         assert (self.engine.build_covariance(self.covFcn).dimension
-                == self.engine.build_realisation().dimension)
+                == self.engine.build_expansion().dimension)
 
 
 class TestDNAFourierEngine2D:
@@ -146,10 +146,10 @@ class TestDNAFourierEngine2D:
         self.engine = DNAFourierEngine(self.q, d=2)
         self.covFcn = _cov2d()
 
-    def test_build_realisation_type(self):
+    def test_build_expansion_type(self):
         assert isinstance(
-            self.engine.build_realisation(),
-            DNAFourierRealisation)
+            self.engine.build_expansion(),
+            DNAFourierExpansion)
 
     def test_covariance_dimension(self):
         assert self.engine.build_covariance(
@@ -160,9 +160,9 @@ class TestDNAFourierEngine2D:
         cov = self.engine.build_covariance(self.covFcn)
         assert np.all(cov.marginalVariance > 0.)
 
-    def test_covariance_matches_realisation_dimension(self):
+    def test_covariance_matches_expansion_dimension(self):
         assert (self.engine.build_covariance(self.covFcn).dimension
-                == self.engine.build_realisation().dimension)
+                == self.engine.build_expansion().dimension)
 
 
 # ---- GPSampler equivalence ----
@@ -179,21 +179,21 @@ class TestDNAFourierGPSampler:
     def _check_equivalence(self, q, d, covFcn, pts):
         engine = DNAFourierEngine(q, d)
         cov = engine.build_covariance(covFcn)
-        realisation = engine.build_realisation()
+        expansion = engine.build_expansion()
         measure = Gaussian(cov)
-        mean = Function(realisation.clone())
-        mean.coordinate = np.zeros(realisation.dimension)
+        mean = Function(
+            np.zeros(expansion.dimension), expansion
+        )
         measure.mean = mean
 
         sqrtVars = np.sqrt(cov.marginalVariance)
 
         rng = default_rng(self.seed)
-        realisation.coefficient = sqrtVars * \
-            rng.standard_normal(realisation.dimension)
-        result1 = realisation.evaluate(pts)
+        coefficient = sqrtVars * rng.standard_normal(expansion.dimension)
+        result1 = expansion.evaluate(coefficient, pts)
 
         rng = default_rng(self.seed)
-        result2 = GPSampler(realisation, measure).draw(rng).function.evaluate(pts)
+        result2 = GPSampler(expansion, measure).draw(rng).evaluate(pts)
 
         np.testing.assert_allclose(result1, result2, rtol=1e-12)
 
@@ -225,12 +225,13 @@ class TestDNASpectralStructure:
 
     def _sample_coefficients(self, engine, covFcn, nSamples, seed=7):
         cov = engine.build_covariance(covFcn)
-        realisation = engine.build_realisation()
+        expansion = engine.build_expansion()
         measure = Gaussian(cov)
-        mean = Function(realisation.clone())
-        mean.coordinate = np.zeros(realisation.dimension)
+        mean = Function(
+            np.zeros(expansion.dimension), expansion
+        )
         measure.mean = mean
-        sampler = GPSampler(realisation, measure)
+        sampler = GPSampler(expansion, measure)
         rng = default_rng(seed)
         return cov, np.array([sampler.draw(rng).coordinate
                               for _ in range(nSamples)])
@@ -304,7 +305,7 @@ class TestDNAIsotropy2D:
         ys = np.linspace(0.1, 0.9, 10)
         pts = Grid(np.array([[x, y] for x in xs for y in ys]))
 
-        fields = np.array([gp.sampler.draw(rng).function.evaluate(pts)
+        fields = np.array([gp.sampler.draw(rng).evaluate(pts)
                            for _ in range(nSamples)])
         variances = np.var(fields, axis=0)
 
@@ -322,7 +323,7 @@ class TestDNAIsotropy2D:
         ys = np.linspace(0.2, 0.8, 6)
         pts = Grid(np.array([[x, y] for x in xs for y in ys]))
 
-        fields = np.array([gp.sampler.draw(rng).function.evaluate(pts)
+        fields = np.array([gp.sampler.draw(rng).evaluate(pts)
                            for _ in range(nSamples)])
         variances = np.var(fields, axis=0)
         means = np.mean(fields, axis=0)
@@ -330,4 +331,3 @@ class TestDNAIsotropy2D:
         maxStdUnits = np.max(
             np.abs(means)) / np.sqrt(variances.mean() / nSamples)
         assert maxStdUnits < 4.0, f"Empirical mean too large: {maxStdUnits:.2f} std units"
-

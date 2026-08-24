@@ -30,11 +30,9 @@ def _outputs():
     eng.build_covariance(cov)                      # sets eng.spectralWeights
     weights = np.asarray(eng.spectralWeights)
 
-    real = eng.build_realisation()
-    real.spectralWeights = eng.spectralWeights
+    expansion = eng.build_expansion()
     coeff = np.linspace(-1.0, 1.0, weights.size)   # fixed, not random
-    real.coefficient = coeff
-    native = real.evaluate_native()
+    native = expansion.evaluate_native(coeff)
 
     mult = eng.compute_log_length_multiplier(nu=1.5, lengthScale=ELL)
     return {"weights": weights, "native": np.asarray(native), "mult": np.asarray(mult)}

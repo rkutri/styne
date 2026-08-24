@@ -1,5 +1,4 @@
 import numpy as np
-from styne.parameter.numeric import Numeric
 
 
 class Data:
@@ -18,10 +17,6 @@ class Data:
         self._dimension = int(dimension)
         self._design = np.asarray(design)
         self._measurement = None
-
-    @property
-    def dType(self):
-        return Numeric
 
     @property
     def dimension(self) -> int:

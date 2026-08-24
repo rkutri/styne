@@ -21,9 +21,10 @@ def test_sglmm_predictor_regression():
     
     pred_mean = predictor.mean()
     
-    realisation = gp.engine.build_realisation()
-    realisation.coefficient = z
-    exact_conditional = gp.engine.evaluate_exact_conditional(queryGrid, realisation, gp.covarianceFunction)
+    parameter = gp.parameter.with_coordinate(z)
+    exact_conditional = gp.engine.evaluate_exact_conditional(
+        queryGrid, parameter, gp.covarianceFunction
+    )
     
     assert np.allclose(pred_mean, exact_conditional, atol=1e-10)
 
@@ -40,8 +41,9 @@ def test_sglmm_predictor_regression_with_trend():
     
     pred_mean = predictor.mean()
     
-    realisation = gp.engine.build_realisation()
-    realisation.coefficient = z
-    exact_conditional = gp.engine.evaluate_exact_conditional(queryGrid, realisation, gp.covarianceFunction)
+    parameter = gp.parameter.with_coordinate(z)
+    exact_conditional = gp.engine.evaluate_exact_conditional(
+        queryGrid, parameter, gp.covarianceFunction
+    )
     
     assert np.allclose(pred_mean, exact_conditional + 5.0, atol=1e-10)

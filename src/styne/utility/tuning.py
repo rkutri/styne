@@ -16,6 +16,7 @@ from styne.statistics.covariance import IIDCovarianceMatrix
 from styne.statistics.gaussian import GaussianDensity
 from styne.statistics.radonnikodym import RadonNikodym
 from styne.utility.bisection import bisection
+from styne.utility.partition import IndependentPartitionDensity
 
 logger = logging.getLogger(__name__)
 
@@ -129,6 +130,10 @@ def infer_init(target):
         return target.reference.mean.clone()
     elif isinstance(target, GaussianDensity):
         return target.mean.clone()
+    elif isinstance(target, IndependentPartitionDensity):
+        return target.parameter.with_coordinate(
+            np.zeros(target.domainDimension)
+        )
     else:
         return target.domainType(np.zeros(target.domainDimension))
 

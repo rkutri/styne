@@ -37,8 +37,10 @@ def test_predictor_is_a_snapshot():
     pred1 = predictor.mean()
 
     z[:] = default_rng(7).standard_normal(gp.parameterDimension)
-    gp.parameter.coordinate = default_rng(99).standard_normal(
-        gp.parameterDimension)
+    replacement = gp.parameter.with_coordinate(
+        default_rng(99).standard_normal(gp.parameterDimension)
+    )
+    assert replacement.expansion is gp.parameter.expansion
     pred2 = predictor.mean()
 
     np.testing.assert_array_equal(pred1, pred2)

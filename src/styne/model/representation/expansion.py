@@ -1,49 +1,30 @@
-from __future__ import annotations
-
 from abc import ABC, abstractmethod
+from typing import Protocol
 
-import copy
-
-from numpy import ndarray, asarray
-
-from styne.parameter.parameter import Parameter
 from styne.utility.grid import Grid
 
 
-class GridFunctionInterface(ABC):
+class GridFunction(Protocol):
+    """Structural contract for an object evaluable on a grid."""
 
-    @abstractmethod
-    def evaluate(self, grid: Grid) -> Grid:
-        pass
+    def evaluate(self, grid: Grid): ...
 
 
-class Expansion(GridFunctionInterface):
+class Expansion(ABC):
+    """Static strategy for evaluating finite-dimensional coefficients.
+
+    Coefficients use a trailing feature axis, ``(..., dimension)``. Evaluation
+    preserves all leading batch dimensions and replaces the feature axis with
+    the expansion's output axis.
+    """
 
     @property
     @abstractmethod
     def dimension(self) -> int:
-        pass
-
-    @property
-    @abstractmethod
-    def coefficient(self) -> ndarray:
-        pass
-
-    @coefficient.setter
-    @abstractmethod
-    def coefficient(self, coefficient: ndarray) -> None:
+        """Number of coefficients accepted by the representation."""
         pass
 
     @abstractmethod
-    def project(self, coefficient: ndarray) -> None:
+    def evaluate(self, coefficient, grid: Grid):
+        """Evaluate coefficients shaped ``(..., dimension)`` on ``grid``."""
         pass
-
-    @staticmethod
-    def validate(coefficient: ndarray) -> ndarray:
-        coefficient = asarray(coefficient, dtype=float)
-        if coefficient.ndim not in [1, 2]:
-            raise ValueError("coefficient must be vector or (nBatch, nParam) matrix")
-        return coefficient
-
-    def clone(self) -> Expansion:
-        return copy.deepcopy(self)

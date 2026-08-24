@@ -58,7 +58,6 @@ def test_dna_predictor_is_an_immutable_snapshot():
 
 def test_bspline_predictor_is_an_immutable_snapshot():
     expansion = BSpline1D(6, degree=3, boundary=[0., 1.])
-    expansion.project(np.zeros(6))
     gp = GaussianProcess.bspline(
         MaternCovariance1D(0.3, 1.5, 0.7), expansion)
     coefficient = np.random.default_rng(2).standard_normal(6)
@@ -94,8 +93,9 @@ def test_sglmm_predictor_features():
     X = np.random.randn(100, 2)
     sglmm = SGLMM(gp, grid, features=X)
     queryGrid = UniformGrid(0., 1., 20)
-    latent = gp.parameter.clone()
-    latent.coordinate = np.zeros(gp.parameterDimension)
+    latent = gp.parameter.with_coordinate(
+        np.zeros(gp.parameterDimension)
+    )
     preparedState = sglmm.prepare(BlockParameter([latent, Vector(np.zeros(2))]))
 
     with pytest.raises(ValueError, match="Out-of-sample features required for prediction."):
@@ -111,8 +111,9 @@ def test_sglmm_predictor_shape():
     
     queryGrid = UniformGrid(0., 1., 20)
     X_pred_wrong = np.random.randn(10, 2)
-    latent = gp.parameter.clone()
-    latent.coordinate = np.zeros(gp.parameterDimension)
+    latent = gp.parameter.with_coordinate(
+        np.zeros(gp.parameterDimension)
+    )
     preparedState = sglmm.prepare(BlockParameter([latent, Vector(np.zeros(2))]))
 
     with pytest.raises(ValueError, match="features must have shape"):

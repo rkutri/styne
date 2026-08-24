@@ -72,7 +72,9 @@ class LocalisedSurrogateDensity(RadonNikodym):
         else:
             self._regGaussian.mean = Vector(np.zeros(surrogateDensity.domainDimension))
         
-        self._regGaussian.mean.coordinate = np.zeros(surrogateDensity.domainDimension)
+        self._regGaussian.mean = self._regGaussian.mean.with_coordinate(
+            np.zeros(surrogateDensity.domainDimension)
+        )
 
         # if the surrogate density is itself a Radon-Nikodym density, there is a
         # choice in which to consider the reference measure. We choose the

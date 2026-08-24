@@ -1,21 +1,30 @@
 import numpy as np
-import pytest
 
 from numpy.random import default_rng
 
+import styne.gp as gp_module
 from styne.statistics.stationary import (
     ExponentialCovariance1D, MaternCovariance1D, MaternCovariance2D,
     matern_covariance, matern_log_rho_gradient
 )
 from styne.statistics.gaussian import Gaussian
 from styne.model.representation.bspline import BSpline1D, BSpline2D
-from styne.gp.gaussianprocess import GaussianProcess, GPSampler
-from styne.gp.direct import DirectRealisation
-from styne.gp.bspline import BSplineRealisation1D, BSplineRealisation2D
+from styne.gp.gaussianprocess import GaussianProcess
+from styne.gp.direct import DirectExpansion
 from styne.utility.grid import UniformGrid
 
 
 LB, RB = 0., 1.
+
+
+def test_gp_package_exports_expansions_without_legacy_realisations():
+    assert gp_module.DirectExpansion is DirectExpansion
+    assert "DNAFourierExpansion" in gp_module.__all__
+    for removed_name in (
+            "DirectRealisation", "BSplineRealisation1D",
+            "BSplineRealisation2D", "DNAFourierRealisation"):
+        assert removed_name not in gp_module.__all__
+        assert not hasattr(gp_module, removed_name)
 
 
 # ---------------------------------------------------------------------------
@@ -27,9 +36,9 @@ def test_dense_gp_sampler_shape():
     grid = UniformGrid(LB, RB, n)
     cov = ExponentialCovariance1D(alpha=5., marginalVariance=1.)
     gp = GaussianProcess.direct(grid, cov)
-    realisation = gp.sampler.generate_realisation(seed=0)
-    assert isinstance(realisation.function, DirectRealisation)
-    assert realisation.coordinate.shape == (n,)
+    function = gp.sampler.generate_realisation(seed=0)
+    assert isinstance(function.expansion, DirectExpansion)
+    assert function.coordinate.shape == (n,)
 
 
 def test_at_sites_uses_explicit_coefficient_without_mutating_parameter():
@@ -37,7 +46,6 @@ def test_at_sites_uses_explicit_coefficient_without_mutating_parameter():
     gp = GaussianProcess.direct(
         grid, MaternCovariance1D(0.3, 1.5, 1.0))
     gp.sites = grid
-    gp.parameter.coordinate = np.zeros(gp.parameterDimension)
     before = np.array(gp.parameter.coordinate, copy=True)
     coefficient = np.linspace(-0.5, 0.5, gp.parameterDimension)
 
@@ -63,7 +71,7 @@ def test_dense_gp_zero_mean():
     sampler = gp.sampler
 
     samples = np.array(
-        [sampler.draw(rng).function.evaluate(gp.engine.grid) for _ in range(nSamples)])
+        [sampler.draw(rng).evaluate(gp.engine.grid) for _ in range(nSamples)])
     mean = np.mean(samples, axis=0)
 
     assert np.max(np.abs(mean)) < 3. * np.sqrt(sigma2 / nSamples), (
@@ -80,7 +88,7 @@ def test_dense_gp_marginal_variance():
     sampler = gp.sampler
 
     samples = np.array(
-        [sampler.draw(rng).function.evaluate(gp.engine.grid) for _ in range(nSamples)])
+        [sampler.draw(rng).evaluate(gp.engine.grid) for _ in range(nSamples)])
     variances = np.var(samples, axis=0)
 
     rel_err = np.max(np.abs(variances - sigma2) / sigma2)
@@ -89,23 +97,21 @@ def test_dense_gp_marginal_variance():
     )
 
 
-def test_dense_gp_parameter_coordinate_propagation():
+def test_dense_gp_parameter_reconstruction_shares_representation():
     n = 8
     grid = UniformGrid(LB, RB, n)
     cov = ExponentialCovariance1D(alpha=5., marginalVariance=1.)
     gp = GaussianProcess.direct(grid, cov)
 
     coords = np.arange(n, dtype=float)
-    gp.parameter.coordinate = coords
+    replacement = gp.parameter.with_coordinate(coords)
 
     np.testing.assert_array_equal(
-        gp.parameter.coordinate, coords,
-        err_msg="coordinate setter did not propagate to parameter"
+        replacement.coordinate, coords,
+        err_msg="replacement did not preserve its coordinate"
     )
-    np.testing.assert_array_equal(
-        gp.parameter.function.coefficient, coords,
-        err_msg="coordinate did not propagate to GPRealisation.coefficient"
-    )
+    np.testing.assert_array_equal(gp.parameter.coordinate, np.zeros(n))
+    assert replacement.expansion is gp.parameter.expansion
 
 
 def test_dense_gp_covariance_update():
@@ -129,29 +135,26 @@ def test_dense_gp_covariance_update():
 # ---------------------------------------------------------------------------
 
 def test_bspline_1d_gp_measure_dimension():
-    n, nx = 32, 8
-    grid = UniformGrid(LB, RB, n)
+    nx = 8
     cov = MaternCovariance1D(lengthScale=0.3, smoothness=1.5, marginalVariance=1.)
     expansion = BSpline1D(nx, degree=3, boundary=[LB, RB])
-    expansion.coefficient = np.zeros(nx)
 
     gp = GaussianProcess.bspline(cov, expansion)
 
     assert gp.measure.density.domainDimension == nx
 
 
-def test_bspline_1d_gp_sampler_returns_realisation():
+def test_bspline_1d_gp_sampler_returns_function():
     n, nx = 32, 6
     grid = UniformGrid(LB, RB, n)
     cov = MaternCovariance1D(lengthScale=0.3, smoothness=1.5, marginalVariance=1.)
     expansion = BSpline1D(nx, degree=3, boundary=[LB, RB])
-    expansion.coefficient = np.zeros(nx)
 
     gp = GaussianProcess.bspline(cov, expansion)
-    realisation = gp.sampler.generate_realisation(seed=7)
+    function = gp.sampler.generate_realisation(seed=7)
 
-    assert isinstance(realisation.function, BSplineRealisation1D)
-    assert realisation.function.evaluate(grid).shape == (n,)
+    assert function.expansion is expansion
+    assert function.evaluate(grid).shape == (n,)
 
 
 # ---------------------------------------------------------------------------
@@ -161,7 +164,6 @@ def test_bspline_1d_gp_sampler_returns_realisation():
 def _make_bspline_2d_gp(nx=5, ny=5):
     cov = MaternCovariance2D(lengthScale=0.3, smoothness=1.5, marginalVariance=1.)
     expansion = BSpline2D([nx, ny], degree=3, boundary=[[LB, RB], [LB, RB]])
-    expansion.project(np.zeros(nx * ny))
     return GaussianProcess.bspline(cov, expansion)
 
 
@@ -176,37 +178,36 @@ def test_bspline_2d_gp_measure_is_gaussian():
     assert isinstance(gp.measure, Gaussian)
 
 
-def test_bspline_2d_gp_sampler_returns_realisation():
+def test_bspline_2d_gp_sampler_shares_expansion():
     gp = _make_bspline_2d_gp()
-    realisation = gp.sampler.generate_realisation(seed=13)
-    assert isinstance(realisation.function, BSplineRealisation2D)
+    function = gp.sampler.generate_realisation(seed=13)
+    assert function.expansion is gp.expansion
 
 
 def test_bspline_2d_gp_sampler_evaluate():
     nx, ny = 5, 5
     gp = _make_bspline_2d_gp(nx, ny)
-    realisation = gp.sampler.generate_realisation(seed=14)
+    function = gp.sampler.generate_realisation(seed=14)
 
     pts = UniformGrid((LB, RB, 4), (LB, RB, 4))
-    values = realisation.function.evaluate(pts)
+    values = function.evaluate(pts)
     assert values.shape == (16,)
 
 
-def test_bspline_2d_gp_parameter_coordinate_propagation():
+def test_bspline_2d_gp_parameter_reconstruction_shares_representation():
     nx, ny = 5, 5
     gp = _make_bspline_2d_gp(nx, ny)
 
     coords = np.ones(nx * ny)
-    gp.parameter.coordinate = coords
+    replacement = gp.parameter.with_coordinate(coords)
 
     np.testing.assert_array_almost_equal(
-        gp.parameter.coordinate, coords,
-        err_msg="coordinate setter did not propagate to parameter"
+        replacement.coordinate, coords,
+        err_msg="replacement did not preserve its coordinate"
     )
-    np.testing.assert_array_almost_equal(
-        gp.parameter.function.coefficient, coords,
-        err_msg="coordinate did not propagate to GPRealisation.coefficient"
-    )
+    np.testing.assert_array_equal(
+        gp.parameter.coordinate, np.zeros(nx * ny))
+    assert replacement.expansion is gp.parameter.expansion
 
 
 def test_bspline_2d_gp_covariance_update_inplace():
@@ -229,7 +230,7 @@ def test_dna_fourier_1d_shape():
     sites = gp.engine.nativeGrid
     gp.sites = sites
     sample = gp.sampler.draw(rng)
-    val = sample.function.evaluate(sites)
+    val = sample.evaluate(sites)
     assert val.shape == (32,)
 
 
@@ -245,7 +246,9 @@ def test_dna_fourier_1d_marginal_isotropy():
     gp.sites = sites
     sampler = gp.sampler
 
-    samples = np.array([sampler.draw(rng).function.evaluate(sites) for _ in range(nSamples)])
+    samples = np.array([
+        sampler.draw(rng).evaluate(sites) for _ in range(nSamples)
+    ])
     variances = np.var(samples, axis=0)
 
     rel_err = np.max(np.abs(variances[2:-2] - sigma2) / sigma2)
