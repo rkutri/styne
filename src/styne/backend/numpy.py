@@ -75,6 +75,9 @@ class NumPyNamespace(ArrayNamespace):
     def stack(self, arrays, *, axis=0):
         return np.stack(arrays, axis=axis)
 
+    def swapaxes(self, array, axis1, axis2):
+        return np.swapaxes(array, axis1, axis2)
+
     def sum(self, array, *, axis=None):
         return np.sum(array, axis=axis)
 

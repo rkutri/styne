@@ -10,7 +10,6 @@ from styne.mcmc.proposal import ProposalMethod
 from styne.mcmc.transition import TransitionData
 from styne.parameter.parameter import Parameter
 from styne.statistics.gaussian import Gaussian
-from styne.statistics.interface import DifferentiableDensity
 from styne.statistics.radonnikodym import RadonNikodym
 
 
@@ -20,7 +19,7 @@ def _validate_pmala_target(target) -> None:
     if not isinstance(target.reference, Gaussian):
         raise NotImplementedError(
             "Currently, only Gaussian reference measures are supported.")
-    if not isinstance(target.derivative, DifferentiableDensity):
+    if not callable(getattr(target.derivative, "evaluate_log_gradient", None)):
         raise ValueError(
             "pMALA requires target.derivative to support evaluate_log_gradient.")
 
@@ -94,13 +93,12 @@ class PMALAProposal(ProposalMethod):
         drift = self._state.with_coordinate(
             np.asarray(driftVector, dtype=np.float64)
         )
-        self._proposalMeasure.mean = drift
-
         refCov = self._target.reference.covariance
-        prevScaling = refCov.scaling
-        refCov.scaling = self._beta**2
-        proposal = self._proposalMeasure.generate_realisation(rng=rng)
-        refCov.scaling = prevScaling
+        proposalCovariance = refCov.with_scaling(self._beta**2)
+        proposalMeasure = self._proposalMeasure.with_mean(drift).with_covariance(
+            proposalCovariance
+        )
+        proposal = proposalMeasure.generate_realisation(rng=rng)
 
         return TransitionData(
             self._state, proposal, auxiliary={'drift': driftVector}

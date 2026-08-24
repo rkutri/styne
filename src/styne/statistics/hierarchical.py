@@ -1,6 +1,8 @@
+import copy
 import numpy as np
 from typing import Optional
 
+from styne.backend import infer_backend
 from styne.statistics.measure import ConditionalMeasure
 from styne.statistics.interface import DensityInterface, LikelihoodInterface
 from styne.parameter.parameter import Parameter
@@ -57,19 +59,16 @@ class SGLMMHyperConditionalDensity(DensityInterface):
         latent state reference to match the current Gibbs block.
         """
         self._latentState = state.block(0)
-        hyperparameters = np.exp(np.asarray(state.block(1).coordinate).ravel())
-        lengthScale, sigma = hyperparameters[0], hyperparameters[1]
 
-        try:
-            covarianceType = type(self._gp.covarianceFunction)
-            smoothness = self._gp.covarianceFunction._smoothness
-            self._gp.covarianceFunction = covarianceType(
-                lengthScale, smoothness, sigma**2
-            )
-            self._gp.measure.covariance.scaling = 1.0
-            # Defer evaluation to evaluate_log to avoid double-pass
-        except np.linalg.LinAlgError:
-            pass
+    def _model_at(self, lengthScale, sigma):
+        """Construct an isolated model for one hyperparameter evaluation."""
+        model = copy.deepcopy(self._model)
+        covarianceType = type(model._gp.covarianceFunction)
+        smoothness = model._gp.covarianceFunction._smoothness
+        model._gp.covarianceFunction = covarianceType(
+            lengthScale, smoothness, sigma**2
+        )
+        return model
             
     def evaluate_log(self, parameter: Parameter, normalised: bool = False) -> float:
         """
@@ -93,95 +92,22 @@ class SGLMMHyperConditionalDensity(DensityInterface):
             `-inf` if the prior is zero, hyperparameters are extreme, or the
             covariance factorisation fails.
         """
-        logHyperparameters = np.asarray(parameter.coordinate).ravel()
-        hyperparameters = np.exp(logHyperparameters)
+        logHyperparameters = parameter.coordinate.reshape((-1,))
+        backend = infer_backend(logHyperparameters)
+        hyperparameters = backend.namespace.exp(logHyperparameters)
         lengthScale, sigma = hyperparameters[0], hyperparameters[1]
 
         from styne.parameter.vector import Vector
         hyperparameterVector = Vector(hyperparameters)
         logPrior = self._pcPrior.evaluate_log(hyperparameterVector)
-        if logPrior == -np.inf or not np.all(np.abs(logHyperparameters) < 150.0):
-            return -np.inf
-
-        logJacobian = np.sum(logHyperparameters)
-        try:
-            covarianceType = type(self._gp.covarianceFunction)
-            smoothness = self._gp.covarianceFunction._smoothness
-            newCovariance = covarianceType(lengthScale, smoothness, sigma**2)
-            self._gp.covarianceFunction = newCovariance
-            self._gp.measure.covariance.scaling = 1.0
-
-            linearPredictor = self._model(self._latentState)
-        except np.linalg.LinAlgError:
-            return -np.inf
+        logJacobian = backend.namespace.sum(logHyperparameters)
+        linearPredictor = self._model_at(lengthScale, sigma)(self._latentState)
             
         logLikelihood = self._likelihood.response.log_likelihood(
             self._likelihood.data.measurement, linearPredictor
         )
         
-        logPriorContribution = 0.0
-
-        return float(
-            logPrior + logPriorContribution + logLikelihood + logJacobian
-        )
-
-    def evaluate_log_gradient(self, parameter: Parameter) -> np.ndarray:
-        logHyperparameters = np.asarray(parameter.coordinate).ravel()
-        hyperparameters = np.exp(logHyperparameters)
-        lengthScale, sigma = hyperparameters[0], hyperparameters[1]
-
-        try:
-            covarianceType = type(self._gp.covarianceFunction)
-            smoothness = self._gp.covarianceFunction._smoothness
-            self._gp.covarianceFunction = covarianceType(
-                lengthScale, smoothness, sigma**2
-            )
-            self._gp.measure.covariance.scaling = 1.0
-
-            linearPredictor = self._model(self._latentState)
-        except np.linalg.LinAlgError:
-            raise RuntimeError("Failed model evaluation due to singular covariance.")
-            
-        linearPredictorScore = self._likelihood.response.score(
-            self._likelihood.data.measurement, linearPredictor
-        )
-
-        from styne.parameter.vector import Vector
-        priorGradient = self._pcPrior.evaluate_log_gradient(
-            Vector([lengthScale, sigma])
-        )
-
-        if self._gp.hasHyperGradient:
-            hyperparameterGradients = self._gp.evaluate_hyper_gradient(
-                self._latentState, linearPredictorScore
-            )
-            gradLogLengthScale = hyperparameterGradients.get('log_rho', 0.0) \
-                + priorGradient[0] * lengthScale + 1.0
-            gradLogSigma = hyperparameterGradients.get('log_sigma', 0.0) \
-                + priorGradient[1] * sigma + 1.0
-            return np.array([gradLogLengthScale, gradLogSigma])
-
-        if not self._gp.hasLogLengthMultiplier:
-            raise NotImplementedError(
-                "Hyperparameter gradients not implemented for "
-                f"{type(self._gp.expansion).__name__}."
-            )
-
-        lengthMultiplier = self._gp.compute_log_length_multiplier(
-            smoothness, lengthScale
-        )
-
-        # latentCoordinate must be the coordinate vector
-        latentCoordinate = self._latentState.coordinate \
-            if isinstance(self._latentState, Parameter) else self._latentState
-
-        gradLogLengthScale = np.dot(linearPredictorScore, lengthMultiplier * latentCoordinate) \
-            + priorGradient[0] * lengthScale + 1.0
-        gradLogSigma = np.dot(linearPredictorScore, latentCoordinate) \
-            + priorGradient[1] * sigma + 1.0
-
-        return np.array([gradLogLengthScale, gradLogSigma])
-
+        return logPrior + logLikelihood + logJacobian
 
 class SGLMMHyperConditional(ConditionalMeasure, DensityInterface):
     """
@@ -263,11 +189,6 @@ class SGLMMHyperConditional(ConditionalMeasure, DensityInterface):
         zeta = np.exp(phi)
         rho, sigma = zeta[0], zeta[1]
 
-        covType = type(self._gp.covarianceFunction)
-        smoothness = self._gp.covarianceFunction._smoothness
-        self._gp.covarianceFunction = covType(rho, smoothness, sigma**2)
-        self._gp.measure.covariance.scaling = 1.0
-
         self._density = SGLMMHyperConditionalDensity(
             self._pcPrior,
             self._gp,
@@ -275,9 +196,6 @@ class SGLMMHyperConditional(ConditionalMeasure, DensityInterface):
             self._likelihood,
             latentState
         )
-
-    def evaluate_log_gradient(self, parameter: Parameter) -> np.ndarray:
-        return self.density.evaluate_log_gradient(parameter)
 
     def draw(self, rng):
         raise NotImplementedError("SGLMMHyperConditional cannot be drawn from.")
@@ -402,7 +320,7 @@ class SGLMMLatentConditional(ConditionalMeasure, DensityInterface):
             compVar = self._partition.rule.extract(
                 1, cov.marginalVariance
             )
-            self._finePrior.covariance = (
+            self._finePrior = self._finePrior.with_covariance(
                 self._finePrior.covariance.__class__(compVar)
             )
 

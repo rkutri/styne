@@ -1,41 +1,33 @@
-import numpy as np
-
-from numpy.random import Generator
-
+from styne.backend import infer_backend
 from styne.parameter.vector import Vector
 from styne.statistics.measure import ProbabilityMeasure
 
 
 class Poisson(ProbabilityMeasure):
-    """
-    Poisson probability measure.
-    """
+    """Poisson measure with backend-native rates and sampling."""
 
-    def __init__(self):
-        self._rate = None
+    def __init__(self, rate=None):
+        self._rate = rate
+
+    def with_rate(self, rate):
+        return type(self)(rate)
 
     @property
-    def rate(self) -> np.ndarray:
+    def rate(self):
         return self._rate
 
     @rate.setter
-    def rate(self, rate) -> None:
-        self._rate = np.asarray(rate, dtype=float)
+    def rate(self, rate):
+        self._rate = rate
 
     @property
-    def mean(self) -> np.ndarray:
+    def mean(self):
         return self._rate
 
-    def draw(self, rng: Generator) -> Vector:
-        """
-        Draw a Poisson sample at the current rate.
-
-        Parameters
-        ----------
-        rng : Generator
-
-        Returns
-        -------
-        Vector
-        """
-        return Vector(rng.poisson(self._rate).astype(float))
+    def sample(self, randomState):
+        if self._rate is None:
+            raise RuntimeError("Poisson rate not set.")
+        values, nextState = infer_backend(self._rate).poisson(
+            randomState, self._rate
+        )
+        return Vector(values), nextState

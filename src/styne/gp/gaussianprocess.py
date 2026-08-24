@@ -21,10 +21,13 @@ class GPSampler(ProbabilityMeasure):
         self._expansion = expansion
         self._measure = measure
 
-    def draw(self, rng: Generator) -> Function:
+    def sample(self, randomState) -> tuple[Function, object]:
 
-        sample = self._measure.draw(rng)
-        return Function(sample.coordinate, self._expansion)
+        sample, nextState = self._measure.sample(randomState)
+        return Function(sample.coordinate, self._expansion), nextState
+
+    def draw(self, rng: Generator) -> Function:
+        return self.sample(rng)[0]
 
 
 class GaussianProcess:
@@ -44,8 +47,7 @@ class GaussianProcess:
             np.zeros(self._expansion.dimension), self._expansion
         )
 
-        self._measure = Gaussian(measureCov)
-        self._measure.mean = self._param
+        self._measure = Gaussian(measureCov, self._param)
 
         self._covFcn = covFcn
 
@@ -88,7 +90,7 @@ class GaussianProcess:
 
         self._covFcn = covFcn
         covariance, expansion = self._specification.build(covFcn)
-        self._measure.covariance = covariance
+        self._measure = self._measure.with_covariance(covariance)
         self._replace_expansion(expansion)
 
     @property
@@ -130,7 +132,7 @@ class GaussianProcess:
         meanCoordinate = self._measure.mean.coordinate
         self._expansion = expansion
         self._param = Function(coordinate, expansion)
-        self._measure.mean = Function(meanCoordinate, expansion)
+        self._measure = self._measure.with_mean(Function(meanCoordinate, expansion))
 
     def bind(self, grid):
         """Return the cached expansion evaluator for ``grid``."""

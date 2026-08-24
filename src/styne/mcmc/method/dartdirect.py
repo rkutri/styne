@@ -63,9 +63,7 @@ class DirectDARTProposal(ProposalMethod):
         mux = self._proposalMeasure.covariance.apply(bx)
         
         propMean = self._state.with_coordinate(mux)
-        self._proposalMeasure.mean = propMean
-        
-        proposal = self._proposalMeasure.generate_realisation(rng=rng)
+        proposal = self._proposalMeasure.with_mean(propMean).generate_realisation(rng=rng)
         
         return TransitionData(
             self._state, proposal, auxiliary={'bx': bx, 'mux': mux}

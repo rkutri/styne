@@ -91,8 +91,7 @@ class HierarchicalBayes(DensityInterface):
 
     def conditional(self, idx: int, state) -> ConditionalMeasure:
         """Condition the idx-th block measure on `state` and return it."""
-        self._conditionals[idx].condition_on(state)
-        return self._conditionals[idx]
+        return self._conditionals[idx].condition(state)
 
     def evaluate_log(self, state) -> float:
         """
@@ -105,8 +104,8 @@ class HierarchicalBayes(DensityInterface):
         rootBlock = state.block(state.nBlocks - 1)
         logp = self._root.density.evaluate_log(rootBlock)
         for i, cond in enumerate(self._conditionals):
-            cond.condition_on(state)
-            logp += cond.density.evaluate_log(state.block(i))
+            conditioned = cond.condition(state)
+            logp += conditioned.density.evaluate_log(state.block(i))
         return logp
 
 

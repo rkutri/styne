@@ -3,7 +3,7 @@ from scipy.optimize import minimize, approx_fprime
 from typing import Tuple
 
 from styne.parameter.parameter import Parameter
-from styne.statistics.interface import DensityInterface, DifferentiableDensity, TwiceDifferentiableDensity
+from styne.statistics.interface import DensityInterface
 
 
 def determine_map(density: DensityInterface, initial_guess: Parameter, method: str = 'L-BFGS-B') -> Tuple[Parameter, np.ndarray]:
@@ -13,7 +13,7 @@ def determine_map(density: DensityInterface, initial_guess: Parameter, method: s
     Parameters
     ----------
     density : DensityInterface
-        The target density (must satisfy DifferentiableDensity).
+        The target density (must expose ``evaluate_log_gradient``).
     initial_guess : Parameter
         The initial guess for the optimization.
     method : str
@@ -25,8 +25,10 @@ def determine_map(density: DensityInterface, initial_guess: Parameter, method: s
         A tuple containing the MAP estimate (as a Parameter) and the exact or 
         finite-difference Hessian matrix at the mode.
     """
-    if not isinstance(density, DifferentiableDensity):
-        raise TypeError("Density must satisfy DifferentiableDensity protocol to compute MAP.")
+    if not callable(getattr(density, "evaluate_log_gradient", None)):
+        raise TypeError(
+            "Density must expose evaluate_log_gradient to compute MAP."
+        )
 
     def objective(x: np.ndarray) -> float:
         p = initial_guess.with_coordinate(x)
@@ -48,7 +50,7 @@ def determine_map(density: DensityInterface, initial_guess: Parameter, method: s
 
     x_map = initial_guess.with_coordinate(res.x)
 
-    if isinstance(density, TwiceDifferentiableDensity):
+    if callable(getattr(density, "evaluate_log_hessian", None)):
         hessian = -density.evaluate_log_hessian(x_map)
     else:
         # Fallback to finite differences on the gradient

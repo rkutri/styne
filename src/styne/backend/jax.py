@@ -116,6 +116,9 @@ class JAXNamespace(ArrayNamespace):
     def stack(self, arrays, *, axis=0):
         return jnp.stack(arrays, axis=axis)
 
+    def swapaxes(self, array, axis1, axis2):
+        return jnp.swapaxes(array, axis1, axis2)
+
     def sum(self, array, *, axis=None):
         return jnp.sum(array, axis=axis)
 

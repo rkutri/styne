@@ -10,7 +10,6 @@ from styne.mcmc.transition import TransitionData
 from styne.parameter.parameter import Parameter
 from styne.statistics.covariance import IIDCovarianceMatrix
 from styne.statistics.gaussian import Gaussian
-from styne.statistics.interface import DifferentiableDensity
 
 
 class MALAProposal(ProposalMethod):
@@ -67,8 +66,7 @@ class MALAProposal(ProposalMethod):
             np.asarray(driftVector, dtype=np.float64)
         )
 
-        self._proposalMeasure.mean = propMean
-        proposal = self._proposalMeasure.generate_realisation(rng=rng)
+        proposal = self._proposalMeasure.with_mean(propMean).generate_realisation(rng=rng)
         return TransitionData(
             self._state, proposal, auxiliary={'drift': driftVector}
         )
@@ -99,7 +97,7 @@ class MetropolisAdjustedLangevinAlgorithm(MetropolisHastings):
                  acceptance: AcceptanceProbability = None,
                  rng: Optional[Generator] = None):
 
-        if not isinstance(targetDensity, DifferentiableDensity):
+        if not callable(getattr(targetDensity, "evaluate_log_gradient", None)):
             raise ValueError(
                 "MALA requires a target density with evaluate_log_gradient."
             )

@@ -1,6 +1,4 @@
-import numpy as np
-from numpy import log
-
+from styne.backend import infer_backend
 from styne.statistics.interface import DensityInterface
 from styne.parameter.parameter import Parameter
 
@@ -30,7 +28,7 @@ class MaternRangePCPrior(DensityInterface):
     def domainDimension(self) -> int:
         return 1
 
-    def evaluate_log(self, parameter: Parameter) -> float:
+    def evaluate_log(self, parameter: Parameter):
         """
         Log-density of the PC prior at `parameter`. Properly normalised,
         includes the full rate-parameter normalising constant, unlike the
@@ -45,10 +43,11 @@ class MaternRangePCPrior(DensityInterface):
         -------
         float
         """
-        rho = float(np.asarray(parameter.coordinate).ravel()[0])
-        if rho <= 0:
-            return -np.inf
-        return log(self._rateParam) - 2. * log(rho) - self._rateParam / rho
+        rho = parameter.coordinate.reshape((-1,))[0]
+        backend = infer_backend(rho)
+        ns = backend.namespace
+        value = ns.log(self._rateParam) - 2. * ns.log(rho) - self._rateParam / rho
+        return ns.where(rho > 0, value, backend.asarray(float("-inf"), dtype=backend.metadata(rho).dtype, device=backend.metadata(rho).device))
 
 
 class MaternSigmaPCPrior(DensityInterface):
@@ -77,7 +76,7 @@ class MaternSigmaPCPrior(DensityInterface):
     def domainDimension(self) -> int:
         return 1
 
-    def evaluate_log(self, parameter: Parameter) -> float:
+    def evaluate_log(self, parameter: Parameter):
         """
         Log-density of the PC prior at `parameter`. Properly normalised, same
         as `MaternRangePCPrior.evaluate_log`.
@@ -91,10 +90,11 @@ class MaternSigmaPCPrior(DensityInterface):
         -------
         float
         """
-        sigma = float(np.asarray(parameter.coordinate).ravel()[0])
-        if sigma < 0:
-            return -np.inf
-        return log(self._rateParam) - self._rateParam * sigma
+        sigma = parameter.coordinate.reshape((-1,))[0]
+        backend = infer_backend(sigma)
+        ns = backend.namespace
+        value = ns.log(self._rateParam) - self._rateParam * sigma
+        return ns.where(sigma >= 0, value, backend.asarray(float("-inf"), dtype=backend.metadata(sigma).dtype, device=backend.metadata(sigma).device))
 
 
 class JointMaternPCPrior(DensityInterface):
@@ -126,7 +126,7 @@ class JointMaternPCPrior(DensityInterface):
     def domainDimension(self) -> int:
         return 2
 
-    def evaluate_log(self, parameter: Parameter) -> float:
+    def evaluate_log(self, parameter: Parameter):
         """
         Joint log-density of the PC prior at `parameter`. Properly normalised,
         sum of the two component priors' normalised log-densities, valid under
@@ -141,28 +141,28 @@ class JointMaternPCPrior(DensityInterface):
         -------
         float
         """
-        coord = np.asarray(parameter.coordinate).ravel()
+        coord = parameter.coordinate.reshape((-1,))
         rho, sigma = coord[0], coord[1]
+        backend = infer_backend(coord)
+        ns = backend.namespace
+        logRho = ns.log(self._rhoPrior._rateParam) - 2. * ns.log(rho) - self._rhoPrior._rateParam / rho
+        logSigma = ns.log(self._sigmaPrior._rateParam) - self._sigmaPrior._rateParam * sigma
+        value = logRho + logSigma
+        invalid = (rho <= 0) | (sigma < 0)
+        return ns.where(invalid, backend.asarray(float("-inf"), dtype=backend.metadata(coord).dtype, device=backend.metadata(coord).device), value)
 
-        if rho <= 0 or sigma < 0:
-            return -np.inf
-
-        logRho = log(self._rhoPrior._rateParam) - 2. * log(rho) - \
-            self._rhoPrior._rateParam / rho
-        logSigma = log(self._sigmaPrior._rateParam) - \
-            self._sigmaPrior._rateParam * sigma
-
-        return float(logRho + logSigma)
-
-    def evaluate_log_gradient(self, parameter: Parameter) -> np.ndarray:
+    def evaluate_log_gradient(self, parameter: Parameter):
         """Gradient of log-prior with respect to [rho, sigma]."""
-        coord = np.asarray(parameter.coordinate).ravel()
+        coord = parameter.coordinate.reshape((-1,))
         rho, sigma = coord[0], coord[1]
 
         if rho <= 0 or sigma < 0:
-            return np.zeros(2)
+            backend = infer_backend(coord)
+            metadata = backend.metadata(coord)
+            return backend.zeros((2,), dtype=metadata.dtype, device=metadata.device)
 
         gradRho = -2.0 / rho + self._rhoPrior._rateParam / rho**2
         gradSigma = -self._sigmaPrior._rateParam
 
-        return np.array([gradRho, gradSigma])
+        backend = infer_backend(coord)
+        return backend.namespace.stack([gradRho, gradSigma])

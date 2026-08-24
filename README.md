@@ -136,6 +136,29 @@ models can be wrapped in a `ForwardMap` subclass and immediately used with every
 compatible sampler. Conversely, new inference algorithms can be developed
 against the density interfaces without knowledge of, or dependence on, individual models.
 
+### Backend-native random states
+
+Sampling uses explicit backend random states. In particular, JAX follows its
+functional key-based convention: pass a key to `sample` and thread the
+returned successor key into the next draw.
+
+```python
+from styne.backend import get_backend
+
+backend = get_backend("jax")
+key = backend.random_state(123)
+sample, key = prior.sample(key)
+next_sample, key = prior.sample(key)
+```
+
+`sample(randomState)` returns `(sample, nextRandomState)` and is the preferred
+API for JAX transformations such as `jit`, `vmap`, and `lax.scan`. The
+`generate_realisation(randomState=key)` convenience method returns only one
+sample and therefore discards the successor key; use it for one-off draws,
+not for a sequence of reproducible JAX draws. NumPy and PyTorch expose the
+same explicit state boundary, while `rng=` and `seed=` remain compatibility
+arguments for existing NumPy-oriented code.
+
 In many uncertainty-quantification problems the forward model dominates the
 computational cost. The `ForwardMap` interface therefore acts as the communication
 boundary between the parameter space and the expensive computation producing the

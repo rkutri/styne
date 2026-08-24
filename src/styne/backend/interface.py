@@ -93,6 +93,9 @@ class ArrayNamespace:
     def stack(self, arrays, *, axis=0):
         raise NotImplementedError
 
+    def swapaxes(self, array, axis1, axis2):
+        raise NotImplementedError
+
     def sum(self, array, *, axis=None):
         raise NotImplementedError
 

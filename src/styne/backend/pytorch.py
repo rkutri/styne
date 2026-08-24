@@ -83,6 +83,9 @@ class PyTorchNamespace(ArrayNamespace):
     def stack(self, arrays, *, axis=0):
         return torch.stack(tuple(arrays), dim=axis)
 
+    def swapaxes(self, array, axis1, axis2):
+        return torch.swapaxes(array, axis1, axis2)
+
     def sum(self, array, *, axis=None):
         if axis is None:
             return torch.sum(array)

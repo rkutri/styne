@@ -65,17 +65,17 @@ class LocalisedSurrogateDensity(RadonNikodym):
             surrogateDensity.domainDimension, spectralWeights
         )
         self._regGaussian = Gaussian(regCov)
-        
+
         if hasattr(surrogateDensity, 'reference'):
-            self._regGaussian.mean = (
+            self._regGaussian = self._regGaussian.with_mean(
                 surrogateDensity.reference.mean.with_coordinate(
                     np.zeros(surrogateDensity.domainDimension)
                 )
             )
         else:
-            self._regGaussian.mean = Vector(
+            self._regGaussian = self._regGaussian.with_mean(Vector(
                 np.zeros(surrogateDensity.domainDimension)
-            )
+            ))
 
         # if the surrogate density is itself a Radon-Nikodym density, there is a
         # choice in which to consider the reference measure. We choose the
@@ -85,8 +85,9 @@ class LocalisedSurrogateDensity(RadonNikodym):
             scaledDerivative = LogScalingWrapper(surrogateDensity.derivative, tempering)
 
             if temperFullDensity:
-                scaledCov = surrogateDensity.reference.covariance.clone()
-                scaledCov.scaling = scaledCov.scaling / tempering
+                scaledCov = surrogateDensity.reference.covariance.with_scaling(
+                    surrogateDensity.reference.covariance.scaling / tempering
+                )
                 reference = Gaussian(scaledCov, surrogateDensity.reference.mean)
                 
                 self._surrogateComponent = ProductWrapper([
@@ -126,7 +127,7 @@ class LocalisedSurrogateDensity(RadonNikodym):
 
     @location.setter
     def location(self, location: Parameter):
-        self._regGaussian.mean = location
+        self._regGaussian = self._regGaussian.with_mean(location)
 
     @property
     def regularisation(self) -> float:
@@ -152,9 +153,9 @@ class LocalisedSurrogateDensity(RadonNikodym):
         if weights is None:
             return
         self._spectralWeights = weights
-        self._regGaussian.covariance = DiagonalCovarianceMatrix(
+        self._regGaussian = self._regGaussian.with_covariance(DiagonalCovarianceMatrix(
             1.0 / np.clip(self._reg * weights**2, 1e-30, None)
-        )
+        ))
 
 
 

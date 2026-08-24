@@ -37,12 +37,12 @@ class MRWProposal(ProposalMethod):
     @covariance.setter
     def covariance(self, cov: CovarianceMatrix):
         """Replace the proposal covariance."""
-        self._proposalMeasure.covariance = cov
+        self._proposalMeasure = self._proposalMeasure.with_covariance(cov)
 
     @ProposalMethod.state.setter
     def state(self, state: Parameter):
         ProposalMethod.state.fset(self, state)
-        self._proposalMeasure.mean = state
+        self._proposalMeasure = self._proposalMeasure.with_mean(state)
 
     def generate_proposal(self, rng: Generator):
         # Guard against use outside the MH loop, where state may not be set.
@@ -255,4 +255,3 @@ class RobbinsMonroMRWFactory(MHFactory):
             self._target, self._proposalCov, self._diagnostics,
             self._acceptance, self.targetAcceptance,
             self.adaptOffset, self.adaptDecay, rng=self.rng)
-

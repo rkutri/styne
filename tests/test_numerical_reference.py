@@ -66,8 +66,9 @@ def test_covariance_reference_values():
 
 
 def test_dense_covariance_operator_reference_values():
-    covariance = DenseCovarianceMatrix(np.array([[2.0, 0.3], [0.3, 1.1]]))
-    covariance.scaling = 1.25
+    covariance = DenseCovarianceMatrix(
+        np.array([[2.0, 0.3], [0.3, 1.1]]), scaling=1.25
+    )
     coordinate = np.array([0.4, -1.2])
 
     assert np.isclose(covariance.log_determinant(), 1.1929750501163947)
@@ -93,8 +94,9 @@ def test_dense_covariance_operator_reference_values():
 
 
 def test_diagonal_covariance_cholesky_respects_scaling():
-    covariance = DiagonalCovarianceMatrix(np.array([1.5, 0.6]))
-    covariance.scaling = 1.25
+    covariance = DiagonalCovarianceMatrix(
+        np.array([1.5, 0.6]), scaling=1.25
+    )
 
     factor = covariance.to_cholesky()
 

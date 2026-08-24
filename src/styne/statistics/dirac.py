@@ -10,6 +10,11 @@ class DiracMeasure(ProbabilityMeasure):
     def __init__(self):
         self._location = None
 
+    def with_location(self, location: Parameter):
+        result = type(self)()
+        result._location = location
+        return result
+
     @property
     def location(self) -> Parameter:
         return self._location
@@ -29,18 +34,6 @@ class DiracMeasure(ProbabilityMeasure):
             raise RuntimeError("Location not set.")
         return self._location.dimension
 
-    def draw(self, rng) -> Parameter:
-        """
-        Return the fixed location, ignoring `rng`.
-
-        Parameters
-        ----------
-        rng : Generator
-            Unused, accepted for interface compatibility.
-
-        Returns
-        -------
-        Parameter
-            The measure's `location`.
-        """
-        return self._location
+    def sample(self, randomState) -> tuple[Parameter, object]:
+        """Return the fixed location without consuming random state."""
+        return self._location, randomState
