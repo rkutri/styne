@@ -2,6 +2,7 @@ import numpy as np
 
 from numpy.random import default_rng
 
+from styne.gp.bspline import _collocation_points
 from styne.gp.gaussianprocess import GaussianProcess
 from styne.model.representation.bspline import BSpline1D, BSpline2D
 from styne.statistics.gaussian import Gaussian
@@ -26,6 +27,15 @@ def cov1d(ell=0.3, nu=1.5, variance=0.7):
 
 def cov2d(ell=0.3, nu=1.5, variance=0.7):
     return MaternCovariance2D(ell, nu, variance)
+
+
+def test_collocation_falls_back_for_compatible_expansions():
+    class CompatibleExpansion:
+        dimension = 4
+
+    points = _collocation_points(CompatibleExpansion(), [-1.0, 1.0])
+
+    np.testing.assert_allclose(points, np.linspace(-1.0, 1.0, 4))
 
 
 # ---- Static B-spline API sanity ----
@@ -130,6 +140,21 @@ class TestBSpline1DGPCorrectness:
         frobTrue = np.linalg.norm(trueCov, 'fro')
         frobErr = np.linalg.norm(empiricalCov - trueCov, 'fro')
         assert frobErr / frobTrue < 0.3
+
+
+def test_high_resolution_prior_preserves_marginal_variance():
+    expansion = make_bsp1d(n=100)
+    gp = GaussianProcess.bspline(
+        cov1d(ell=0.2, nu=1.5, variance=1.0), expansion
+    )
+    design = expansion.design_matrix(np.linspace(0.0, 1.0, 300))
+    coefficientCovariance = gp.measure.covariance.to_dense()
+
+    fieldVariance = np.einsum(
+        "ij,jk,ik->i", design, coefficientCovariance, design
+    )
+
+    np.testing.assert_allclose(fieldVariance, 1.0, atol=1e-3)
 
 
 class TestBSpline2DGPCorrectness:

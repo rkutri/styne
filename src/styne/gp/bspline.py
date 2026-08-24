@@ -8,6 +8,12 @@ from styne.statistics.interface import CovarianceFunctionInterface
 from styne.statistics.covariance import DenseCovarianceMatrix
 
 
+def _collocation_points(expansion, bounds):
+    if hasattr(expansion, "greville_abscissae"):
+        return expansion.greville_abscissae()
+    return np.linspace(bounds[0], bounds[-1], expansion.dimension)
+
+
 def induced_prior_covariance(
         cov_fn, grid, expansion, nuggetEps=1e-10, maxTries=3):
     """
@@ -20,7 +26,7 @@ def induced_prior_covariance(
     cov_fn : object with evaluate_covariance(pts1, pts2)
         Stationary covariance function (e.g. MaternCovariance1D).
     grid : array_like, shape (n,)
-        1D GP grid; determines the domain [grid[0], grid[-1]].
+        One-dimensional GP domain description.
     expansion : Expansion
         Finite-dimensional basis (e.g. BSpline1D).
     """
@@ -31,8 +37,7 @@ def induced_prior_covariance(
 
     n = expansion.dimension
 
-    x0, x1 = grid[0], grid[-1]
-    collocation = np.linspace(x0, x1, n)
+    collocation = _collocation_points(expansion, grid)
 
     phi = expansion.design_matrix(collocation)
     kernel = cov_fn.evaluate_covariance(collocation, collocation)
@@ -44,7 +49,8 @@ def induced_prior_covariance(
     c = 0.5 * (c + c.T)
     return DenseCovarianceMatrix(
         c + nuggetEps * backend.eye(
-            n, dtype=backend.metadata(c).dtype, device=backend.metadata(c).device
+            n, dtype=backend.metadata(c).dtype,
+            device=backend.metadata(c).device,
         )
     )
 
@@ -69,8 +75,8 @@ def induced_prior_covariance_2d(covFunc2d, bspX, bspY, xBounds, yBounds,
     ny = bspY.dimension
     N = nx * ny
 
-    xColloc = np.linspace(xBounds[0], xBounds[1], nx)
-    yColloc = np.linspace(yBounds[0], yBounds[1], ny)
+    xColloc = _collocation_points(bspX, xBounds)
+    yColloc = _collocation_points(bspY, yBounds)
 
     xi, yj = np.meshgrid(xColloc, yColloc, indexing='ij')
     pts = np.column_stack([xi.ravel(), yj.ravel()])
@@ -88,7 +94,8 @@ def induced_prior_covariance_2d(covFunc2d, bspX, bspY, xBounds, yBounds,
     c = 0.5 * (c + c.T)
     return DenseCovarianceMatrix(
         c + nuggetEps * backend.eye(
-            N, dtype=backend.metadata(c).dtype, device=backend.metadata(c).device
+            N, dtype=backend.metadata(c).dtype,
+            device=backend.metadata(c).device,
         )
     )
 

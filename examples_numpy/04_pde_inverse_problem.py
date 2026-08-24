@@ -6,12 +6,14 @@ of the elliptic PDE solution. Defines a custom forward model and a DNA Gaussian
 process parametrisation and prior.
 """
 
+import argparse
+
 import numpy as np
 from scipy.sparse.linalg import spsolve
 
 import styne
 from styne.gp import GaussianProcess
-from styne.parameter import Function
+from styne.parameter import Vector
 from styne.statistics import (
     MaternCovariance1D, Data, GaussianResponse, RegressionLikelihood,
     UnnormalisedPosterior, IIDCovarianceMatrix,
@@ -25,20 +27,31 @@ from styne.utility.finiteelement import (
     p1_stiffness_1d, p1_mass_lumped_1d, apply_dirichlet_1d,
 )
 
+parser = argparse.ArgumentParser(description=__doc__)
+parser.add_argument("--smoke", action="store_true")
+arguments = parser.parse_args()
+smokeMode = arguments.smoke
+
 # check for matplotlib
 try:
     import matplotlib.pyplot as plt
     hasMatplotlib = True
 except ImportError:
     hasMatplotlib = False
-    print("matplotlib not installed (pip install styne[plotting]); skipping plot.")
+    print(
+        "matplotlib not installed (pip install styne[plotting]); "
+        "skipping plot."
+    )
+
+if smokeMode:
+    hasMatplotlib = False
 
 # fix seed
 rng = np.random.default_rng(2026)
 
 
 # definition of a custom forward model. For more details on the
-# interface, see src/styne/model/model.py
+# interface, see src/styne/model/forwardmap.py
 class EllipticForwardMap(styne.ForwardMap):
     """
     Forward map: parameter to PDE solution at the observation sites.
@@ -89,14 +102,14 @@ class EllipticForwardMap(styne.ForwardMap):
         parameter type associated with the forward map. Must be derived from
         styne.Parameter.
         """
-        return Function
+        return Vector
 
     @property
     def pDim(self):
         """
         parameter dimension, as in: length of the coordinate vector (ndarray)
         """
-        return self._gp.parameter.dimension
+        return self._gp.parameterDimension
 
     def _prepare(self, parameter):
         """
@@ -198,16 +211,18 @@ factory.target = posterior
 factory.rng = rng
 
 # tune proposal scale
-nTuning = 500
+nTuning = 10 if smokeMode else 500
 initState = prior.mean
 sampler = PCNTuner(factory, initState, RWTunerConfig(nTuning=nTuning)).tune()
 
 # run mcmc
-nSteps = 15_000
-sampler.run(nSteps, initState, progress=True, description="Sampling pCN")
+nSteps = 30 if smokeMode else 15_000
+sampler.run(
+    nSteps, initState, progress=not smokeMode, description="Sampling pCN"
+)
 
 # discard burn-in
-nBurnIn = 5000
+nBurnIn = 5 if smokeMode else 5000
 trajectory = np.array(sampler.chain.trajectory)[nBurnIn:]
 
 # diagnostics
@@ -231,10 +246,10 @@ diffusionLower, diffusionUpper = np.percentile(fields, [2.5, 97.5], axis=0)
 # summary statistics against the ground truth
 diffusionTrueNodal = np.exp(log_diffusion_true(plotMesh.axis))
 correlation = np.corrcoef(diffusionTrueNodal, posteriorMean)[0, 1]
-coverage = np.mean(
-    (diffusionTrueNodal >= diffusionLower)
-    & (diffusionTrueNodal <= diffusionUpper)
+covered = (diffusionTrueNodal >= diffusionLower) & (
+    diffusionTrueNodal <= diffusionUpper
 )
+coverage = np.mean(covered)
 print(f"posterior mean vs truth: diffusion correlation = {correlation:.3f}")
 print(f"pointwise 95% band covers {100 * coverage:.1f}% of the true field")
 

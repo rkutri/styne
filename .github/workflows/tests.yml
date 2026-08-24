@@ -10,7 +10,7 @@ jobs:
     strategy:
       matrix:
         python-version: ['3.10', '3.11', '3.12']
-        backend: [base, jax, torch]
+        backend: [numpy, jax, pytorch]
     steps:
       - uses: actions/checkout@v4
       - name: Set up Python
@@ -23,12 +23,18 @@ jobs:
           pip install .
           pip install pytest flake8 flake8-print
           if [ "${{ matrix.backend }}" = "jax" ]; then pip install 'jax[cpu]'; fi
-          if [ "${{ matrix.backend }}" = "torch" ]; then pip install torch; fi
+          if [ "${{ matrix.backend }}" = "pytorch" ]; then pip install torch; fi
       - name: Run linting
         run: flake8 --select=T201 src/styne
       - name: Run supported tests
         run: python3 -m pytest tests -m 'not slow'
       - name: Run benchmark smoke test
         run: python3 benchmarks/backend_smoke.py
-      - name: Run quickstart smoke test
-        run: STYNE_SMOKE=1 python3 examples/01_quickstart.py
+      - name: Run maintained example smoke tests
+        run: |
+          python3 examples/01_quickstart.py --smoke --backend "${{ matrix.backend }}"
+          python3 examples/02_gp.py --smoke --backend "${{ matrix.backend }}"
+          python3 examples/03_sglmm.py --smoke --backend "${{ matrix.backend }}"
+      - name: Run NumPy PDE example smoke test
+        if: ${{ matrix.python-version == '3.12' && matrix.backend == 'numpy' }}
+        run: python3 examples_numpy/04_pde_inverse_problem.py --smoke

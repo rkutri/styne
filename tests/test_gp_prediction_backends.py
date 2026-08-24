@@ -115,6 +115,41 @@ def test_pytorch_gp_evaluation_and_sampling_preserve_device_dtype_and_graph(
     assert torch.isfinite(hyperGradient)
 
 
+def test_jax_high_resolution_bspline_sample_is_finite():
+    jax = pytest.importorskip("jax", reason="JAX is an optional backend")
+    jnp = pytest.importorskip("jax.numpy")
+    covariance = MaternCovariance1D(
+        jnp.asarray(0.2, dtype=jnp.float32), 1.5,
+        jnp.asarray(1.0, dtype=jnp.float32),
+    )
+    process = GaussianProcess.bspline(
+        covariance, BSpline1D(100, degree=3, boundary=[0.0, 1.0])
+    )
+
+    field, _ = process.sampler.sample(jax.random.key(11))
+
+    assert field.coordinate.dtype == jnp.float32
+    assert jnp.all(jnp.isfinite(field.coordinate))
+
+
+def test_pytorch_high_resolution_bspline_sample_is_finite():
+    torch = pytest.importorskip(
+        "torch", reason="PyTorch is an optional backend"
+    )
+    covariance = MaternCovariance1D(
+        torch.tensor(0.2, dtype=torch.float32), 1.5,
+        torch.tensor(1.0, dtype=torch.float32),
+    )
+    process = GaussianProcess.bspline(
+        covariance, BSpline1D(100, degree=3, boundary=[0.0, 1.0])
+    )
+
+    field, _ = process.sampler.sample(torch.Generator().manual_seed(11))
+
+    assert field.coordinate.dtype == torch.float32
+    assert torch.all(torch.isfinite(field.coordinate))
+
+
 def test_jax_sglmm_prediction_returns_a_differentiable_array():
     jax = pytest.importorskip("jax", reason="JAX is an optional backend")
     jnp = pytest.importorskip("jax.numpy")

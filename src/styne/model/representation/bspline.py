@@ -146,6 +146,17 @@ class BSpline1D(LinearExpansion):
     def boundary(self):
         return list(self._boundary)
 
+    def greville_abscissae(self) -> np.ndarray:
+        """Return the standard collocation points for this basis."""
+        if self.degree == 0:
+            left = self._knots[:self.dimension]
+            right = self._knots[1:self.dimension + 1]
+            return 0.5 * (left + right)
+        return np.array([
+            np.mean(self._knots[i + 1:i + self.degree + 1])
+            for i in range(self.dimension)
+        ])
+
     def design_matrix(self, grid: np.ndarray) -> np.ndarray:
         grid = grid_array(grid).ravel()
         return si.BSpline.design_matrix(

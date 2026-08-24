@@ -87,16 +87,19 @@ samplers (`MCMCSampler`).
 
 ## Usage
 
-Start with the four runnable examples in `examples/`.
+Start with the three backend-neutral examples in `examples/`.
 
 * `01_quickstart.py`: Bayesian linear regression, the shortest complete wiring
   from prior to posterior.
 * `02_gp.py`: interchangeable Gaussian-process representations.
 * `03_sglmm.py`: a spatial GLMM with Poisson observations.
-* `04_pde_inverse_problem.py`: a custom PDE inverse problem.
 
-The PDE example is NumPy/SciPy-specific. The maintained backend-neutral
-examples are the quickstart, GP, and SGLMM examples.
+These scripts accept `--backend {numpy,jax,pytorch}` and a fast `--smoke`
+mode for validation.
+
+The custom PDE inverse problem is retained at
+`examples_numpy/04_pde_inverse_problem.py` because its sparse solve is
+NumPy/SciPy-specific. It also accepts `--smoke`.
 
 ## Migrating from 0.2
 

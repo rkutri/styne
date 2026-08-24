@@ -3,11 +3,12 @@ Gaussian Process Engine Comparison
 
 Draw sample paths from direct, B-spline and DNA parametrisations of the same
 Matérn Gaussian-process prior. Compare independent prior realisations with
-evaluation through the stateful GaussianProcess interface.
+evaluation through explicit GaussianProcess coefficients.
 """
 
 import numpy as np
 
+from runtime import as_numpy, configure_backend, parse_arguments
 from styne.gp import GaussianProcess
 from styne.model.representation import BSpline1D
 from styne.statistics import MaternCovariance1D, MaternCovariance2D
@@ -19,25 +20,34 @@ try:
     hasMatplotlib = True
 except ImportError:
     hasMatplotlib = False
-    print("matplotlib not installed (pip install styne[plotting]); skipping plots.")
+    print(
+        "matplotlib not installed (pip install styne[plotting]); "
+        "skipping plots."
+    )
 
-# fix seed
-rng = np.random.default_rng(2026)
+arguments = parse_arguments(__doc__)
+smokeMode = arguments.smoke
+if smokeMode:
+    hasMatplotlib = False
+
+backend, rng = configure_backend(arguments.backend)
 
 
 # --- SETUP ---
 
 # covariance functions
-lengthscale = 0.2
+lengthscale = backend.asarray(0.2)
 smoothness = 1.5
-variance = 1.0
+variance = backend.asarray(1.0)
 
 covariance1D = MaternCovariance1D(lengthscale, smoothness, variance)
-covariance2D = MaternCovariance2D(0.5 * lengthscale, 0.5 * smoothness, variance)
+covariance2D = MaternCovariance2D(
+    0.5 * lengthscale, smoothness, variance
+)
 
 # evaluation sites
 resolution = 100
-nSites = 300
+nSites = 20 if smokeMode else 300
 sites = UniformGrid(0.0, 1.0, nSites)
 
 
@@ -67,8 +77,8 @@ for name, gp in engines.items():
 
 # --- INDEPENDENT PRIOR REALISATIONS ---
 
-nSamples = 2000
-nPaths = 5
+nSamples = 10 if smokeMode else 2000
+nPaths = 2 if smokeMode else 5
 interior = (sites.axis >= 0.1) & (sites.axis <= 0.9)
 
 print(f"\ndrawing {nSamples} independent prior realisations per engine ...")
@@ -76,10 +86,13 @@ print(f"\ndrawing {nSamples} independent prior realisations per engine ...")
 samplerVar = {}
 for name, gp in engines.items():
 
-    samples = np.array([
-        gp.sampler.generate_realisation(rng=rng).evaluate(sites)
-        for _ in range(nSamples)
-    ])
+    samples = []
+    for _ in range(nSamples):
+        realisation, rng = gp.sampler.sample(rng)
+        samples.append(realisation.evaluate(sites))
+    samples = as_numpy(backend.namespace.stack(samples))
+    if not np.isfinite(samples).all():
+        raise RuntimeError(f"{name} sampler produced non-finite values")
 
     samplerVar[name] = samples.var(axis=0)
     band = samplerVar[name][interior]
@@ -90,21 +103,27 @@ for name, gp in engines.items():
 
 # --- STATELESS EVALUATION ---
 
-print(f"\nevaluating {nSamples} parameter states via gp.evaluate(z, sites) ...")
+print(
+    f"\nevaluating {nSamples} parameter states "
+    "via gp.evaluate(z, sites) ..."
+)
 
 atSitesVar = {}
 for name, gp in engines.items():
 
-    samples = np.empty((nSamples, nSites))
-
-    for k in range(nSamples):
-        realisation = gp.sampler.generate_realisation(rng=rng)
-        samples[k] = gp.evaluate(realisation.coordinate, sites)
+    samples = []
+    for _ in range(nSamples):
+        realisation, rng = gp.sampler.sample(rng)
+        samples.append(gp.evaluate(realisation.coordinate, sites))
+    samples = as_numpy(backend.namespace.stack(samples))
+    if not np.isfinite(samples).all():
+        raise RuntimeError(f"{name} evaluation produced non-finite values")
 
     atSitesVar[name] = samples.var(axis=0)
     band = atSitesVar[name][interior]
-    discrepancy = np.max(np.abs(atSitesVar[name][interior]
-                                - samplerVar[name][interior]))
+    discrepancy = np.max(np.abs(
+        atSitesVar[name][interior] - samplerVar[name][interior]
+    ))
 
     print(f"  {name:8s}: marginal var on interior "
           f"[{band.min():.3f}, {band.max():.3f}], "
@@ -121,8 +140,8 @@ if hasMatplotlib:
 
         # independent prior realisations
         for _ in range(nPaths):
-            path = gp.sampler.generate_realisation(
-                rng=rng).evaluate(sites)
+            realisation, rng = gp.sampler.sample(rng)
+            path = as_numpy(realisation.evaluate(sites))
             axes[0, col].plot(sites.axis, path, lw=0.7, alpha=0.7)
 
         axes[0, col].plot(sites.axis, samplerVar[name],
@@ -132,9 +151,10 @@ if hasMatplotlib:
 
         # stateless evaluation of explicit GaussianProcess coefficients
         for _ in range(nPaths):
-            realisation = gp.sampler.generate_realisation(rng=rng)
+            realisation, rng = gp.sampler.sample(rng)
             axes[1, col].plot(
-                sites.axis, gp.evaluate(realisation.coordinate, sites),
+                sites.axis,
+                as_numpy(gp.evaluate(realisation.coordinate, sites)),
                 lw=0.7, alpha=0.7)
 
         axes[1, col].plot(sites.axis, atSitesVar[name],
@@ -159,11 +179,11 @@ if hasMatplotlib:
 # --- DNA COEFFICIENT PRIOR ---
 
 specCov = dnaGP.measure.covariance
-marginalVariances = specCov.marginalVariance
-logDet = specCov.log_determinant()
+marginalVariances = as_numpy(specCov.marginalVariance)
+logDet = float(as_numpy(specCov.log_determinant()))
 
-zSample = dnaGP.measure.generate_realisation(rng=rng)
-logPrior = dnaGP.measure.density.evaluate_log(zSample)
+zSample, rng = dnaGP.measure.sample(rng)
+logPrior = float(as_numpy(dnaGP.measure.density.evaluate_log(zSample)))
 
 print("\nDNA coefficient prior:")
 print(f"  marginal variances [{marginalVariances.min():.3e}, "
@@ -174,12 +194,12 @@ print(f"  log-density of one prior draw = {logPrior:.4f}")
 
 # --- 2D DNA REALISATION ---
 
-resolution2D = 100
+resolution2D = 5 if smokeMode else 100
 gp2D = GaussianProcess.dna(covariance2D, q=resolution2D, d=2)
 
-realisation2D = gp2D.sampler.generate_realisation(rng=rng)
-nativeField = realisation2D.expansion.evaluate_native(
-    realisation2D.coordinate
+realisation2D, rng = gp2D.sampler.sample(rng)
+nativeField = as_numpy(
+    realisation2D.expansion.evaluate_native(realisation2D.coordinate)
 )
 
 nGrid = resolution2D + 2
