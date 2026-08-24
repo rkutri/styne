@@ -30,7 +30,7 @@ from styne.statistics.gaussian import Gaussian
 from styne.statistics.covariance import DenseCovarianceMatrix, IIDCovarianceMatrix
 from styne.statistics.likelihood import RegressionLikelihood
 from styne.statistics.radonnikodym import RadonNikodym
-from styne.model.linear import LinearModel
+from styne.model.linear import LinearForwardMap
 from styne.utility.map import determine_map
 
 from styne.mcmc.method.mala import MALAFactory
@@ -161,7 +161,7 @@ def setup_model(randomGenerator, d):
     priorCovariance = IIDCovarianceMatrix(d, 1.0 / alphaPrior)
     prior = Gaussian(priorCovariance, mean=Vector(np.zeros(d)))
 
-    linearModel = LinearModel(precondCovariates)
+    linearModel = LinearForwardMap(precondCovariates)
     response = BinomialResponse(n=1)
     likelihood = RegressionLikelihood(data, linearModel, response)
 

@@ -131,25 +131,24 @@ def build_ground_truth(smoothness, config):
     realisation = truthGP.sampler.generate_realisation(rng=rng)
 
     truthGP.sites = Grid(coordinates)
-    truthGP.parameter.coordinate = realisation.coordinate
 
-    etaSites = truthGP.at_sites() + config.trendOffset
+    etaSites = truthGP.at_sites(realisation.coordinate) + config.trendOffset
     counts = PoissonResponse().simulate(etaSites, rng=rng).coordinate
 
     resolution = config.predictionResolution
 
     truthGP.sites = UniformGrid((0., 1., resolution), (0., 1., resolution))
-    truthGP.parameter.coordinate = realisation.coordinate
-    truthField = (truthGP.at_sites() + config.trendOffset).reshape(
+    truthField = (
+        truthGP.at_sites(realisation.coordinate) + config.trendOffset).reshape(
         resolution, resolution)
 
     captureResolution = config.captureGridResolution
 
     truthGP.sites = UniformGrid(
         (0., 1., captureResolution), (0., 1., captureResolution))
-    truthGP.parameter.coordinate = realisation.coordinate
 
-    captureField = (truthGP.at_sites() + config.trendOffset).reshape(
+    captureField = (
+        truthGP.at_sites(realisation.coordinate) + config.trendOffset).reshape(
         captureResolution, captureResolution)
 
     return coordinates, counts, truthField, captureField

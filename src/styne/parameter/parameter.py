@@ -5,7 +5,7 @@ A Parameter wraps the coordinate array that the model and MCMC layer
 operate on. The library reads 'coordinate' to evaluate models, and
 writes to 'coordinate' to propose new states. The rest of the library
 never needs to know the semantic meaning of the coordinates; that
-knowledge lives inside the Parameter subclass and the Model that
+knowledge lives inside the Parameter subclass and the ForwardMap that
 consumes it.
 
 To define a custom parameter, subclass 'Parameter' and implement:

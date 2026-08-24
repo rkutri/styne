@@ -1,13 +1,13 @@
 import numpy as np
 import pytest
 
-from styne.model.model import Model
+from styne.model.forwardmap import ForwardMap
 from styne.parameter.vector import Vector
 from styne.statistics.likelihood import RegressionLikelihood
 from styne.statistics.response import GaussianResponse
 
 
-class _DifferentiableMock(Model):
+class _DifferentiableMock(ForwardMap):
     """Identity model that satisfies DifferentiableModel."""
 
     def __init__(self, dim=2):
@@ -22,11 +22,11 @@ class _DifferentiableMock(Model):
     def pDim(self):
         return self._dim
 
-    def _interpolate(self, parameter):
-        self._p = parameter
+    def _prepare(self, parameter):
+        return parameter.coordinate
 
-    def _evaluate(self):
-        self._evaluation = self._p.coordinate
+    def _evaluate(self, preparedState):
+        return preparedState
 
     def directional_derivative(self, parameter):
         return parameter.clone()
@@ -35,7 +35,7 @@ class _DifferentiableMock(Model):
         return np.asarray(w)
 
 
-class _NonDifferentiableMock(Model):
+class _NonDifferentiableMock(ForwardMap):
 
     @property
     def pType(self):
@@ -45,11 +45,11 @@ class _NonDifferentiableMock(Model):
     def pDim(self):
         return 2
 
-    def _interpolate(self, parameter):
-        pass
+    def _prepare(self, parameter):
+        return parameter.coordinate
 
-    def _evaluate(self):
-        self._evaluation = np.zeros(2)
+    def _evaluate(self, preparedState):
+        return np.zeros(2)
 
 
 def test_initialisation(mock_likelihood, mock_data, mock_forward_model):
@@ -106,11 +106,7 @@ def test_condition_on_clears_caches(mock_data, mock_noise):
 
     assert likelihood._logLikelihoodCache.contains(parameter)
     assert likelihood._gradientCache.contains(parameter)
-    assert likelihood.model.evaluation is not None
-
     likelihood.condition_on(parameter)
 
     assert not likelihood._logLikelihoodCache.contains(parameter)
     assert not likelihood._gradientCache.contains(parameter)
-    assert likelihood.model.evaluation is None
-

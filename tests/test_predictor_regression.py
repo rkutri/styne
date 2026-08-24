@@ -3,6 +3,7 @@ import numpy as np
 
 from styne.gp.gaussianprocess import GaussianProcess
 from styne.model.sglmm import SGLMM
+from styne.parameter.vector import Vector
 from styne.statistics.stationary import MaternCovariance1D
 from styne.utility.grid import UniformGrid
 from styne.model.trend import ConstantTrend
@@ -15,10 +16,8 @@ def test_sglmm_predictor_regression():
     sglmm = SGLMM(gp, grid)
     queryGrid = UniformGrid(0., 1., 20)
     
-    predictor = sglmm.create_predictor(queryGrid)
-    
     z = np.random.randn(gp.parameterDimension)
-    gp.parameter.coordinate = z
+    predictor = sglmm.create_predictor(sglmm.prepare(Vector(z)), queryGrid)
     
     pred_mean = predictor.mean()
     
@@ -36,10 +35,8 @@ def test_sglmm_predictor_regression_with_trend():
     sglmm = SGLMM(gp, grid, trend=ConstantTrend(5.0))
     queryGrid = UniformGrid(0., 1., 20)
     
-    predictor = sglmm.create_predictor(queryGrid)
-    
     z = np.random.randn(gp.parameterDimension)
-    gp.parameter.coordinate = z
+    predictor = sglmm.create_predictor(sglmm.prepare(Vector(z)), queryGrid)
     
     pred_mean = predictor.mean()
     

@@ -7,9 +7,9 @@ def global_random_seed():
     np.random.seed(42)
     random.seed(42)
 
-from styne.model.model import Model
+from styne.model.forwardmap import ForwardMap
 
-class MockIdentityModel(Model):
+class MockIdentityForwardMap(ForwardMap):
     def __init__(self, dim=2):
         super().__init__()
         self._dim = dim
@@ -23,14 +23,11 @@ class MockIdentityModel(Model):
     def pDim(self):
         return self._dim
 
-    def _interpolate(self, parameter):
-        self._p = parameter
+    def _prepare(self, parameter):
+        return parameter.coordinate
 
-    def _evaluate(self):
-        if hasattr(self, '_p'):
-            self._evaluation = self._p.coordinate
-        else:
-            self._evaluation = np.zeros(self._dim)
+    def _evaluate(self, preparedState):
+        return preparedState
 
 
 @pytest.fixture
@@ -50,7 +47,7 @@ def mock_data():
 
 @pytest.fixture
 def mock_forward_model():
-    return MockIdentityModel(dim=2)
+    return MockIdentityForwardMap(dim=2)
 
 
 @pytest.fixture

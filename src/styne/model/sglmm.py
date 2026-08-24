@@ -2,7 +2,7 @@ import numpy as np
 
 from typing import Optional
 
-from styne.model.model import Model
+from styne.model.forwardmap import ForwardMap
 from styne.model.trend import Trend
 from styne.parameter.parameter import Parameter
 from styne.parameter.vector import Vector
@@ -13,7 +13,7 @@ from styne.utility.grid import Grid
 from styne.statistics.interface import Predictor
 
 
-class SGLMM(Model):
+class SGLMM(ForwardMap):
     """
     Template class for (Spatial) Generalised Linear Mixed Models.
 
@@ -56,15 +56,16 @@ class SGLMM(Model):
         if trend is not None and not isinstance(trend, Trend):
             raise TypeError("trend must implement the Trend protocol")
 
-        self._fixedEffect = None
         self._trendValues = None
 
         self._obsSites = obsSites
 
         self._gp = gp
-        # If the GP has no sites set, we default to the observation sites.
-        # Otherwise, we respect the existing parametrisation (e.g. for Cholesky baselines).
-        if self._gp.sites is None:
+        # SGLMM owns the GP's site configuration for its lifetime: the latent
+        # field must be synthesised at the observation sites. Pin it once here
+        # so evaluation and gradients need no per-call site mutation. Callers
+        # must not re-site this GP while it is owned by an SGLMM.
+        if self._gp.sites is not self._obsSites:
             self._gp.sites = self._obsSites
 
         if features is None:
@@ -101,28 +102,23 @@ class SGLMM(Model):
         return latentDim
 
 
-    def _interpolate(self, parameter) -> None:
+    def _prepare(self, parameter):
+        if self._features is not None:
+            return parameter.block(0).coordinate, parameter.block(1).coordinate
+
+        return parameter.coordinate, None
+
+    def _evaluate(self, preparedState):
+        latentCoordinate, fixedEffect = preparedState
+        evaluation = self._gp.at_sites(latentCoordinate)
 
         if self._features is not None:
-
-            self._gp.parameter.coordinate = parameter.block(0).coordinate
-            self._fixedEffect = parameter.block(1).coordinate
-
-        else:
-            self._gp.parameter.coordinate = parameter.coordinate
-
-    def _evaluate(self) -> None:
-        if self._gp.sites is not self._obsSites:
-            self._gp.sites = self._obsSites
-            
-        self._evaluation = self._gp.at_sites()
-
-        if self._features is not None:
-            self._evaluation = self._evaluation \
-                + self._features @ self._fixedEffect
+            evaluation = evaluation + self._features @ fixedEffect
 
         if self._trendValues is not None:
-            self._evaluation = self._evaluation + self._trendValues
+            evaluation = evaluation + self._trendValues
+
+        return evaluation
 
     def directional_derivative(self, parameter: Parameter) -> np.ndarray:
         """
@@ -142,9 +138,6 @@ class SGLMM(Model):
         -------
         np.ndarray
         """
-        if self._gp.sites is not self._obsSites:
-            self._gp.sites = self._obsSites
-
         coord = parameter.block(0).coordinate if self._features is not None else parameter.coordinate
         deriv = self._gp.directional_derivative(coord)
 
@@ -171,9 +164,6 @@ class SGLMM(Model):
             `Vector`-shaped if no fixed effects, otherwise concatenated with
             the fixed-effect block's adjoint contribution.
         """
-        if self._gp.sites is not self._obsSites:
-            self._gp.sites = self._obsSites
-
         w = np.asarray(w).ravel()
         gpAdj = self._gp.adjoint_directional_derivative(w)
 
@@ -185,12 +175,16 @@ class SGLMM(Model):
             self._features.T @ w
         ])
 
-    def create_predictor(self, queryGrid: Grid, features=None) -> 'SGLMMPredictor':
+    def create_predictor(
+            self, preparedState, queryGrid: Grid, features=None
+    ) -> 'SGLMMPredictor':
         """
         Build an out-of-sample predictor at new sites.
 
         Parameters
         ----------
+        preparedState
+            State returned by 'prepare' for the parameter to predict.
         queryGrid : Grid
             Sites to predict at.
         features : np.ndarray, optional
@@ -201,32 +195,38 @@ class SGLMM(Model):
         -------
         SGLMMPredictor
         """
-        gpPredictor = self._gp.engine.create_predictor(self._gp, queryGrid)
-        return SGLMMPredictor(self, gpPredictor, queryGrid, features)
+        latentCoordinate, fixedEffect = preparedState
+        gpPredictor = self._gp.engine.create_predictor(
+            self._gp, queryGrid, latentCoordinate)
+        return SGLMMPredictor(gpPredictor, queryGrid, features, fixedEffect, self._trend)
 
 
 class SGLMMPredictor(Predictor):
     """
-    Out-of-sample predictor for the SGLMM model.
+    Immutable out-of-sample mean snapshot for the SGLMM model.
     """
     def __init__(
-        self, model: SGLMM, gpPredictor: Predictor, 
-        queryGrid: Grid, features=None
+        self, gpPredictor: Predictor, queryGrid: Grid, features, fixedEffect, trend
     ):
-        self._model = model
-        self._gpPredictor = gpPredictor
-        self._trendValues = model._trend.evaluate(queryGrid) if model._trend else None
-        
-        if model._features is not None:
+        mean = np.array(gpPredictor.mean(), dtype=float, copy=True)
+
+        if trend is not None:
+            mean = mean + np.array(
+                trend.evaluate(queryGrid), dtype=float, copy=True)
+
+        if fixedEffect is not None:
             if features is None:
                 raise ValueError("Out-of-sample features required for prediction.")
-            self._features = np.asarray(features)
-            if self._features.ndim == 1:
-                self._features = self._features[:, None]
-            if len(self._features) != len(queryGrid):
+            frozenFeatures = np.array(features, dtype=float, copy=True)
+            if frozenFeatures.ndim == 1:
+                frozenFeatures = frozenFeatures[:, None]
+            if len(frozenFeatures) != len(queryGrid):
                 raise ValueError("features must have shape (len(queryGrid), p)")
-        else:
-            self._features = None
+            frozenFixedEffect = np.array(
+                fixedEffect, dtype=float, copy=True)
+            mean = mean + frozenFeatures @ frozenFixedEffect
+
+        self._mean = np.array(mean, dtype=float, copy=True)
 
     def mean(self) -> np.ndarray:
         """
@@ -236,9 +236,4 @@ class SGLMMPredictor(Predictor):
         -------
         np.ndarray
         """
-        val = self._gpPredictor.mean()
-        if self._trendValues is not None:
-            val = val + self._trendValues
-        if self._features is not None:
-            val = val + self._features @ self._model._fixedEffect
-        return val
+        return self._mean.copy()

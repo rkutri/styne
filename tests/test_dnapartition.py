@@ -35,18 +35,15 @@ def test_partitioned_parameter_evaluation():
     mergedParam = partition._rule.merge([coarseSample.coordinate, fineSample.coordinate])
     
     # Full merged evaluation
-    dnaGP.parameter.coordinate = mergedParam
-    evalMerged = dnaGP.at_sites()
+    evalMerged = dnaGP.at_sites(mergedParam)
     
     # Coarse only evaluation
     coarsePadded = partition._rule.merge([coarseSample.coordinate, np.zeros_like(fineSample.coordinate)])
-    dnaGP.parameter.coordinate = coarsePadded
-    evalCoarseOnly = dnaGP.at_sites()
+    evalCoarseOnly = dnaGP.at_sites(coarsePadded)
     
     # Fine only evaluation
     finePadded = partition._rule.merge([np.zeros_like(coarseSample.coordinate), fineSample.coordinate])
-    dnaGP.parameter.coordinate = finePadded
-    evalFineOnly = dnaGP.at_sites()
+    evalFineOnly = dnaGP.at_sites(finePadded)
     
     np.testing.assert_allclose(evalMerged, evalCoarseOnly + evalFineOnly, 
                                err_msg="Merged parameter field evaluation should equal sum of zero-padded evaluations.")

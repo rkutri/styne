@@ -1,10 +1,10 @@
 import numpy as np
 
-from styne.model.model import Model
+from styne.model.forwardmap import ForwardMap
 from styne.parameter.vector import Vector
 
 
-class LinearModel(Model):
+class LinearForwardMap(ForwardMap):
     """
     Base class for linear models. The model response is the linear predictor,
         eta = X @ beta
@@ -25,9 +25,6 @@ class LinearModel(Model):
         if not self._features.ndim == 2:
             raise ValueError("features must be a 2D array")
 
-        self._beta = None
-
-
     @property
     def pType(self):
         return Vector
@@ -36,11 +33,11 @@ class LinearModel(Model):
     def pDim(self):
         return self._features.shape[1]
     
-    def _interpolate(self, parameter: Vector) -> None:
-        self._beta = parameter.coordinate
+    def _prepare(self, parameter: Vector) -> np.ndarray:
+        return parameter.coordinate
 
-    def _evaluate(self) -> None:
-        self._evaluation = self._features @ self._beta
+    def _evaluate(self, preparedState: np.ndarray) -> np.ndarray:
+        return self._features @ preparedState
 
     def directional_derivative(self, parameter: Vector) -> Vector:
         """
@@ -77,5 +74,3 @@ class LinearModel(Model):
         np.ndarray
         """
         return self._features.T @ np.asarray(w).ravel()
-
-        

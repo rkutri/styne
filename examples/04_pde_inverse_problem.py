@@ -39,7 +39,7 @@ rng = np.random.default_rng(2026)
 
 # definition of a custom forward model. For more details on the
 # interface, see src/styne/model/model.py
-class EllipticForwardModel(styne.Model):
+class EllipticForwardMap(styne.ForwardMap):
     """
     Forward map: parameter to PDE solution at the observation sites.
 
@@ -51,7 +51,7 @@ class EllipticForwardModel(styne.Model):
 
     Everything that does not depend on the parameter (mass matrix,
     right-hand side, observation interpolation matrix) is assembled once
-    at construction. Per parameter update, _interpolate reassembles and
+    at construction. Per parameter update, _prepare reassembles and
     constrains the stiffness matrix, so that _evaluate only solves the
     system and interpolates to the observation sites.
     """
@@ -84,8 +84,6 @@ class EllipticForwardModel(styne.Model):
         rhs[-1] = 0.0
         self._rhs = rhs
 
-        self._stiffMat = None
-
     @property
     def pType(self):
         """
@@ -101,24 +99,23 @@ class EllipticForwardModel(styne.Model):
         """
         return self._gp.parameter.dimension
 
-    def _interpolate(self, parameter):
+    def _prepare(self, parameter):
         """
         Set parameter as new state of the forward map and perform the
         parameter-dependent precomputation.
         """
-        self._gp.parameter.coordinate = parameter.coordinate
-        diffusion = np.exp(self._gp.at_sites())
+        diffusion = np.exp(self._gp.at_sites(parameter.coordinate))
 
         stiffMat = p1_stiffness_1d(self._vertices, diffusion)
-        self._stiffMat = apply_dirichlet_1d(stiffMat)
+        return apply_dirichlet_1d(stiffMat)
 
-    def _evaluate(self):
+    def _evaluate(self, preparedState):
         """
         Evaluate the forward map: solve the precomputed FE system and
         interpolate the solution to the observation sites.
         """
-        solution = spsolve(self._stiffMat, self._rhs)
-        self._evaluation = self._obsInterp @ solution
+        solution = spsolve(preparedState, self._rhs)
+        return self._obsInterp @ solution
 
 
 # --- SETUP ---
@@ -141,7 +138,7 @@ gp = GaussianProcess.dna(gpCov, q=30, d=DIM)
 nFEM = 50
 feMesh = UniformGrid(0., 1., nFEM)
 source = ExplicitFunction(lambda x: 1.)
-fMap = EllipticForwardModel(gp, source, feMesh, obsSites)
+fMap = EllipticForwardMap(gp, source, feMesh, obsSites)
 
 
 # --- SYNTHETIC DATA GENERATION ---
@@ -226,8 +223,7 @@ gp.sites = plotMesh
 
 fields = np.empty((len(trajectory), len(plotMesh)))
 for i, coefficients in enumerate(trajectory):
-    gp.parameter.coordinate = coefficients
-    fields[i] = np.exp(gp.at_sites())
+    fields[i] = np.exp(gp.at_sites(coefficients))
 
 # posterior mean and pointwise 95% credible band
 posteriorMean = fields.mean(axis=0)

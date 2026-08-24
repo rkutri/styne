@@ -275,28 +275,27 @@ class BSplineGPEngine(GPEngine):
             self, w: np.ndarray, _covariance: CovarianceMatrix) -> np.ndarray:
         return self._H.T @ w
 
-    def create_predictor(self, gpState: GPState, queryGrid: Grid) -> Predictor:
+    def create_predictor(
+            self, gpState: GPState, queryGrid: Grid,
+            coefficient: np.ndarray) -> Predictor:
         pts = queryGrid.to_array()
         H_pred = self._expansion.design_matrix(pts if self._is2d else pts.ravel())
-        return BSplineGPPredictor(gpState, H_pred)
+        frozenCoefficient = np.array(coefficient, dtype=float, copy=True)
+        return BSplineGPPredictor(H_pred @ frozenCoefficient)
 
 
 class BSplineGPPredictor(Predictor):
     """
-    Out-of-sample prediction for the B-spline GP engine.
+    Immutable out-of-sample mean snapshot for the B-spline GP engine.
 
     Parameters
     ----------
-    gpState : GPState
-        Current GP state, exposes the parameter to predict from.
-    H_pred : np.ndarray
-        Design matrix mapping B-spline coefficients to values at the query
-        sites.
+    mean : np.ndarray
+        Predictive mean computed from the coefficient at construction time.
     """
 
-    def __init__(self, gpState: GPState, H_pred: np.ndarray):
-        self._gpState = gpState
-        self._H_pred = H_pred
+    def __init__(self, mean: np.ndarray):
+        self._mean = np.array(mean, dtype=float, copy=True)
 
     def mean(self) -> np.ndarray:
         """
@@ -307,4 +306,4 @@ class BSplineGPPredictor(Predictor):
         np.ndarray
             Predictive mean values, `H_pred @ coefficients`.
         """
-        return self._H_pred @ self._gpState.parameter.coordinate
+        return self._mean.copy()

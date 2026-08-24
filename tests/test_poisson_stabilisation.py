@@ -3,7 +3,7 @@ import pytest
 import warnings
 
 from styne.statistics.response import PoissonResponse
-from styne.model.model import Model
+from styne.model.forwardmap import ForwardMap
 from styne.parameter.vector import Vector
 from styne.statistics.radonnikodym import RadonNikodym
 from styne.statistics.gaussian import Gaussian
@@ -12,12 +12,12 @@ from styne.statistics.interface import DensityInterface
 from styne.mcmc.method.pmala import PMALAProposal
 
 
-class MockDifferentiableModel(Model):
+class MockDifferentiableForwardMap(ForwardMap):
     """Mock model returning pre-defined evaluation and computing adjoint."""
 
     def __init__(self, evaluation: np.ndarray):
         super().__init__()
-        self._evaluation = evaluation
+        self._response = evaluation
 
     @property
     def pType(self):
@@ -25,13 +25,13 @@ class MockDifferentiableModel(Model):
 
     @property
     def pDim(self) -> int:
-        return len(self._evaluation)
+        return len(self._response)
 
-    def _interpolate(self, parameter) -> None:
-        pass
+    def _prepare(self, parameter):
+        return self._response
 
-    def _evaluate(self) -> None:
-        pass
+    def _evaluate(self, preparedState):
+        return preparedState
 
     def adjoint_directional_derivative(self, vector: np.ndarray) -> np.ndarray:
         return vector
@@ -88,11 +88,11 @@ def test_poisson_score_limits():
     response = PoissonResponse()
     yVal = np.array([1.0, 1.0, 1.0, 1.0])
     etaExtreme = np.array([500.0, 800.0, np.inf, -np.inf])
-    modelVal = MockDifferentiableModel(etaExtreme)
+    modelVal = MockDifferentiableForwardMap(etaExtreme)
 
     with warnings.catch_warnings():
         warnings.simplefilter("error")
-        scoreVal = response.score(yVal, modelVal)
+        scoreVal = response.score(yVal, etaExtreme, modelVal)
 
     assert np.isfinite(scoreVal).all()
     # At extreme positive eta, score = y - exp(clip(eta)) which should be extremely negative.

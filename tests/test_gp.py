@@ -32,6 +32,21 @@ def test_dense_gp_sampler_shape():
     assert realisation.coordinate.shape == (n,)
 
 
+def test_at_sites_uses_explicit_coefficient_without_mutating_parameter():
+    grid = UniformGrid(0., 1., 5)
+    gp = GaussianProcess.direct(
+        grid, MaternCovariance1D(0.3, 1.5, 1.0))
+    gp.sites = grid
+    gp.parameter.coordinate = np.zeros(gp.parameterDimension)
+    before = np.array(gp.parameter.coordinate, copy=True)
+    coefficient = np.linspace(-0.5, 0.5, gp.parameterDimension)
+
+    values = gp.at_sites(coefficient)
+
+    assert values.shape == (len(grid),)
+    np.testing.assert_array_equal(gp.parameter.coordinate, before)
+
+
 def test_dense_gp_measure_is_gaussian():
     grid = UniformGrid(LB, RB, 5)
     cov = ExponentialCovariance1D(alpha=5., marginalVariance=1.)

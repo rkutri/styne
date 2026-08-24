@@ -6,7 +6,7 @@ with a Metropolised-Random-Walk sampler.
 """
 import numpy as np
 
-from styne.model import LinearModel
+from styne.model import LinearForwardMap
 from styne.parameter import Vector
 from styne.statistics import (
     Data, Gaussian, GaussianResponse, RegressionLikelihood,
@@ -55,7 +55,7 @@ prior = Gaussian(priorCov, mean=Vector(np.zeros(2)))
 
 # likelihood definition
 noiseModel = GaussianResponse(IIDCovarianceMatrix(nObs, noiseVar))
-forwardModel = LinearModel(features)
+forwardModel = LinearForwardMap(features)
 likelihood = RegressionLikelihood(data, forwardModel, noiseModel)
 
 # posterior definition

@@ -52,8 +52,7 @@ model = SGLMM(gp, obsSites)
 
 # synthetic data generation
 truthGP.sites = obsSites
-truthGP.parameter.coordinate = zTrue.coordinate
-counts = rng.poisson(np.exp(truthGP.at_sites()))
+counts = rng.poisson(np.exp(truthGP.at_sites(zTrue.coordinate)))
 
 data = Data(dimension=1, design=obsSites.to_array())
 data.measurement = counts[:, None]
@@ -103,12 +102,10 @@ gridRes = 40
 dense = UniformGrid((0.0, 1.0, gridRes), (0.0, 1.0, gridRes))
 
 truthGP.sites = dense
-truthGP.parameter.coordinate = zTrue.coordinate
-fieldTrue = truthGP.at_sites()
+fieldTrue = truthGP.at_sites(zTrue.coordinate)
 
 gp.sites = dense
-gp.parameter.coordinate = zMean
-fieldRecovered = gp.at_sites()
+fieldRecovered = gp.at_sites(zMean)
 
 correlation = np.corrcoef(fieldTrue, fieldRecovered)[0, 1]
 print(f"posterior mean vs truth: field correlation = {correlation:.3f}")

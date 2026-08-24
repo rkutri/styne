@@ -2,7 +2,7 @@
 Curated top-level surface of styne.
 
 The main extension and interaction points resolve directly on the
-package, e.g. `styne.Model`, `styne.Parameter`, `styne.MetropolisHastings`.
+package, e.g. `styne.ForwardMap`, `styne.Parameter`, `styne.MetropolisHastings`.
 Everything else keeps its documented subpackage path (`styne.gp`,
 `styne.statistics`, `styne.mcmc`, `styne.utility`, ...).
 """
@@ -21,8 +21,8 @@ except PackageNotFoundError:
     __version__ = "0+unknown"
 
 _SYMBOL_TO_MODULE = {
-    "Model": "styne.model.model",
-    "DifferentiableModel": "styne.model.model",
+    "ForwardMap": "styne.model.forwardmap",
+    "DifferentiableModel": "styne.model.forwardmap",
     "Parameter": "styne.parameter.parameter",
     "MetropolisHastings": "styne.mcmc.metropolishastings",
 }

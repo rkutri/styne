@@ -90,9 +90,9 @@ for name, gp in engines.items():
           f"[{band.min():.3f}, {band.max():.3f}]")
 
 
-# --- EVALUATION THROUGH GP STATE ---
+# --- STATELESS EVALUATION ---
 
-print(f"\nevaluating {nSamples} parameter states per engine via gp.at_sites() ...")
+print(f"\nevaluating {nSamples} parameter states per engine via gp.at_sites(z) ...")
 
 atSitesVar = {}
 for name, gp in engines.items():
@@ -101,8 +101,7 @@ for name, gp in engines.items():
 
     for k in range(nSamples):
         realisation = gp.sampler.generate_realisation(rng=rng)
-        gp.parameter.coordinate = realisation.coordinate
-        samples[k] = gp.at_sites()
+        samples[k] = gp.at_sites(realisation.coordinate)
 
     atSitesVar[name] = samples.var(axis=0)
     band = atSitesVar[name][interior]
@@ -133,15 +132,16 @@ if hasMatplotlib:
         axes[0, col].set_title(f"{name} — prior realisations")
         axes[0, col].legend(fontsize=8)
 
-        # evaluation through the current GaussianProcess parameter
+        # stateless evaluation of explicit GaussianProcess coefficients
         for _ in range(nPaths):
             realisation = gp.sampler.generate_realisation(rng=rng)
-            gp.parameter.coordinate = realisation.coordinate
-            axes[1, col].plot(sites.axis, gp.at_sites(), lw=0.7, alpha=0.7)
+            axes[1, col].plot(
+                sites.axis, gp.at_sites(realisation.coordinate),
+                lw=0.7, alpha=0.7)
 
         axes[1, col].plot(sites.axis, atSitesVar[name],
                           "k--", lw=1.5, label="marginal var")
-        axes[1, col].set_title(f"{name} — gp.at_sites()")
+        axes[1, col].set_title(f"{name} — gp.at_sites(z)")
         axes[1, col].set_xlabel("x")
         axes[1, col].legend(fontsize=8)
 

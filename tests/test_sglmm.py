@@ -120,11 +120,10 @@ class TestSGLMMForwardMap:
 
     def test_jacobian_times_zeta_matches_model_evaluation(self):
         s = self.s
-        s['model'].interpolate(s['zetaTrue'])
-        s['model'].evaluate()
+        evaluation = s['model'](s['zetaTrue'])
         err = np.max(
             np.abs(s['J'] @ s['zetaTrue'].coordinate
-                   - s['model'].evaluation.ravel())
+                   - evaluation.ravel())
         )
         assert err < 1e-12, f"Forward map error: {err:.2e}"
 
@@ -236,11 +235,10 @@ class TestSGLMMFixedEffectsForwardMap:
 
     def test_jacobian_times_full_param_matches_model_evaluation(self):
         s = self.s
-        s['model'].interpolate(s['paramTrue'])
-        s['model'].evaluate()
+        evaluation = s['model'](s['paramTrue'])
         fullCoord = np.hstack([s['zetaTrue'].coordinate, s['betaTrue']])
         err = np.max(
-            np.abs(s['J'] @ fullCoord - s['model'].evaluation.ravel())
+            np.abs(s['J'] @ fullCoord - evaluation.ravel())
         )
         assert err < 1e-12, f"Forward map error: {err:.2e}"
 

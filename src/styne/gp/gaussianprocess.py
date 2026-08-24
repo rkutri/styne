@@ -163,12 +163,18 @@ class GaussianProcess:
     def sampler(self) -> GPSampler:
         return GPSampler(self._realisation, self._measure)
 
-    def at_sites(self) -> np.ndarray:
+    def at_sites(self, coefficient: np.ndarray) -> np.ndarray:
+        """Evaluate an explicit latent coefficient at the configured sites.
 
+        Evaluation is stateless: the coefficient is passed directly through
+        the engine's linear synthesis operator and the stored GP parameter is
+        not read or mutated.
+        """
         if self._sites is None:
             raise ValueError("sites not set on GaussianProcess")
 
-        return self._engine.at_sites(self._realisation, self._sites)
+        return self._engine.evaluate(
+            np.asarray(coefficient), self._measure.covariance)
 
     def directional_derivative(self, v: np.ndarray) -> np.ndarray:
         return self._engine.apply_jacobian(
@@ -177,7 +183,4 @@ class GaussianProcess:
     def adjoint_directional_derivative(self, w: np.ndarray) -> np.ndarray:
         return self._engine.apply_adjoint_jacobian(
             np.asarray(w), self._measure.covariance)
-
-
-
 

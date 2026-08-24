@@ -1,11 +1,9 @@
 import numpy as np
 from scipy.linalg import solve_triangular
-from scipy.spatial.distance import cdist
 from styne.gp.engine import GPEngine, GPState
 from styne.model.representation.expansion import Expansion
 from styne.statistics.interface import CovarianceFunctionInterface, Predictor
 from styne.statistics.covariance import CovarianceMatrix, DenseCovarianceMatrix, IIDCovarianceMatrix
-from styne.statistics.stationary import matern_covariance
 from styne.utility.grid import Grid
 from styne.utility.interpolation import Interpolation1D
 
@@ -227,71 +225,41 @@ class DirectGPEngine(GPEngine):
             
         return result
 
-    def create_predictor(self, gpState: GPState, queryGrid: Grid) -> Predictor:
-        return DirectGPPredictor(gpState, self, queryGrid)
+    def create_predictor(
+            self, gpState: GPState, queryGrid: Grid,
+            coefficient: np.ndarray) -> Predictor:
+        shapeCovariance = self._shapeCovariance
+        if not isinstance(shapeCovariance, DenseCovarianceMatrix):
+            raise NotImplementedError(
+                "Only DenseCovarianceMatrix is supported."
+            )
+
+        kStar = gpState.covarianceFunction.evaluate_covariance(
+            queryGrid, self._grid)
+        kStarArray = kStar.to_dense() if isinstance(
+            kStar, DenseCovarianceMatrix) else np.asarray(kStar)
+        frozenCoefficient = np.array(coefficient, dtype=float, copy=True)
+        frozenFactor = np.array(
+            shapeCovariance._cholFactor, dtype=float, copy=True)
+        mean = kStarArray @ solve_triangular(
+            frozenFactor.T, frozenCoefficient, lower=False)
+        return DirectGPPredictor(mean)
 
 
 class DirectGPPredictor(Predictor):
     """
-    Out-of-sample prediction for the direct GP engine.
-
-    Precomputes pairwise distances between the query sites and the
-    engine's grid, used to build the cross-covariance for the predictive
-    mean.
+    Immutable out-of-sample mean snapshot for the direct GP engine.
 
     Parameters
     ----------
-    gpState : GPState
-        Current GP state, exposes the parameter and covariance function to
-        predict from.
-    engine : DirectGPEngine
-        The engine the prediction is built against.
-    queryGrid : Grid
-        Sites to predict at.
+    mean : np.ndarray
+        Predictive mean computed from the coefficient and covariance state
+        at construction time.
     """
 
-    def __init__(
-        self, gpState: GPState, engine: DirectGPEngine,
-        queryGrid: Grid
-    ):
-        self._gpState = gpState
-        self._engine = engine
-        self._distanceMatrix = self._compute_distances(
-            engine, queryGrid
-        )
-
-    def _compute_distances(self, engine, queryGrid):
-        queryArr = queryGrid.to_array()
-        gridArr = engine.grid.to_array()
-        if queryArr.ndim == 1:
-            queryArr = queryArr[:, np.newaxis]
-        if gridArr.ndim == 1:
-            gridArr = gridArr[:, np.newaxis]
-        return cdist(queryArr, gridArr)
+    def __init__(self, mean: np.ndarray):
+        self._mean = np.array(mean, dtype=float, copy=True)
 
     def mean(self) -> np.ndarray:
-        """
-        Predictive mean at the query sites, conditional on the current state.
-
-        Returns
-        -------
-        np.ndarray
-            Predictive mean values at `queryGrid`.
-        """
-        covFcn = self._gpState.covarianceFunction
-        kStarArr = matern_covariance(
-            self._distanceMatrix,
-            covFcn._lengthScale,
-            covFcn._smoothness,
-            covFcn._marginalVariance
-        )
-        z = self._gpState.parameter.coordinate
-        shapeCov = self._engine._shapeCovariance
-        if not isinstance(shapeCov, DenseCovarianceMatrix):
-            raise NotImplementedError(
-                "Only DenseCovarianceMatrix is supported."
-            )
-        L = shapeCov._cholFactor
-        return kStarArr @ solve_triangular(
-            L.T, z, lower=False
-        )
+        """Return an independent copy of the snapshotted mean."""
+        return self._mean.copy()

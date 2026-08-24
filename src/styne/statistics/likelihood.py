@@ -1,6 +1,6 @@
 import numpy as np
 
-from styne.model.model import Model, DifferentiableModel
+from styne.model.forwardmap import ForwardMap, DifferentiableModel
 from styne.model.sglmm import SGLMM
 from styne.parameter.parameter import Parameter
 from styne.utility.memoisation import EvaluationCache
@@ -23,7 +23,7 @@ class RegressionLikelihood(LikelihoodInterface):
     ----------
     data : Data
         Observed data.
-    forwardMap : Model
+    forwardMap : ForwardMap
         Forward model mapping the parameter to the model
         response G(\theta) at the observation sites.
     noise : ResponseFamily
@@ -46,7 +46,7 @@ class RegressionLikelihood(LikelihoodInterface):
     def __init__(
         self,
         data: Data,
-        forwardMap: Model,
+        forwardMap: ForwardMap,
         noise: ResponseFamily,
         cacheSize: int = 5,
     ):
@@ -94,11 +94,10 @@ class RegressionLikelihood(LikelihoodInterface):
         if self._logLikelihoodCache.contains(parameter):
             return self._logLikelihoodCache.retrieve(parameter)
 
-        self._forwardMap.interpolate(parameter)
-        self._forwardMap.evaluate()
+        evaluation = self._forwardMap(parameter)
 
         result = self._response.log_likelihood(
-            self._data.measurement, self._forwardMap.evaluation)
+            self._data.measurement, evaluation)
 
         self._logLikelihoodCache.add(parameter, result)
 
@@ -115,10 +114,10 @@ class RegressionLikelihood(LikelihoodInterface):
         if self._gradientCache.contains(parameter):
             return self._gradientCache.retrieve(parameter)
 
-        self._forwardMap.interpolate(parameter)
-        self._forwardMap.evaluate()
+        evaluation = self._forwardMap(parameter)
 
-        result = self._response.score(self._data.measurement, self._forwardMap)
+        result = self._response.score(
+            self._data.measurement, evaluation, self._forwardMap)
         self._gradientCache.add(parameter, result)
         return result
 
@@ -127,7 +126,6 @@ class RegressionLikelihood(LikelihoodInterface):
         invalidation propagation from RadonNikodym."""
         self._logLikelihoodCache.clear()
         self._gradientCache.clear()
-        self._forwardMap.reset()
 
 
 class SGLMMLikelihood(LikelihoodInterface):
@@ -218,11 +216,10 @@ class SGLMMLikelihood(LikelihoodInterface):
         if self._logLikelihoodCache.contains(parameter):
             return self._logLikelihoodCache.retrieve(parameter)
 
-        self._predictor.interpolate(parameter)
-        self._predictor.evaluate()
+        evaluation = self._predictor(parameter)
 
         result = self._response.log_likelihood(
-            self._data.measurement, self._predictor.evaluation
+            self._data.measurement, evaluation
         )
 
         self._logLikelihoodCache.add(parameter, result)
@@ -239,10 +236,10 @@ class SGLMMLikelihood(LikelihoodInterface):
         if self._gradientCache.contains(parameter):
             return self._gradientCache.retrieve(parameter)
 
-        self._predictor.interpolate(parameter)
-        self._predictor.evaluate()
+        evaluation = self._predictor(parameter)
 
-        result = self._response.score(self._data.measurement, self._predictor)
+        result = self._response.score(
+            self._data.measurement, evaluation, self._predictor)
         self._gradientCache.add(parameter, result)
         return result
 
@@ -251,4 +248,3 @@ class SGLMMLikelihood(LikelihoodInterface):
         invalidation propagation from RadonNikodym."""
         self._logLikelihoodCache.clear()
         self._gradientCache.clear()
-        self._predictor.reset()

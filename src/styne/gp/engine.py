@@ -12,9 +12,10 @@ from typing import Protocol
 
 class GPState(Protocol):
     """
-    Protocol exposing the dynamically changing state of a Gaussian Process.
-    Used by predictors to access current parameters and covariance functions
-    during MCMC evaluation.
+    Gaussian-process configuration available while building a predictor.
+
+    Engines may inspect the basis and covariance at construction time, but
+    the returned predictor must not retain this live state.
     """
     @property
     def parameter(self) -> Function: ...
@@ -44,6 +45,16 @@ class GPEngine(ABC):
     def at_sites(self, realisation: Expansion, sites: Grid) -> ndarray:
         return realisation.evaluate(sites)
 
+    def evaluate(
+            self, coefficient: ndarray,
+            covariance: CovarianceMatrix) -> ndarray:
+        """Synthesise values from an explicit whitened coefficient.
+
+        GP synthesis is linear under the engine whitening contract, so the
+        evaluation operator is also its own parameter Jacobian action.
+        """
+        return self.apply_jacobian(coefficient, covariance)
+
     @property
     @abstractmethod
     def spatialDimension(self) -> int:
@@ -70,5 +81,13 @@ class GPEngine(ABC):
         ...
 
     @abstractmethod
-    def create_predictor(self, gpState: GPState, queryGrid: Grid) -> Predictor:
+    def create_predictor(
+            self, gpState: GPState, queryGrid: Grid,
+            coefficient: ndarray) -> Predictor:
+        """Build an immutable predictor snapshot.
+
+        The returned predictor owns all inputs needed for prediction. Later
+        mutation of the GP, coefficient, covariance, features, or arrays
+        returned by the predictor cannot change its predictions.
+        """
         ...

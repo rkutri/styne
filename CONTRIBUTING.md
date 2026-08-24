@@ -37,7 +37,8 @@ version with others is always appreciated.
 ## Explicitly welcomed contributions
 
 - **New samplers, models, or GP engines** that fit the existing
-  interfaces (`MetropolisHastings`, `Model`, `GPEngine`, etc.). Please open an
+  interfaces (`MetropolisHastings`, `ForwardMap`, `GPEngine`, etc.). Please
+  open an
   issue before writing code if you are unsure about structural compatibility.
 - **Interface extensions.** If existing interfaces do not support specific
   surrogate classes, your model or likelihood, open an issue detailing the

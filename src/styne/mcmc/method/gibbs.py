@@ -132,5 +132,5 @@ class GibbsBuilder:
             If `model` hasn't been set.
         """
         if self._model is None:
-            raise ValueError("Model not set.")
+            raise ValueError("Bayesian model not set.")
         return BlockGibbs(self._model, rng=self._rng)

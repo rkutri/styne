@@ -58,10 +58,8 @@ class TestIdentityCache:
         assert cache.retrieve(p) == 10.
 
 
-class TestModelInterpolateGuard:
-    """Verify Model.interpolate uses identity, not equality."""
-
-    def test_same_object_skips_reinterpolation(self):
+class TestForwardMapExplicitState:
+    def test_distinct_prepared_states_do_not_interfere(self):
         from styne.gp.gaussianprocess import GaussianProcess
         from styne.statistics.stationary import MaternCovariance1D
         from styne.model.sglmm import SGLMM
@@ -72,47 +70,47 @@ class TestModelInterpolateGuard:
         gp = GaussianProcess.dna(covFcn, q=5, d=1)
         model = SGLMM(gp, grid)
 
-        param = gp.parameter.clone()
-        param.coordinate = np.random.randn(
-            param.dimension
-        )
-        model.interpolate(param)
-        model.evaluate()
-        eval1 = model.evaluation.copy()
+        rng = np.random.default_rng(20240720)
+        firstParameter = gp.parameter.clone()
+        firstParameter.coordinate = rng.standard_normal(firstParameter.dimension)
+        secondParameter = gp.parameter.clone()
+        secondParameter.coordinate = rng.standard_normal(secondParameter.dimension)
 
-        # Same object, no reset: should skip _interpolate
-        model.interpolate(param)
-        model.evaluate()
-        eval2 = model.evaluation
+        firstState = model.prepare(firstParameter)
+        secondState = model.prepare(secondParameter)
 
-        np.testing.assert_array_equal(eval1, eval2)
+        firstEvaluation = model.evaluate(firstState)
+        secondEvaluation = model.evaluate(secondState)
 
-    def test_clone_triggers_reinterpolation(self):
+        assert not np.allclose(firstEvaluation, secondEvaluation)
+        np.testing.assert_allclose(firstEvaluation, model.evaluate(firstState))
+
+    def test_gradient_is_stable_across_interleaved_evaluation(self):
         from styne.gp.gaussianprocess import GaussianProcess
-        from styne.statistics.stationary import MaternCovariance1D
+        from styne.statistics.stationary import MaternCovariance2D
         from styne.model.sglmm import SGLMM
-        from styne.utility.grid import UniformGrid
+        from styne.statistics.response import PoissonResponse
+        from styne.statistics.likelihood import SGLMMLikelihood
+        from styne.statistics import Data
+        from styne.utility.grid import Grid
 
-        grid = UniformGrid(0., 1., 20)
-        covFcn = MaternCovariance1D(0.3, 1.5, 1.0)
-        gp = GaussianProcess.dna(covFcn, q=5, d=1)
-        model = SGLMM(gp, grid)
+        covariance = MaternCovariance2D(0.3, 1.5, 1.0)
+        gp = GaussianProcess.dna(covariance, q=2, d=2)
+        sites = Grid(np.array([[0.1, 0.2], [0.4, 0.7], [0.8, 0.3]]))
+        model = SGLMM(gp, sites)
 
-        param1 = gp.parameter.clone()
-        param1.coordinate = np.random.randn(
-            param1.dimension
-        )
-        model.interpolate(param1)
-        model.evaluate()
+        data = Data(1, sites.to_array())
+        data.measurement = np.array([[1.0], [0.0], [3.0]])
+        likelihood = SGLMMLikelihood(data, model, PoissonResponse())
 
-        param2 = gp.parameter.clone()
-        param2.coordinate = np.random.randn(
-            param2.dimension
-        )
-        model.reset()
-        model.interpolate(param2)
-        model.evaluate()
+        target = Vector(np.linspace(-0.3, 0.5, gp.parameterDimension))
+        interleaved = Vector(np.linspace(0.4, -0.6, gp.parameterDimension))
+        targetAgain = Vector(np.linspace(-0.3, 0.5, gp.parameterDimension))
 
-        assert not np.allclose(
-            model.evaluation, 0.
+        isolatedGradient = likelihood.evaluate_log_gradient(target)
+        likelihood.evaluate_log(interleaved)
+        recomputedGradient = likelihood.evaluate_log_gradient(targetAgain)
+
+        np.testing.assert_allclose(
+            isolatedGradient, recomputedGradient, rtol=0.0, atol=1e-12
         )

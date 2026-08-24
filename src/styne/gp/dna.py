@@ -518,7 +518,11 @@ class DNAFourierEngine(GPEngine):
                         interior += sin_series(np.concatenate([[0.], block]))
                 offset += n
 
-            res = self._interpMat @ (scale * interior)
+            native = scale * interior
+            if self._interpMat is None:
+                return native if isBatch else native.ravel()
+
+            res = self._interpMat @ native
             return res if isBatch else res.ravel()
 
         # 2D
@@ -555,6 +559,9 @@ class DNAFourierEngine(GPEngine):
             offset += nX * nY
 
         res = scale * interior.reshape(-1, nBatch) if isBatch else scale * interior.ravel()
+        if self._interpMat is None:
+            return res
+
         return self._interpMat @ res
 
     def apply_adjoint_jacobian(
@@ -667,7 +674,9 @@ class DNAFourierEngine(GPEngine):
 
         return kStarArr @ cho_solve((L, True), uObs)
 
-    def create_predictor(self, gpState: GPState, queryGrid: Grid) -> Predictor:
+    def create_predictor(
+            self, gpState: GPState, queryGrid: Grid,
+            coefficient: np.ndarray) -> Predictor:
         if self._d == 1:
             interpMat = linear_interpolation_matrix(
                 queryGrid.to_array().ravel(), self.nativeGrid.xAxis
@@ -676,20 +685,23 @@ class DNAFourierEngine(GPEngine):
             interpMat = bilinear_interpolation_matrix(
                 queryGrid.to_array(), self.nativeGrid.xAxis, self.nativeGrid.yAxis
             )
-        return DNAGPPredictor(gpState, interpMat)
+        realisation = gpState.parameter.function.clone()
+        realisation.coefficient = np.array(
+            coefficient, dtype=float, copy=True)
+        native = realisation.evaluate_native()
+        if native.ndim == 1:
+            mean = interpMat @ native
+        else:
+            mean = native @ interpMat.T
+        return DNAGPPredictor(mean)
 
 
 class DNAGPPredictor(Predictor):
-    def __init__(self, gpState: GPState, interpMat: np.ndarray):
-        self._gpState = gpState
-        self._interpMat = interpMat
+    """Immutable out-of-sample mean snapshot for the DNA GP engine."""
+
+    def __init__(self, mean: np.ndarray):
+        self._mean = np.array(mean, dtype=float, copy=True)
 
     def mean(self) -> np.ndarray:
-        native = self._gpState.parameter.function.evaluate_native()
-        
-        # Micro-optimization: interpMat is a CSR sparse matrix.
-        # CSR @ 1D_vector utilizes scipy's fastest internal C-path.
-        # For 2D (batched) arrays, shape alignment requires native @ interpMat.T.
-        if native.ndim == 1:
-            return self._interpMat @ native
-        return native @ self._interpMat.T
+        """Return an independent copy of the snapshotted mean."""
+        return self._mean.copy()

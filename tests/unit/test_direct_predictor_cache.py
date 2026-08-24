@@ -1,14 +1,9 @@
 import numpy as np
-import pytest
 from numpy.random import default_rng
 from scipy.linalg import solve_triangular
 
 from styne.gp.gaussianprocess import GaussianProcess
-from styne.gp.direct import DirectGPPredictor
-from styne.model.sglmm import SGLMM
-from styne.statistics.stationary import (
-    MaternCovariance1D, matern_covariance
-)
+from styne.statistics.stationary import MaternCovariance1D
 from styne.utility.grid import UniformGrid
 
 
@@ -18,16 +13,13 @@ def _setup(seed=42):
     covFcn = MaternCovariance1D(0.2, 1.5, 1.0)
     gp = GaussianProcess.direct(grid, covFcn)
     queryGrid = UniformGrid(0., 1., 10)
-    predictor = gp.engine.create_predictor(gp, queryGrid)
     z = rng.standard_normal(gp.parameterDimension)
-    gp.parameter.coordinate = z
-    return gp, predictor, queryGrid, z
+    return gp, queryGrid, z
 
 
 def test_mean_matches_explicit_computation():
-    """Verify cached predictor gives same result as manual computation."""
-    gp, predictor, queryGrid, z = _setup()
-
+    gp, queryGrid, z = _setup()
+    predictor = gp.engine.create_predictor(gp, queryGrid, z)
     pred = predictor.mean()
 
     covFcn = gp.covarianceFunction
@@ -39,27 +31,47 @@ def test_mean_matches_explicit_computation():
     np.testing.assert_allclose(pred, expected, atol=1e-12)
 
 
-def test_mean_reflects_state_update():
-    """Changing the GP parameter must produce different predictions."""
-    gp, predictor, queryGrid, z = _setup()
-    rng = default_rng(99)
-
+def test_predictor_is_a_snapshot():
+    gp, queryGrid, z = _setup()
+    predictor = gp.engine.create_predictor(gp, queryGrid, z)
     pred1 = predictor.mean()
-    gp.parameter.coordinate = rng.standard_normal(
-        gp.parameterDimension
-    )
+
+    z[:] = default_rng(7).standard_normal(gp.parameterDimension)
+    gp.parameter.coordinate = default_rng(99).standard_normal(
+        gp.parameterDimension)
     pred2 = predictor.mean()
 
-    assert not np.allclose(pred1, pred2)
+    np.testing.assert_array_equal(pred1, pred2)
+
+    pred2[:] = 0.0
+    np.testing.assert_array_equal(pred1, predictor.mean())
+
+
+def test_distinct_coefficients_give_distinct_predictors():
+    gp, queryGrid, z = _setup()
+    other = default_rng(7).standard_normal(gp.parameterDimension)
+
+    first = gp.engine.create_predictor(gp, queryGrid, z)
+    second = gp.engine.create_predictor(gp, queryGrid, other)
+
+    assert not np.allclose(first.mean(), second.mean())
 
 
 def test_mean_reflects_covariance_update():
-    """Changing the covariance function must produce different predictions."""
-    gp, predictor, queryGrid, z = _setup()
-    pred1 = predictor.mean()
+    gp, queryGrid, z = _setup()
+    pred1 = gp.engine.create_predictor(gp, queryGrid, z).mean()
 
     gp.covarianceFunction = MaternCovariance1D(0.5, 1.5, 2.0)
-    predictor2 = gp.engine.create_predictor(gp, queryGrid)
-    pred2 = predictor2.mean()
+    pred2 = gp.engine.create_predictor(gp, queryGrid, z).mean()
 
     assert not np.allclose(pred1, pred2)
+
+
+def test_existing_predictor_ignores_covariance_update():
+    gp, queryGrid, z = _setup()
+    predictor = gp.engine.create_predictor(gp, queryGrid, z)
+    expected = predictor.mean()
+
+    gp.covarianceFunction = MaternCovariance1D(0.5, 1.5, 2.0)
+
+    np.testing.assert_array_equal(expected, predictor.mean())

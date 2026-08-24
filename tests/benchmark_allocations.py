@@ -18,8 +18,7 @@ def audit_evaluation(q=50, steps=100):
     thetas = rng.standard_normal((steps, gp.parameterDimension))
     
     # Warmup
-    gp.parameter.coordinate = thetas[0]
-    _ = gp.at_sites()
+    _ = gp.at_sites(thetas[0])
     
     tracemalloc.start()
     start_time = time.perf_counter()
@@ -28,8 +27,7 @@ def audit_evaluation(q=50, steps=100):
     snapshot1 = tracemalloc.take_snapshot()
     
     for i in range(steps):
-        gp.parameter.coordinate = thetas[i]
-        _ = gp.at_sites()
+        _ = gp.at_sites(thetas[i])
         
     duration = time.perf_counter() - start_time
     snapshot2 = tracemalloc.take_snapshot()

@@ -10,8 +10,7 @@ from styne.statistics.covariance import IIDCovarianceMatrix
 from styne.mcmc.method.dart import DARTFactory
 from styne.mcmc.method.mlda import MLDAFactory
 from styne.mcmc.diagnostics import AcceptanceRateDiagnostics
-from styne.model.model import Model
-from tests.conftest import MockIdentityModel
+from tests.conftest import MockIdentityForwardMap
 
 def setup_mcmc_factory(factory_class, dim, gamma=None, tempering=1.0):
     """Common setup for MLDA and DART factories on a Gaussian posterior."""
@@ -26,7 +25,7 @@ def setup_mcmc_factory(factory_class, dim, gamma=None, tempering=1.0):
     data.measurement = np.zeros((dim, 1))
     
     # Identity model + Gaussian noise (diagonal covariance diag(1))
-    model = MockIdentityModel(dim)
+    model = MockIdentityForwardMap(dim)
     noise = GaussianResponse(IIDCovarianceMatrix(dim, 1.0))
     
     fineLikelihood = RegressionLikelihood(data, model, noise)

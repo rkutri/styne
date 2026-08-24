@@ -87,10 +87,10 @@ class TestHierarchicalLogic(unittest.TestCase):
         density = hyperCond.density
         
         logp1 = density.evaluate_log(hyper1)
-        eval1 = predictor.evaluation.copy()
+        eval1 = predictor(latent).copy()
         
         logp2 = density.evaluate_log(hyper2)
-        eval2 = predictor.evaluation.copy()
+        eval2 = predictor(latent).copy()
         
         self.assertNotEqual(logp1, logp2)
         self.assertFalse(np.allclose(eval1, eval2))

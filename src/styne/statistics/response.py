@@ -3,7 +3,7 @@ import numpy as np
 from abc import abstractmethod
 from scipy.special import expit
 
-from styne.model.model import DifferentiableModel
+from styne.model.forwardmap import DifferentiableModel
 from styne.parameter.vector import Vector
 from styne.statistics.gaussian import Gaussian
 from styne.statistics.measure import ProbabilityMeasure
@@ -83,7 +83,10 @@ class ResponseFamily(ProbabilityMeasure):
         ...
 
     @abstractmethod
-    def score(self, y: np.ndarray, model: DifferentiableModel) -> np.ndarray:
+    def score(
+            self, y: np.ndarray, evaluation: np.ndarray,
+            model: DifferentiableModel
+    ) -> np.ndarray:
         """
         Adjoint gradient of the log-likelihood with respect to the model's
         parameters, via the model's `adjoint_directional_derivative`.
@@ -92,6 +95,8 @@ class ResponseFamily(ProbabilityMeasure):
         ----------
         y : np.ndarray
             Observed data.
+        evaluation : np.ndarray
+            Linear predictor returned by the forward map.
         model : DifferentiableModel
             Forward model the linear predictor came from.
 
@@ -176,8 +181,11 @@ class GaussianResponse(ResponseFamily):
         self._gaussian.mean = previousMean
         return logLikelihood
 
-    def score(self, y: np.ndarray, model: DifferentiableModel) -> np.ndarray:
-        residual = np.asarray(y).ravel() - np.asarray(model.evaluation).ravel()
+    def score(
+            self, y: np.ndarray, evaluation: np.ndarray,
+            model: DifferentiableModel
+    ) -> np.ndarray:
+        residual = np.asarray(y).ravel() - np.asarray(evaluation).ravel()
         return model.adjoint_directional_derivative(
             self._gaussian.density.covariance.apply_inverse(residual)
         )
@@ -244,8 +252,11 @@ class PoissonResponse(ResponseFamily):
             y * etaClamped - np.exp(etaClamped)
         ))
 
-    def score(self, y: np.ndarray, model: DifferentiableModel) -> np.ndarray:
-        eta = np.asarray(model.evaluation).ravel()
+    def score(
+            self, y: np.ndarray, evaluation: np.ndarray,
+            model: DifferentiableModel
+    ) -> np.ndarray:
+        eta = np.asarray(evaluation).ravel()
         return model.adjoint_directional_derivative(
             np.asarray(y).ravel() - np.exp(np.clip(eta, _etaFloor, _etaCeil))
         )
@@ -308,8 +319,11 @@ class BinomialResponse(ResponseFamily):
         eta = np.asarray(eta).ravel()
         return float(np.sum(y * eta - self._n * np.logaddexp(0, eta)))
 
-    def score(self, y: np.ndarray, model: DifferentiableModel) -> np.ndarray:
-        p = expit(np.asarray(model.evaluation).ravel())
+    def score(
+            self, y: np.ndarray, evaluation: np.ndarray,
+            model: DifferentiableModel
+    ) -> np.ndarray:
+        p = expit(np.asarray(evaluation).ravel())
         return model.adjoint_directional_derivative(
             np.asarray(y).ravel() - self._n * p
         )

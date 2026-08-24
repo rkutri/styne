@@ -29,7 +29,7 @@ class SGLMMHyperConditionalDensity(DensityInterface):
     likelihood : LikelihoodInterface
         Likelihood the data are evaluated under.
     latentState : Parameter
-        Latent field value the model is interpolated at.
+        Latent field value the forward map is prepared at.
     """
     def __init__(
             self,
@@ -122,14 +122,10 @@ class SGLMMHyperConditionalDensity(DensityInterface):
             self._gp.covarianceFunction = newCovariance
             self._gp.measure.covariance.scaling = 1.0
 
-            self._model.reset()
-            self._model.interpolate(self._latentState)
-            self._model.evaluate()
+            linearPredictor = self._model(self._latentState)
         except np.linalg.LinAlgError:
             return -np.inf
             
-        linearPredictor = self._model.evaluation
-
         logLikelihood = self._likelihood.response.log_likelihood(
             self._likelihood.data.measurement, linearPredictor
         )
@@ -158,15 +154,12 @@ class SGLMMHyperConditionalDensity(DensityInterface):
                 )
                 self._gp.measure.covariance.scaling = 1.0
 
-                self._model.reset()
-                self._model.interpolate(self._latentState)
-                self._model.evaluate()
+            linearPredictor = self._model(self._latentState)
         except np.linalg.LinAlgError:
             raise RuntimeError("Failed model evaluation due to singular covariance.")
             
         linearPredictorScore = self._likelihood.response.score(
-            self._likelihood.data.measurement, self._model
-        )
+            self._likelihood.data.measurement, linearPredictor, self._model)
 
         from styne.parameter.vector import Vector
         priorGradient = self._pcPrior.evaluate_log_gradient(
@@ -292,10 +285,6 @@ class SGLMMHyperConditional(ConditionalMeasure, DensityInterface):
         smoothness = self._gp.covarianceFunction._smoothness
         self._gp.covarianceFunction = covType(rho, smoothness, sigma**2)
         self._gp.measure.covariance.scaling = 1.0
-
-        self._model.reset()
-        self._model.interpolate(latentState)
-        self._model.evaluate()
 
         self._density = SGLMMHyperConditionalDensity(
             self._pcPrior,

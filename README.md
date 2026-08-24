@@ -47,7 +47,7 @@ prior = Gaussian(priorCov, mean=Vector(np.zeros(2)))
 
 # likelihood definition
 noiseModel = GaussianResponse(IIDCovarianceMatrix(nObs, noiseVar))
-forwardModel = LinearModel(features)
+forwardModel = LinearForwardMap(features)
 likelihood = RegressionLikelihood(data, forwardModel, noiseModel)
 
 # posterior definition
@@ -70,8 +70,8 @@ The example is intentionally assembled from interchangeable components. Most
 objects shown here can be replaced independently, either by alternative library
 implementations or by user-defined ones implementing the corresponding
 interface, without changing the surrounding code. The principal extension points
-are custom forward models (`Model`), likelihoods (`LikelihoodInterface`) and samplers
-(`MCMCSampler`).
+are custom forward maps (`ForwardMap`), likelihoods (`LikelihoodInterface`) and
+samplers (`MCMCSampler`).
 
 ## Usage
 
@@ -97,7 +97,7 @@ efficient simulation of high-dimensional Gaussian fields is itself part of the
 workflow.
 
 **Models.** Ready-to-use implementations of Bayesian linear regression and
-spatial GLMMs, together with the `Model` interface for wrapping arbitrary
+spatial GLMMs, together with the `ForwardMap` interface for wrapping arbitrary
 application-specific forward models, including expensive PDE solvers and other
 simulators.
 
@@ -118,7 +118,7 @@ GaussianProcess --> Prior ----------------+
                                           +--> Posterior --> Sampler
 ```
 
-Model, ResponseFamily and Data compose into the Likelihood. GaussianProcess
+ForwardMap, ResponseFamily and Data compose into the Likelihood. GaussianProcess
 builds the Prior. Prior and Likelihood compose into the Posterior, and the
 Sampler targets it.
 
@@ -132,12 +132,12 @@ constructor boundaries. Each component depends only on the interfaces of its
 immediate neighbours, allowing individual parts of a Bayesian model to evolve independently.
 
 This supports two complementary workflows. Existing simulators and forward
-models can be wrapped in a `Model` subclass and immediately used with every
+models can be wrapped in a `ForwardMap` subclass and immediately used with every
 compatible sampler. Conversely, new inference algorithms can be developed
 against the density interfaces without knowledge of, or dependence on, individual models.
 
 In many uncertainty-quantification problems the forward model dominates the
-computational cost. The `Model` interface therefore acts as the communication
+computational cost. The `ForwardMap` interface therefore acts as the communication
 boundary between the parameter space and the expensive computation producing the
 model prediction. Surrogate-assisted methods such as DART are designed around
 this boundary.
@@ -151,13 +151,13 @@ problem represented by the `styne` interfaces.
 | ----------------------------------- | ------------------------------------------------------------------------------------ | ---------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Parameter                           | Coordinate representation of the unknown                                             | `Parameter`, `Vector`, `Function`, `BlockParameter`              | regression coefficients; latent GP coefficients; PDE coefficient representation                                                                      |
 | Prior / reference measure           | Distribution before conditioning on data, or reference measure for a target          | `ProbabilityMeasure`, `Gaussian`, `gp.measure`                   | IID Gaussian prior in the quickstart; DNA Gaussian-process prior in the PDE example; latent-field prior in hierarchical SGLMMs                       |
-| Model evaluation / predictor        | Deterministic quantity computed from the parameter and passed to the response family | `Model`                                                          | `LinearModel`; `SGLMM`; custom `EllipticForwardModel`                                                                                                |
+| Forward-map evaluation / predictor  | Deterministic quantity computed from the parameter and passed to the response family | `ForwardMap`                                                     | `LinearForwardMap`; `SGLMM`; custom `EllipticForwardMap`                                                                                                  |
 | Response family / measurement model | Conditional law of observations given the model evaluation                           | `ResponseFamily`                                                 | `GaussianResponse`; `PoissonResponse`; `BinomialResponse`                                                                                            |
 | Likelihood                          | Data-dependent log-density contribution                                              | `LikelihoodInterface`, `RegressionLikelihood`, `SGLMMLikelihood` | Gaussian regression likelihood; Poisson SGLMM likelihood                                                                                             |
 | Target                              | Measure or unnormalised density sampled by an algorithm                              | `DensityInterface`, `RadonNikodym`, `UnnormalisedPosterior`      | `UnnormalisedPosterior(prior, likelihood)`; `RadonNikodym(prior, likelihood)`; direct targets such as `GaussianDensity` and `GaussianMixtureDensity` |
 | Markov transition / sampler         | Transition mechanism targeting the chosen measure or density                         | `MCMCSampler`, `GibbsSampler`, `MetropolisHastings`                     | MRW in the quickstart; MALA for the SGLMM; pCN for the PDE inverse problem; DART and Gibbs samplers in the manuscript examples                       |
 
-The main compression is the `Model` interface. Mathematically, one may separate
+The main compression is the `ForwardMap` interface. Mathematically, one may separate
 a forward map $\mathcal{G}$, an observation functional $F$, and a response
 model. In `styne`, the model returns the deterministic quantity passed to the
 response family, corresponding at the software boundary to
@@ -182,4 +182,3 @@ please cite the DOI of the specific release version used.
 ## Licence
 
 MIT. See [LICENSE](LICENSE).
-

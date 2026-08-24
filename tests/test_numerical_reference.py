@@ -10,7 +10,7 @@ from styne.mcmc.method.mala import (
 )
 from styne.mcmc.method.pcn import PCNProposal
 from styne.mcmc.transition import TransitionData
-from styne.model import LinearModel, SGLMM
+from styne.model import LinearForwardMap, SGLMM
 from styne.parameter import Vector
 from styne.statistics import (
     Data,
@@ -90,9 +90,9 @@ def test_direct_and_dna_gp_reference_evaluations():
     directGrid = UniformGrid(0.0, 1.0, 5)
     direct = GaussianProcess.direct(directGrid, directCovariance)
     direct.sites = directGrid
-    direct.parameter.coordinate = np.array([0.5, -1.0, 0.25, 0.75, -0.4])
+    directCoefficient = np.array([0.5, -1.0, 0.25, 0.75, -0.4])
     np.testing.assert_allclose(
-        direct.at_sites(),
+        direct.at_sites(directCoefficient),
         [
             0.6519202405202649,
             -0.5684390912084771,
@@ -107,9 +107,9 @@ def test_direct_and_dna_gp_reference_evaluations():
         MaternCovariance1D(0.3, 1.5, 0.8), q=3, d=1,
     )
     dna.sites = UniformGrid(0.0, 1.0, 5)
-    dna.parameter.coordinate = np.linspace(-0.75, 0.9, dna.parameterDimension)
+    dnaCoefficient = np.linspace(-0.75, 0.9, dna.parameterDimension)
     np.testing.assert_allclose(
-        dna.at_sites(),
+        dna.at_sites(dnaCoefficient),
         [
             -0.7205954985785141,
             -0.11406982021787518,
@@ -185,7 +185,7 @@ def _reduced_quickstart():
     data.measurement = np.array([[0.2], [1.1], [1.7]])
     likelihood = RegressionLikelihood(
         data,
-        LinearModel(features),
+        LinearForwardMap(features),
         GaussianResponse(IIDCovarianceMatrix(3, 0.4)),
     )
     prior = Gaussian(IIDCovarianceMatrix(2, 2.0), Vector(np.zeros(2)))
@@ -249,7 +249,7 @@ def test_reduced_sglmm_example_output():
 
     assert np.isclose(likelihood.evaluate_log(parameter), -3.1271698680170905)
     np.testing.assert_allclose(
-        model.evaluation,
+        model(parameter),
         [-0.13849327906176964, 0.00300770988501932, -0.05670864098190717],
         rtol=0.0, atol=1e-12,
     )

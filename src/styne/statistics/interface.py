@@ -4,7 +4,7 @@ from typing import Optional, Union, Sequence, runtime_checkable, Protocol
 from numpy import ndarray
 from numpy.random import Generator, SeedSequence
 
-from styne.model.model import Model
+from styne.model.forwardmap import ForwardMap
 from styne.parameter.parameter import Parameter
 from styne.statistics.measure import ProbabilityMeasure
 from styne.statistics.data import Data
@@ -92,7 +92,7 @@ class LikelihoodInterface(DensityInterface):
 
     @property
     @abstractmethod
-    def model(self) -> Model:
+    def model(self) -> ForwardMap:
         ...
 
 
