@@ -43,7 +43,7 @@ class _BSplineEvaluation(BoundLinearExpansion):
         return coefficient @ designMatrix.T
 
     def _adjoint_derivative(self, coefficient, cotangent):
-        return cotangent @ self._designMatrix
+        return cotangent @ backend_constant(self._designMatrix, cotangent)
 
 
 class BSpline2D(LinearExpansion):

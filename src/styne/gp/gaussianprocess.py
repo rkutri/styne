@@ -3,6 +3,7 @@ from __future__ import annotations
 import numpy as np
 from numpy.random import Generator
 from styne.parameter.function import Function
+from styne.parameter.vector import Vector
 from styne.model.representation.expansion import LinearExpansion
 from styne.statistics.gaussian import Gaussian
 from styne.statistics.interface import CovarianceFunctionInterface
@@ -34,8 +35,9 @@ class GaussianProcess:
     """
     A Gaussian process defined by a covariance function and linear expansion.
 
-    `parameter` exposes the current field as a `Function` parameter.
-    `sampler` returns a `GPSampler` for drawing independent functions.
+    The process stores only static representation and covariance state.
+    Use :meth:`function` to bind explicit coefficients to its expansion and
+    :attr:`sampler` to draw independent functions.
     """
 
     def __init__(self, covFcn, specification):
@@ -43,11 +45,9 @@ class GaussianProcess:
         measureCov, self._expansion = specification.build(covFcn)
         if not isinstance(self._expansion, LinearExpansion):
             raise TypeError("GaussianProcess requires a LinearExpansion")
-        self._param = Function(
-            np.zeros(self._expansion.dimension), self._expansion
+        self._measure = Gaussian(
+            measureCov, Vector(np.zeros(self._expansion.dimension))
         )
-
-        self._measure = Gaussian(measureCov, self._param)
 
         self._covFcn = covFcn
 
@@ -79,23 +79,19 @@ class GaussianProcess:
 
     @property
     def parameterDimension(self) -> int:
-        return self._param.dimension
+        return self._expansion.dimension
 
     @property
     def covarianceFunction(self) -> CovarianceFunctionInterface:
         return self._covFcn
 
-    @covarianceFunction.setter
-    def covarianceFunction(self, covFcn: CovarianceFunctionInterface) -> None:
+    def with_covariance_function(self, covFcn: CovarianceFunctionInterface):
+        """Return a process with ``covFcn`` and no shared numerical state."""
+        return type(self)(covFcn, self._specification)
 
-        self._covFcn = covFcn
-        covariance, expansion = self._specification.build(covFcn)
-        self._measure = self._measure.with_covariance(covariance)
-        self._replace_expansion(expansion)
-
-    @property
-    def parameter(self) -> Function:
-        return self._param
+    def function(self, coefficient) -> Function:
+        """Bind explicit coefficient coordinates to this process expansion."""
+        return Function(coefficient, self._expansion)
 
     @property
     def expansion(self) -> LinearExpansion:
@@ -126,13 +122,6 @@ class GaussianProcess:
     @property
     def sampler(self) -> GPSampler:
         return GPSampler(self._expansion, self._measure)
-
-    def _replace_expansion(self, expansion: LinearExpansion) -> None:
-        coordinate = self._param.coordinate
-        meanCoordinate = self._measure.mean.coordinate
-        self._expansion = expansion
-        self._param = Function(coordinate, expansion)
-        self._measure = self._measure.with_mean(Function(meanCoordinate, expansion))
 
     def bind(self, grid):
         """Return the cached expansion evaluator for ``grid``."""

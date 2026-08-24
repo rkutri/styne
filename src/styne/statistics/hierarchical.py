@@ -65,8 +65,8 @@ class SGLMMHyperConditionalDensity(DensityInterface):
         model = copy.deepcopy(self._model)
         covarianceType = type(model._gp.covarianceFunction)
         smoothness = model._gp.covarianceFunction._smoothness
-        model._gp.covarianceFunction = covarianceType(
-            lengthScale, smoothness, sigma**2
+        model._gp = model._gp.with_covariance_function(
+            covarianceType(lengthScale, smoothness, sigma**2)
         )
         return model
             
@@ -303,12 +303,12 @@ class SGLMMLatentConditional(ConditionalMeasure, DensityInterface):
 
         covType = type(self._gp.covarianceFunction)
         smoothness = self._gp.covarianceFunction._smoothness
-        self._gp.covarianceFunction = covType(
-            rho, smoothness, sigma**2
+        self._gp = self._gp.with_covariance_function(
+            covType(rho, smoothness, sigma**2)
         )
         if self._coarseGP is not None:
-            self._coarseGP.covarianceFunction = covType(
-                rho, smoothness, sigma**2
+            self._coarseGP = self._coarseGP.with_covariance_function(
+                covType(rho, smoothness, sigma**2)
             )
             if self._localisedDensity is not None:
                 self._localisedDensity.sync_weights(

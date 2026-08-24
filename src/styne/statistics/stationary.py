@@ -5,6 +5,8 @@ from scipy.linalg import toeplitz
 from scipy.special import gamma, kv, gammaln
 from scipy.spatial.distance import cdist
 
+from styne.backend import infer_backend
+
 from styne.statistics.interface import CovarianceFunctionInterface
 from styne.statistics.covariance import (
     CovarianceMatrix, DenseCovarianceMatrix
@@ -15,7 +17,7 @@ _MATERN_MAX_SCALED_DISTANCE = 800.0
 _MATERN_MIN_SCALED_DISTANCE = 1e-8
 
 
-def _as_point_array(points: np.ndarray) -> np.ndarray:
+def _as_point_array(points, backend, metadata):
     """Coerce a Grid or raw array to a dense `(nPoints, dimension)` array.
 
     'Grid.to_array' already returns this shape, `(n, 1)` in 1D and `(n, 2)`
@@ -23,11 +25,11 @@ def _as_point_array(points: np.ndarray) -> np.ndarray:
     promoted to a column.
     """
     if isinstance(points, (Grid, UniformGrid)):
-        return np.asarray(points.to_array())
+        points = points.to_array()
 
-    array = np.asarray(points, dtype=float)
+    array = backend.asarray(points, dtype=metadata.dtype, device=metadata.device)
     if array.ndim == 1:
-        return array[:, None]
+        return array.reshape((-1, 1))
     return array
 
 
@@ -50,10 +52,13 @@ class StationaryCovariance(CovarianceFunctionInterface):
         Domain dimension, 1 or 2.
     """
 
-    def __init__(self, statCovCallable, fourierCallable, spatialDimension):
+    def __init__(
+            self, statCovCallable, fourierCallable, spatialDimension,
+            backendReference=None):
         self._fcn = statCovCallable
         self._fourier = fourierCallable
         self._spatialDimension = spatialDimension
+        self._backendReference = backendReference
 
     @property
     def spatialDimension(self) -> int:
@@ -61,22 +66,32 @@ class StationaryCovariance(CovarianceFunctionInterface):
 
     def evaluate_covariance(self, x: np.ndarray,
                             y: np.ndarray) -> np.ndarray:
-        xPoints = _as_point_array(x)
-        yPoints = _as_point_array(y)
-
-        distances = cdist(xPoints, yPoints)
-        covFlat = self._fcn(distances.ravel())
-        return np.asarray(covFlat).reshape(distances.shape)
+        reference = (
+            self._backendReference
+            if hasattr(self._backendReference, "shape") else x
+        )
+        if isinstance(reference, (Grid, UniformGrid)):
+            reference = reference.to_array()
+        backend = infer_backend(reference)
+        metadata = backend.metadata(reference)
+        xPoints = _as_point_array(x, backend, metadata)
+        yPoints = _as_point_array(y, backend, metadata)
+        delta = xPoints[:, None, :] - yPoints[None, :, :]
+        distances = backend.namespace.sqrt(
+            backend.namespace.sum(delta * delta, axis=-1)
+        )
+        return self._fcn(distances)
 
     def evaluate_fourier(self, freq: np.ndarray) -> np.ndarray:
         return self._fourier(freq)
 
 
 def exponential_covariance(delta, alpha, variance):
-    delta = np.asarray(delta)
-    norms = (np.linalg.norm(delta, axis=-1) if delta.ndim > 1
-             else np.abs(delta))
-    return variance * np.exp(-alpha * norms)
+    reference = alpha if hasattr(alpha, "shape") else delta
+    backend = infer_backend(reference)
+    metadata = backend.metadata(reference)
+    delta = backend.asarray(delta, dtype=metadata.dtype, device=metadata.device)
+    return variance * backend.namespace.exp(-alpha * backend.namespace.abs(delta))
 
 
 def matern_kappa(lengthScale, smoothness):
@@ -92,37 +107,35 @@ def matern_covariance(x, lengthScale, smoothness, variance):
     if smoothness < 0.5:
         raise ValueError(f"Invalid smoothness parameter: {smoothness}")
 
+    reference = lengthScale if hasattr(lengthScale, "shape") else x
+    backend = infer_backend(reference)
+    metadata = backend.metadata(reference)
+    ns = backend.namespace
+    x = backend.asarray(x, dtype=metadata.dtype, device=metadata.device)
+
     if isclose(smoothness, 0.5):
-        return variance * np.exp(-np.abs(x) / lengthScale)
+        return variance * ns.exp(-ns.abs(x) / lengthScale)
 
     kappa = matern_kappa(lengthScale, smoothness)
-    scaledDistance = np.abs(x)
-    if np.isfinite(kappa):
-        scaledDistance *= kappa
-    else:
-        scaledDistance = np.where(scaledDistance == 0, 0.0, np.inf)
+    scaledDistance = ns.abs(x) * kappa
 
     # Avoid inf * 0 = nan when distance overflows
-    safeDist = np.minimum(scaledDistance, _MATERN_MAX_SCALED_DISTANCE)
+    safeDist = ns.minimum(scaledDistance, _MATERN_MAX_SCALED_DISTANCE)
 
     if isclose(smoothness, 1.5):
-        return variance * (1. + safeDist) * np.exp(-safeDist)
+        return variance * (1. + safeDist) * ns.exp(-safeDist)
 
     if isclose(smoothness, 2.5):
         return variance * (1. + safeDist + safeDist**2 / 3.) * \
-            np.exp(-safeDist)
+            ns.exp(-safeDist)
 
-    covariance = np.zeros_like(scaledDistance)
-
-    validMask = (
-        (scaledDistance > _MATERN_MIN_SCALED_DISTANCE)
-        & (scaledDistance < _MATERN_MAX_SCALED_DISTANCE)
-    )
-    covariance[~validMask & (scaledDistance < _MATERN_MIN_SCALED_DISTANCE)] = variance
-    covariance[validMask] = (variance * (2. ** (1. - smoothness)) / gamma(smoothness)) * \
-        (scaledDistance[validMask] ** smoothness) * kv(smoothness, scaledDistance[validMask])
-
-    return covariance
+    if backend.name != "numpy":
+        raise NotImplementedError(
+            "Matern smoothness must be 0.5, 1.5, or 2.5 on this backend."
+        )
+    covariance = (variance * (2. ** (1. - smoothness)) / gamma(smoothness)) * \
+        (scaledDistance ** smoothness) * kv(smoothness, scaledDistance)
+    return ns.where(scaledDistance <= _MATERN_MIN_SCALED_DISTANCE, variance, covariance)
 
 
 def matern_log_rho_gradient(x, lengthScale, smoothness, variance):
@@ -163,43 +176,51 @@ def matern_log_rho_gradient(x, lengthScale, smoothness, variance):
 
 
 def matern_fourier(f, lengthScale, smoothness, variance, d=1):
-    f = np.asarray(f, dtype=float)
+    reference = lengthScale if hasattr(lengthScale, "shape") else f
+    backend = infer_backend(reference)
+    metadata = backend.metadata(reference)
+    ns = backend.namespace
+    f = backend.asarray(f, dtype=metadata.dtype, device=metadata.device)
     if d == 1 and f.ndim == 1:
-        f = f[:, np.newaxis]
+        f = f.reshape((-1, 1))
     kappa = matern_kappa(lengthScale, smoothness)
-    kappa = np.clip(kappa, 1e-10, None)
+    kappa = ns.maximum(kappa, 1e-10)
     
     # Vectorized sum over frequency components if multiple dimensions provided
-    sSq = np.sum((2. * np.pi * f)**2, axis=-1)
+    sSq = ns.sum((2. * np.pi * f)**2, axis=-1)
 
     # Closed-form fast paths for common smoothness values (API contract: vectorized)
-    if kappa < 1e30:
-        if isclose(smoothness, 0.5):
-            if d == 1:
-                return (variance * 2. * kappa) / (kappa**2 + sSq)
-            elif d == 2:
-                return (variance * 2. * np.pi * kappa) / (kappa**2 + sSq)**1.5
-        
-        if isclose(smoothness, 1.5):
-            if d == 1:
-                return (variance * 4. * kappa**3) / (kappa**2 + sSq)**2
-            elif d == 2:
-                return (variance * 6. * np.pi * kappa**3) / (kappa**2 + sSq)**2.5
+    if isclose(smoothness, 0.5):
+        if d == 1:
+            return (variance * 2. * kappa) / (kappa**2 + sSq)
+        if d == 2:
+            return (variance * 2. * np.pi * kappa) / (kappa**2 + sSq)**1.5
 
-        if isclose(smoothness, 2.5):
-            if d == 1:
-                return (variance * (16. / 3.) * kappa**5) / (kappa**2 + sSq)**3
-            elif d == 2:
-                return (variance * 10. * np.pi * kappa**5) / (kappa**2 + sSq)**3.5
+    if isclose(smoothness, 1.5):
+        if d == 1:
+            return (variance * 4. * kappa**3) / (kappa**2 + sSq)**2
+        if d == 2:
+            return (variance * 6. * np.pi * kappa**3) / (kappa**2 + sSq)**2.5
 
-    # Generic Gamma-based evaluation
+    if isclose(smoothness, 2.5):
+        if d == 1:
+            return (variance * (16. / 3.) * kappa**5) / (kappa**2 + sSq)**3
+        if d == 2:
+            return (variance * 10. * np.pi * kappa**5) / (kappa**2 + sSq)**3.5
+
+    if backend.name != "numpy":
+        raise NotImplementedError(
+            "Matern smoothness must be 0.5, 1.5, or 2.5 on this backend."
+        )
+
+    # Generic Gamma-based evaluation (NumPy only).
     beta = matern_beta(smoothness, d)
     logNormConst = (d / 2.0) * np.log(4. * np.pi) + \
         gammaln(2. * beta) - gammaln(smoothness) + \
-        (2. * smoothness) * np.log(kappa)
+        (2. * smoothness) * ns.log(kappa)
 
-    logSpectral = np.log(variance) + logNormConst - (2. * beta) * np.log(kappa**2 + sSq)
-    return np.exp(logSpectral)
+    logSpectral = ns.log(variance) + logNormConst - (2. * beta) * ns.log(kappa**2 + sSq)
+    return ns.exp(logSpectral)
 
 
 class ExponentialCovariance1D(StationaryCovariance):
@@ -218,7 +239,7 @@ class ExponentialCovariance1D(StationaryCovariance):
         super().__init__(
             lambda r: exponential_covariance(r, alpha, marginalVariance),
             lambda f: matern_fourier(f, 1. / alpha, 0.5, marginalVariance, d=1),
-            spatialDimension=1
+            spatialDimension=1, backendReference=marginalVariance
         )
 
 
@@ -242,7 +263,7 @@ class MaternCovariance1D(StationaryCovariance):
         super().__init__(
             lambda r: matern_covariance(r, lengthScale, smoothness, marginalVariance),
             lambda f: matern_fourier(f, lengthScale, smoothness, marginalVariance, d=1),
-            spatialDimension=1
+            spatialDimension=1, backendReference=marginalVariance
         )
         self._lengthScale = lengthScale
         self._smoothness = smoothness
@@ -317,7 +338,7 @@ class MaternCovariance2D(StationaryCovariance):
         super().__init__(
             lambda r: matern_covariance(r, lengthScale, smoothness, marginalVariance),
             lambda f: matern_fourier(f, lengthScale, smoothness, marginalVariance, d=2),
-            spatialDimension=2
+            spatialDimension=2, backendReference=marginalVariance
         )
         self._lengthScale = lengthScale
         self._smoothness = smoothness

@@ -1,5 +1,5 @@
 import numpy as np
-from scipy.linalg import solve_triangular
+from styne.backend import infer_backend
 from styne.model.representation.expansion import (
     BoundLinearExpansion,
     LinearExpansion,
@@ -15,9 +15,7 @@ class _DirectEvaluation(BoundLinearExpansion):
 
     def __init__(self, interpolation, shapeFactor=None):
         self._interpolation = np.asarray(interpolation)
-        self._shapeFactor = None if shapeFactor is None else np.asarray(
-            shapeFactor
-        )
+        self._shapeFactor = shapeFactor
 
     @property
     def dimension(self):
@@ -41,10 +39,12 @@ class _DirectEvaluation(BoundLinearExpansion):
         return native @ interpolation.T
 
     def _adjoint_derivative(self, coefficient, cotangent):
-        nativeCotangent = cotangent @ self._interpolation
+        interpolation = backend_constant(self._interpolation, cotangent)
+        nativeCotangent = cotangent @ interpolation
         if self._shapeFactor is None:
             return nativeCotangent
-        return nativeCotangent @ self._shapeFactor
+        shapeFactor = backend_constant(self._shapeFactor, cotangent)
+        return nativeCotangent @ shapeFactor
 
 
 class DirectExpansion(LinearExpansion):
@@ -122,10 +122,13 @@ class _DirectGPSpecification:
         )
 
         if not isinstance(covarianceMatrix, CovarianceMatrix):
+            backend = infer_backend(covarianceMatrix)
+            metadata = backend.metadata(covarianceMatrix)
             covarianceMatrix = 0.5 * (covarianceMatrix + covarianceMatrix.T)
             if self._nugget > 0.:
-                covarianceMatrix = covarianceMatrix + \
-                    self._nugget * np.eye(len(self._grid))
+                covarianceMatrix = covarianceMatrix + self._nugget * backend.eye(
+                    len(self._grid), dtype=metadata.dtype, device=metadata.device
+                )
 
         shapeCovariance = covarianceMatrix if \
             isinstance(covarianceMatrix, CovarianceMatrix) \
@@ -137,54 +140,23 @@ class _DirectGPSpecification:
 
     def evaluate_exact_conditional(
             self, expansion, queryGrid, state, covFcn, sites):
-        from scipy.linalg import cholesky, cho_solve
-
-        z = state.coordinate if hasattr(state, 'coordinate') \
-            else np.asarray(state)
+        z = state.coordinate if hasattr(state, 'coordinate') else state
+        backend = infer_backend(z)
+        metadata = backend.metadata(z)
         observed = expansion.evaluate(z, sites)
         observedCovariance = covFcn.evaluate_covariance(sites, sites)
         observedCovariance = observedCovariance.to_dense() if isinstance(
             observedCovariance, DenseCovarianceMatrix
-        ) else np.asarray(observedCovariance)
-        observedCovariance = np.array(
-            observedCovariance, dtype=float, copy=True
+        ) else observedCovariance
+        observedCovariance = backend_constant(observedCovariance, z)
+        observedCovariance = observedCovariance + backend_constant(
+            1e-8 * np.eye(observedCovariance.shape[-1]), z
         )
-        observedCovariance.flat[::observedCovariance.shape[0] + 1] += 1e-8
-        factor = cholesky(observedCovariance, lower=True)
         kStar = covFcn.evaluate_covariance(queryGrid, sites)
         kStarArr = kStar.to_dense() if isinstance(
-            kStar, DenseCovarianceMatrix) else np.asarray(kStar)
-        return kStarArr @ cho_solve((factor, True), observed)
-
-    def evaluate_hyper_gradient(
-            self, expansion, state, zTilde, covFcn):
-        if not hasattr(covFcn, 'evaluate_covariance_gradient'):
-            raise NotImplementedError("Exact gradients not implemented for this covariance.")
-        
-        gradK = covFcn.evaluate_covariance_gradient(self._grid, self._grid)
-        
-        shapeCovariance = expansion.shapeCovariance
-        if not isinstance(shapeCovariance, DenseCovarianceMatrix):
-            raise NotImplementedError(
-                "Hyper gradient requires dense covariance matrix."
-            )
-        L = shapeCovariance.to_cholesky()
-        z = state.coordinate if hasattr(state, 'coordinate') \
-            else np.asarray(state)
-        result = {}
-        for paramName, dK in gradK.items():
-            dKArr = dK.to_dense() if isinstance(dK, DenseCovarianceMatrix) else np.asarray(dK)
-            
-            temp = solve_triangular(L, dKArr, lower=True)
-            M = solve_triangular(L, temp.T, lower=True).T
-            
-            X = np.tril(M)
-            np.fill_diagonal(X, 0.5 * np.diag(M))
-            
-            du = L @ (X @ z)
-            result[paramName] = float(np.dot(zTilde, du))
-            
-        return result
+            kStar, DenseCovarianceMatrix) else kStar
+        kStarArr = backend_constant(kStarArr, z)
+        return kStarArr @ backend.solve(observedCovariance, observed)
 
     def create_predictor(
             self, gpState, queryGrid: Grid,
@@ -204,11 +176,13 @@ class _DirectGPSpecification:
         kStar = gpState.covarianceFunction.evaluate_covariance(
             queryGrid, self._grid)
         kStarArray = kStar.to_dense() if isinstance(
-            kStar, DenseCovarianceMatrix) else np.asarray(kStar)
-        frozenCoefficient = np.array(coefficient, dtype=float, copy=True)
-        frozenFactor = shapeCovariance.to_cholesky()
-        mean = kStarArray @ solve_triangular(
-            frozenFactor.T, frozenCoefficient, lower=False)
+            kStar, DenseCovarianceMatrix) else kStar
+        backend = infer_backend(coefficient)
+        kStarArray = backend_constant(kStarArray, coefficient)
+        factor = backend_constant(shapeCovariance.to_cholesky(), coefficient)
+        mean = kStarArray @ backend.solve_triangular(
+            factor.T, coefficient, lower=False
+        )
         return DirectGPPredictor(mean)
 
 
@@ -223,9 +197,8 @@ class DirectGPPredictor(Predictor):
         at construction time.
     """
 
-    def __init__(self, mean: np.ndarray):
-        self._mean = np.array(mean, dtype=float, copy=True)
+    def __init__(self, mean):
+        self._mean = mean
 
-    def mean(self) -> np.ndarray:
-        """Return an independent copy of the snapshotted mean."""
-        return self._mean.copy()
+    def mean(self):
+        return self._mean

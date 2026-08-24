@@ -1,6 +1,7 @@
 import numpy as np
 
-from numpy.linalg import LinAlgError
+from styne.backend import infer_backend
+from styne.model.representation.expansion import backend_constant
 
 from styne.model.representation.bspline import BSpline2D
 from styne.statistics.interface import CovarianceFunctionInterface, Predictor
@@ -36,27 +37,17 @@ def induced_prior_covariance(
 
     phi = expansion.design_matrix(collocation)
     kernel = cov_fn.evaluate_covariance(collocation, collocation)
+    backend = infer_backend(kernel)
+    phi = backend_constant(phi, kernel)
 
-    y = np.linalg.solve(phi, kernel)
-    c = np.linalg.solve(phi, y.T)
+    y = backend.solve(phi, kernel)
+    c = backend.solve(phi, y.T)
     c = 0.5 * (c + c.T)
-
-    eps = nuggetEps
-    for k in range(maxTries):
-
-        try:
-            return DenseCovarianceMatrix(c)
-
-        except (ValueError, LinAlgError) as e:
-
-            if k == maxTries - 1:
-                raise ValueError(
-                    "Prior covariance is not s.p.d. even after attempted "
-                    "regularisation."
-                ) from e
-
-            c = c + eps * np.eye(n)
-            eps *= 100.
+    return DenseCovarianceMatrix(
+        c + nuggetEps * backend.eye(
+            n, dtype=backend.metadata(c).dtype, device=backend.metadata(c).device
+        )
+    )
 
 
 def induced_prior_covariance_2d(covFunc2d, bspX, bspY, xBounds, yBounds,
@@ -91,26 +82,16 @@ def induced_prior_covariance_2d(covFunc2d, bspX, bspY, xBounds, yBounds,
     phiY = bspY.design_matrix(yColloc)
     phi2D = np.kron(phiX, phiY)
 
-    y = np.linalg.solve(phi2D, K)
-    c = np.linalg.solve(phi2D, y.T)
+    backend = infer_backend(K)
+    phi2D = backend_constant(phi2D, K)
+    y = backend.solve(phi2D, K)
+    c = backend.solve(phi2D, y.T)
     c = 0.5 * (c + c.T)
-
-    eps = nuggetEps
-    for k in range(maxTries):
-
-        try:
-            return DenseCovarianceMatrix(c)
-
-        except (ValueError, LinAlgError) as e:
-
-            if k == maxTries - 1:
-                raise ValueError(
-                    "2D prior covariance is not s.p.d. even after attempted "
-                    "regularisation."
-                ) from e
-
-            c = c + eps * np.eye(N)
-            eps *= 100.
+    return DenseCovarianceMatrix(
+        c + nuggetEps * backend.eye(
+            N, dtype=backend.metadata(c).dtype, device=backend.metadata(c).device
+        )
+    )
 
 
 class _BSplineGPSpecification:
@@ -141,8 +122,7 @@ class _BSplineGPSpecification:
     def create_predictor(
             self, gpState, queryGrid: Grid,
             coefficient: np.ndarray, observationGrid=None) -> Predictor:
-        frozenCoefficient = np.array(coefficient, dtype=float, copy=True)
-        mean = self._expansion.evaluate(frozenCoefficient, queryGrid)
+        mean = self._expansion.evaluate(coefficient, queryGrid)
         return BSplineGPPredictor(mean)
 
 
@@ -156,10 +136,10 @@ class BSplineGPPredictor(Predictor):
         Predictive mean computed from the coefficient at construction time.
     """
 
-    def __init__(self, mean: np.ndarray):
-        self._mean = np.array(mean, dtype=float, copy=True)
+    def __init__(self, mean):
+        self._mean = mean
 
-    def mean(self) -> np.ndarray:
+    def mean(self):
         """
         Predictive mean at the query sites.
 
@@ -168,4 +148,4 @@ class BSplineGPPredictor(Predictor):
         np.ndarray
             Predictive mean values, `H_pred @ coefficients`.
         """
-        return self._mean.copy()
+        return self._mean

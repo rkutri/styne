@@ -422,7 +422,10 @@ class DNACoarseFinePartition(Partition):
         if not hasattr(dnaGP, 'resolution'):
             raise AttributeError("GaussianProcess must expose 'resolution' for DNA partition.")
 
-        super().__init__(DNACoarseFineSplit(dnaGP.resolution, qC, d), dnaGP.parameter)
+        super().__init__(
+            DNACoarseFineSplit(dnaGP.resolution, qC, d),
+            dnaGP.function(np.zeros(dnaGP.parameterDimension)),
+        )
         self._measure = dnaGP.measure
 
     def coarse_measure(self):

@@ -89,7 +89,7 @@ class SGLMM(ForwardMap):
     @property
     def pDim(self) -> int:
 
-        latentDim = self._gp.parameter.dimension
+        latentDim = self._gp.parameterDimension
 
         if self._features is not None:
             return self._features.shape[1] + latentDim
