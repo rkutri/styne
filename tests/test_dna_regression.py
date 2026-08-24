@@ -32,8 +32,7 @@ def _outputs():
     coeff = np.linspace(-1.0, 1.0, weights.size)   # fixed, not random
     native = expansion.evaluate_native(coeff)
 
-    mult = gp.compute_log_length_multiplier(1.5, ELL)
-    return {"weights": weights, "native": np.asarray(native), "mult": np.asarray(mult)}
+    return {"weights": weights, "native": np.asarray(native)}
 
 
 def make_snapshot():
@@ -41,13 +40,12 @@ def make_snapshot():
 
 
 def test_scalar_path_unchanged():
-    if not os.path.exists(SNAP):
-        make_snapshot()
+    assert os.path.exists(SNAP), f"Missing committed DNA snapshot: {SNAP}"
     ref = np.load(SNAP)
     out = _outputs()
-    for key in ref.files:
+    for key, value in out.items():
         np.testing.assert_allclose(
-            out[key], ref[key], rtol=0, atol=1e-12,
+            value, ref[key], rtol=0, atol=1e-12,
             err_msg=f"scalar regression broken in '{key}'")
 
 

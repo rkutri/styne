@@ -284,19 +284,26 @@ class JAXBackend(Backend):
     def dct1(self, array, *, axis=-1):
         if array.shape[axis] < 2:
             raise ValueError("DCT-I requires an input length of at least two.")
+        # JAX exposes no DCT-I.  The even extension has length 2*(N-1),
+        # which is the defining type-I grid; using a native DCT-II here would
+        # shift the DNA modes and corrupt endpoint values.  Since the
+        # extension is real, rFFT retains exactly the required N bins.
         moved = jnp.moveaxis(array, axis, -1)
         extension = jnp.concatenate((moved, moved[..., -2:0:-1]), axis=-1)
-        transformed = jnp.real(jnp.fft.fft(extension, axis=-1))
-        result = transformed[..., :moved.shape[-1]]
+        transformed = jnp.fft.rfft(extension, axis=-1)
+        result = jnp.real(transformed)
         return jnp.moveaxis(result, -1, axis)
 
     def dst1(self, array, *, axis=-1):
+        # The odd extension has length 2*(N+1), reproducing unnormalised
+        # DST-I and its zero endpoints exactly; only its one-sided spectrum
+        # is required.
         moved = jnp.moveaxis(array, axis, -1)
         zero = jnp.zeros_like(moved[..., :1])
         extension = jnp.concatenate(
             (zero, moved, zero, -moved[..., ::-1]), axis=-1
         )
-        transformed = -jnp.imag(jnp.fft.fft(extension, axis=-1))
+        transformed = -jnp.imag(jnp.fft.rfft(extension, axis=-1))
         result = transformed[..., 1:moved.shape[-1] + 1]
         return jnp.moveaxis(result, -1, axis)
 

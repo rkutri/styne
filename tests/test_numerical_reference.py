@@ -33,11 +33,7 @@ from styne.utility.finiteelement import (
     p1_mass_lumped_1d,
     p1_stiffness_1d,
 )
-from tests.reference_oracles import (
-    compute_log_length_multiplier,
-    dna_adjoint_synthesis,
-    dna_synthesis_matrix,
-)
+from tests.reference_oracles import dna_synthesis_matrix
 
 
 def test_covariance_reference_values():
@@ -143,35 +139,14 @@ def test_direct_and_dna_gp_reference_evaluations():
     )
 
 
-def test_dna_transform_and_adjoint_closed_form_oracle():
+def test_dna_transform_matches_closed_form_oracle():
     q = (2, 1)
     expansion = DNAFourierExpansion(q, d=2, alpha=(1.0, 1.5))
     coefficient = np.linspace(-0.8, 1.1, expansion.dimension)
-    residual = np.linspace(-0.4, 0.7, 12)
 
     synthesisMatrix = dna_synthesis_matrix(q, d=2)
     np.testing.assert_allclose(
         expansion.evaluate_native(coefficient), synthesisMatrix @ coefficient,
-        rtol=0.0, atol=1e-12,
-    )
-    np.testing.assert_allclose(
-        expansion.adjoint_synthesis(residual),
-        dna_adjoint_synthesis(q, 2, residual),
-        rtol=0.0, atol=1e-12,
-    )
-
-
-def test_log_length_multiplier_closed_form_oracle():
-    q = (3, 2)
-    alpha = (1.0, 1.4)
-    gp = GaussianProcess.dna(
-        MaternCovariance2D(0.3, 1.5, 1.0), q, d=2, alpha=alpha
-    )
-    expected = compute_log_length_multiplier(
-        q, alpha, d=2, nu=1.5, lengthScale=0.3,
-    )
-    np.testing.assert_allclose(
-        gp.compute_log_length_multiplier(1.5, 0.3), expected,
         rtol=0.0, atol=1e-12,
     )
 

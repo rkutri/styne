@@ -215,8 +215,8 @@ the same interface. `LinearExpansion` records the additional structure needed
 by the current Gaussian-process parametrisations. Derivative actions use the
 mathematical names `directional_derivative(coefficient, direction)` and
 `adjoint_derivative(coefficient, cotangent)`. JAX and PyTorch obtain both from
-their native automatic differentiation; NumPy linear expansions provide an
-analytical fallback.
+their native automatic differentiation; NumPy expansions provide an analytical
+fallback only where one is implemented.
 
 ```python
 field = Function(coordinate, expansion)

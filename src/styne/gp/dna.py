@@ -3,9 +3,6 @@ import numpy as np
 
 from styne.gp.dnautility import (
     BC, BoundaryCondition,
-    adj_cos_series_1d, adj_sin_series_1d,
-    adj_cos_series_rows, adj_cos_series_cols,
-    adj_sin_series_rows, adj_sin_series_cols,
 )
 from styne.backend import infer_backend
 from styne.model.representation.expansion import (
@@ -39,10 +36,14 @@ def _backend_zeros(reference, shape):
 def _cos_series_backend(coefficient):
     backend = infer_backend(coefficient)
     namespace = backend.namespace
+    rootTwo = backend_constant(np.sqrt(2.0), coefficient)
     first = coefficient[..., :1]
-    rest = coefficient[..., 1:] / np.sqrt(2.)
+    rest = coefficient[..., 1:] / rootTwo
+    zero = _backend_zeros(
+        coefficient, coefficient.shape[:-1] + (1,)
+    )
     padded = namespace.concatenate(
-        (first, rest, _backend_zeros(coefficient, coefficient.shape[:-1] + (1,))),
+        (first, rest, zero),
         axis=-1,
     )
     return backend.dct1(padded, axis=-1)
@@ -51,8 +52,9 @@ def _cos_series_backend(coefficient):
 def _sin_series_backend(coefficient):
     backend = infer_backend(coefficient)
     namespace = backend.namespace
+    rootTwo = backend_constant(np.sqrt(2.0), coefficient)
     interior = backend.dst1(
-        coefficient[..., 1:] / np.sqrt(2.), axis=-1
+        coefficient[..., 1:] / rootTwo, axis=-1
     )
     zero = _backend_zeros(coefficient, coefficient.shape[:-1] + (1,))
     return namespace.concatenate((zero, interior, zero), axis=-1)
@@ -97,17 +99,18 @@ class DNAFourierComponentExpansion(LinearExpansion):
         self._alpha = _as_axis_tuple(alpha, bc.d)
         if spectralWeights is None:
             spectralWeights = np.ones(self.dimension)
-        spectralWeights = np.asarray(spectralWeights, dtype=float)
+        elif not hasattr(spectralWeights, "shape"):
+            spectralWeights = np.asarray(spectralWeights)
         if spectralWeights.shape != (self.dimension,):
             raise ValueError(
                 f"Expected weights of dimension {self.dimension}, "
                 f"got {spectralWeights.shape}."
             )
-        self._weights = np.array(spectralWeights, copy=True)
+        self._weights = spectralWeights
 
     @property
-    def spectralWeights(self) -> np.ndarray:
-        return self._weights.copy()
+    def spectralWeights(self):
+        return self._weights
 
     @property
     def dimension(self) -> int:
@@ -201,40 +204,6 @@ class DNAFourierComponentExpansion(LinearExpansion):
     def _bind(self, grid: Grid) -> BoundLinearExpansion:
         return _DNAEvaluation(self, grid)
 
-    def adjoint_synthesis(self, r: np.ndarray) -> np.ndarray:
-        """Adjoint of evaluate_native (scaled): native space -> R^{block_size}."""
-        res = self._adjoint_synthesis_1d(r) if self._bc.d == 1 \
-            else self._adjoint_synthesis_2d(r)
-
-        return res * self._weights
-
-    def _adjoint_synthesis_1d(self, r: np.ndarray) -> np.ndarray:
-        q = self._q[0]
-        if self._bc[0] == BC.NEUMANN:
-            return adj_cos_series_1d(r, q)
-        return adj_sin_series_1d(r, q)
-
-    def _adjoint_synthesis_2d(self, r: np.ndarray) -> np.ndarray:
-        r_mat = r.reshape(self._q[0] + 2, self._q[1] + 2)
-
-        if self._bc[0] == BC.NEUMANN:
-            col_adj = adj_cos_series_cols(r_mat, self._q[0])
-        else:
-            col_adj = adj_sin_series_cols(r_mat, self._q[0])
-
-        if self._bc[1] == BC.NEUMANN:
-            a_adj = adj_cos_series_rows(col_adj, self._q[1])
-        else:
-            a_adj = adj_sin_series_rows(col_adj, self._q[1])
-
-        r0 = 1 if self._bc[0] == BC.DIRICHLET else 0
-        c0 = 1 if self._bc[1] == BC.DIRICHLET else 0
-        nX = (self._q[0] + 1) if self._bc[0] == BC.NEUMANN else self._q[0]
-        nY = (self._q[1] + 1) if self._bc[1] == BC.NEUMANN else self._q[1]
-
-        return a_adj[r0:r0 + nX, c0:c0 + nY].ravel()
-
-
 # ---- Full DNA field ----
 
 
@@ -254,12 +223,15 @@ class DNAFourierExpansion(LinearExpansion):
         totalDimension = sum(dimensions)
         if spectralWeights is None:
             spectralWeights = np.ones(totalDimension)
-        spectralWeights = np.asarray(spectralWeights, dtype=float)
+        elif not hasattr(spectralWeights, "shape"):
+            spectralWeights = np.asarray(spectralWeights)
         if spectralWeights.shape != (totalDimension,):
             raise ValueError(
                 f"Expected weights of dimension {totalDimension}, "
                 f"got {spectralWeights.shape}."
             )
+
+        self._spectralWeights = spectralWeights
 
         self._slices = []
         self._components = []
@@ -290,11 +262,8 @@ class DNAFourierExpansion(LinearExpansion):
         return self._alpha
 
     @property
-    def spectralWeights(self) -> np.ndarray:
-        """Concatenated spectral weights across all BC blocks."""
-        return np.concatenate([
-            component.spectralWeights for component in self._components
-        ])
+    def spectralWeights(self):
+        return self._spectralWeights
 
     def with_spectral_weights(self, spectralWeights):
         """Return an equivalent expansion with replacement static weights."""
@@ -314,14 +283,15 @@ class DNAFourierExpansion(LinearExpansion):
     def evaluate_native(self, coefficient) -> np.ndarray:
         """Evaluate explicit coefficients on the native DNA grid."""
         coefficient = self._validate(coefficient)
-        scale = 2. ** (-self._d / 2.)
+        scale = backend_constant(2. ** (-self._d / 2.), coefficient)
         fields = [
             component.evaluate_native(coefficient[..., coefficientSlice])
             for component, coefficientSlice in zip(
                 self._components, self._slices
             )
         ]
-        return scale * sum(fields)
+        namespace = infer_backend(coefficient).namespace
+        return scale * namespace.sum(namespace.stack(fields, axis=0), axis=0)
 
     @property
     def nativeGrid(self):
@@ -334,19 +304,6 @@ class DNAFourierExpansion(LinearExpansion):
 
     def _bind(self, grid: Grid) -> BoundLinearExpansion:
         return _DNAEvaluation(self, grid)
-
-    def adjoint_synthesis(self, r: np.ndarray) -> np.ndarray:
-        """
-        Adjoint of evaluate_native: native space -> R^{total_spectral_dim}.
-
-        For each BC block b, computes scale * W_b^T @ r and concatenates
-        the results. The scale factor 2^{-d/2} matches evaluate_native.
-        """
-        scale = 2. ** (-self._d / 2.)
-        return np.concatenate([
-            scale * component.adjoint_synthesis(r)
-            for component in self._components
-        ])
 
 
 class _DNAEvaluation(BoundLinearExpansion):
@@ -377,17 +334,6 @@ class _DNAEvaluation(BoundLinearExpansion):
         native = self._expansion.evaluate_native(coefficient)
         interpolation = backend_constant(self._interpolation, coefficient)
         return native @ interpolation.T
-
-    def _adjoint_derivative(self, coefficient, cotangent):
-        nativeCotangent = cotangent @ self._interpolation
-        if nativeCotangent.ndim == 1:
-            return self._expansion.adjoint_synthesis(nativeCotangent)
-        batchShape = nativeCotangent.shape[:-1]
-        rows = np.stack([
-            self._expansion.adjoint_synthesis(row)
-            for row in nativeCotangent.reshape(-1, nativeCotangent.shape[-1])
-        ])
-        return rows.reshape(batchShape + (rows.shape[-1],))
 
 
 class _DNAGPSpecification:
@@ -452,38 +398,15 @@ class _DNAGPSpecification:
                 ))
                 spectralDensities.append(covFcn.evaluate_fourier(freqs))
 
-        weights = np.sqrt(np.concatenate(spectralDensities))
-        weights *= np.prod(self._alpha) ** (-0.5)
+        backend = infer_backend(spectralDensities[0])
+        weights = backend.namespace.sqrt(
+            backend.namespace.concatenate(spectralDensities, axis=0)
+        ) * np.prod(self._alpha) ** (-0.5)
         expansion = DNAFourierExpansion(
             self._q, self._d, self._alpha, weights
         )
-        return IIDCovarianceMatrix(weights.size, 1.0), expansion
-
-    def compute_log_length_multiplier(
-        self, nu: float, lengthScale: float
-    ) -> np.ndarray:
-        """ Analytically compute spectral multipliers for log-lengthscale grad. """
-        multipliers = []
-        alpha, q, d = self._alpha, self._q, self._d
-        l2 = lengthScale**2
-        factor = 2 * nu + d
-
-        for bc in BoundaryCondition.all_combinations(d):
-            if d == 1:
-                modes = np.array(range(q[0] + 1) if bc[0] == BC.NEUMANN else range(1, q[0] + 1))
-                w2 = (np.pi / alpha[0])**2 * (modes**2)
-                mVal = 0.5 * (d - factor * (l2 * w2) / (2 * nu + l2 * w2))
-                multipliers.append(mVal)
-            else:
-                xRange = range(q[0] + 1) if bc[0] == BC.NEUMANN else range(1, q[0] + 1)
-                yRange = range(q[1] + 1) if bc[1] == BC.NEUMANN else range(1, q[1] + 1)
-                X, Y = np.meshgrid(xRange, yRange, indexing='ij')
-                w2 = ((np.pi / alpha[0])**2 * X.ravel()**2
-                      + (np.pi / alpha[1])**2 * Y.ravel()**2)
-                mVal = 0.5 * (d - factor * (l2 * w2) / (2 * nu + l2 * w2))
-                multipliers.append(mVal)
-
-        return np.concatenate(multipliers)
+        unitVariance = weights[0] * 0.0 + 1.0
+        return IIDCovarianceMatrix(weights.shape[0], unitVariance), expansion
 
     def evaluate_exact_conditional(
             self, expansion, queryGrid, state, covFcn, sites):

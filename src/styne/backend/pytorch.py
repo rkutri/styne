@@ -306,20 +306,26 @@ class PyTorchBackend(Backend):
     def dct1(self, array, *, axis=-1):
         if array.shape[axis] < 2:
             raise ValueError("DCT-I requires an input length of at least two.")
+        # PyTorch exposes no DCT-I.  This even extension has length 2*(N-1);
+        # torch-native DCT-II conventions would shift the DNA modes.  rFFT
+        # retains the complete nonredundant spectrum of this real extension.
         moved = torch.movedim(array, axis, -1)
         reflectedInterior = torch.flip(moved[..., 1:-1], dims=(-1,))
         extension = torch.cat((moved, reflectedInterior), dim=-1)
-        transformed = torch.real(torch.fft.fft(extension, dim=-1))
-        result = transformed[..., :moved.shape[-1]]
+        transformed = torch.fft.rfft(extension, dim=-1)
+        result = torch.real(transformed)
         return torch.movedim(result, -1, axis)
 
     def dst1(self, array, *, axis=-1):
+        # The 2*(N+1) odd extension gives unnormalised DST-I with exact zero
+        # endpoints, matching the retained 0.2.1 synthesis convention; only
+        # the one-sided spectrum is required.
         moved = torch.movedim(array, axis, -1)
         zero = torch.zeros_like(moved[..., :1])
         extension = torch.cat(
             (zero, moved, zero, -torch.flip(moved, dims=(-1,))), dim=-1
         )
-        transformed = -torch.imag(torch.fft.fft(extension, dim=-1))
+        transformed = -torch.imag(torch.fft.rfft(extension, dim=-1))
         result = transformed[..., 1:moved.shape[-1] + 1]
         return torch.movedim(result, -1, axis)
 

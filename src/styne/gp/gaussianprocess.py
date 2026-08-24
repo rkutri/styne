@@ -147,12 +147,6 @@ class GaussianProcess:
     def hasHyperGradient(self) -> bool:
         return hasattr(self._specification, "evaluate_hyper_gradient")
 
-    @property
-    def hasLogLengthMultiplier(self) -> bool:
-        return hasattr(
-            self._specification, "compute_log_length_multiplier"
-        )
-
     def create_predictor(
             self, coefficient, grid, observationGrid=None):
         return self._specification.create_predictor(
@@ -178,14 +172,4 @@ class GaussianProcess:
             )
         return self._specification.evaluate_hyper_gradient(
             self._expansion, state, cotangent, self._covFcn
-        )
-
-    def compute_log_length_multiplier(self, smoothness, lengthScale):
-        if not self.hasLogLengthMultiplier:
-            raise NotImplementedError(
-                "Log-length multipliers are unavailable for "
-                f"{type(self._expansion).__name__}."
-            )
-        return self._specification.compute_log_length_multiplier(
-            smoothness, lengthScale
         )

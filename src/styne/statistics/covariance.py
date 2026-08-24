@@ -145,9 +145,9 @@ class IIDCovarianceMatrix(DiagonalCovarianceMatrix):
     def __init__(self, dimension, variance, scaling=1.0):
         backend, variance = _backend_array(variance)
         metadata = backend.metadata(variance)
-        marginalVariance = backend.full(
-            dimension, variance, dtype=metadata.dtype, device=metadata.device
-        )
+        marginalVariance = backend.ones(
+            dimension, dtype=metadata.dtype, device=metadata.device
+        ) * variance
         super().__init__(marginalVariance, scaling)
 
     def with_scaling(self, scaling):
