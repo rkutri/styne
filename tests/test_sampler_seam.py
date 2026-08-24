@@ -126,12 +126,16 @@ def test_subsampler_reset():
     
     initialState = Vector(np.zeros(2))
     mainChain.run(5, initialState)
-    
+
     for subsampler in mainChain.subsamplers:
-        assert len(subsampler.diagnostics._recent) > 0 or subsampler.diagnostics._total > 0
-        
+        assert subsampler.diagnostics._total == 0
+        subsampler.diagnostics.process(TransitionData(
+            initialState, initialState, outcome=TransitionData.ACCEPTED
+        ))
+        assert subsampler.diagnostics._total == 1
+
     mainChain.clear()
-    
+
     for subsampler in mainChain.subsamplers:
         assert len(subsampler.diagnostics._recent) == 0
         assert subsampler.diagnostics._total == 0

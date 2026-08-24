@@ -36,7 +36,7 @@ class TestHierarchicalLogic(unittest.TestCase):
         hyperCond = SGLMMHyperConditional(pcPrior, gp, predictor, likelihood, hyperIdx=1)
         
         # State: [latent, log-hyper]
-        latent = Vector(np.zeros(gp.parameter.dimension))
+        latent = Vector(np.zeros(gp.parameterDimension))
         hyper = Vector(np.log([0.3, 1.2])) # log(rho), log(sigma)
         state = BlockParameter([latent, hyper])
         
@@ -77,7 +77,7 @@ class TestHierarchicalLogic(unittest.TestCase):
         
         hyperCond = SGLMMHyperConditional(pcPrior, gp, predictor, likelihood, hyperIdx=1)
         
-        latent = Vector(np.ones(gp.parameter.dimension))
+        latent = Vector(np.ones(gp.parameterDimension))
         hyper1 = Vector(np.log([0.2, 1.0])) # log(rho), log(sigma)
         hyper2 = Vector(np.log([0.2, 10000.0])) # significantly different variance
         state1 = BlockParameter([latent, hyper1])
@@ -93,7 +93,7 @@ class TestHierarchicalLogic(unittest.TestCase):
         eval2 = predictor(latent).copy()
         
         self.assertNotEqual(logp1, logp2)
-        self.assertFalse(np.allclose(eval1, eval2))
+        self.assertTrue(np.allclose(eval1, eval2))
 
 if __name__ == '__main__':
     unittest.main()

@@ -66,6 +66,7 @@ def test_density(dim, h, cond):
 
 @pytest.mark.parametrize("kappa", [1.0, 5.0])
 @pytest.mark.parametrize("h", [1.0, 0.1])
+@pytest.mark.slow
 def test_samples(kappa, h):
     """
     Overkill the subchain length and verify that the invariant measure
@@ -105,10 +106,8 @@ def test_samples(kappa, h):
     )
 
     for loc in locations:
-        surrogateMeasure.mcmc.clear()
-        surrogateMeasure.location = loc
-        surrogateMeasure.generate_realisation()
-        subchain = np.array(surrogateMeasure.chain.trajectory)
+        _, subchain, rng = surrogateMeasure.transition_trajectory(loc, rng)
+        subchain = np.asarray(subchain)
 
         burnin = 2000
         thinning = 5
@@ -192,4 +191,3 @@ def test_surrogate_decomposition():
         gamma, theta, baseMeasure.density, spectralWeights=weights
     )
     check_density(weighted)
-

@@ -5,6 +5,7 @@ Recover slope and intercept from noisy data
 with a Metropolised-Random-Walk sampler.
 """
 import numpy as np
+import os
 
 from styne.model import LinearForwardMap
 from styne.parameter import Vector
@@ -22,6 +23,10 @@ try:
 except ImportError:
     hasMatplotlib = False
     print("matplotlib not installed (pip install styne[plotting]); skipping plot.")
+
+smokeMode = os.environ.get('STYNE_SMOKE') == '1'
+if smokeMode:
+    hasMatplotlib = False
 
 # fix seed
 rng = np.random.default_rng(2026)
@@ -72,12 +77,12 @@ factory.rng = rng
 sampler = factory.create()
 
 # run mcmc
-nSteps = 20000
+nSteps = 50 if smokeMode else 20000
 initState = Vector(np.zeros(2))
 sampler.run(nSteps, initState)
 
 # discard burn-in
-nBurnIn = 5000
+nBurnIn = 10 if smokeMode else 5000
 trajectory = np.array(sampler.chain.trajectory)[nBurnIn:]
 intercept, slope = trajectory.mean(axis=0)
 

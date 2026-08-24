@@ -11,13 +11,13 @@ algorithms are fast!', JMLR, and is exact for this label convention.
 """
 
 import numpy as np
+from scipy.special import expit
 
 from styne.backend import infer_backend
 from styne.model.representation.expansion import backend_constant
 from styne.parameter.vector import Vector
 from styne.statistics.interface import DensityInterface
 from styne.statistics.stationary import MaternCovariance1D
-from styne.utility.linalg import svd_truncate_frob, svd_truncate_rank
 
 
 class LogisticPosterior(DensityInterface):
@@ -152,10 +152,7 @@ def generate_logistic_data(d, n, betaStar, ell, rng=None):
     return X, y, designCov
 
 
-# svd_truncate_frob and svd_truncate_rank are re-exported from utility.linalg
 __all__ = [
     "LogisticPosterior",
     "generate_logistic_data",
-    "svd_truncate_frob",
-    "svd_truncate_rank",
 ]

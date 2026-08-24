@@ -58,17 +58,17 @@ def test_dense_gp_sampler_shape():
     assert function.coordinate.shape == (n,)
 
 
-def test_evaluate_uses_explicit_coefficient_without_mutating_parameter():
+def test_evaluate_uses_explicit_coefficient_without_mutating_coefficient():
     grid = UniformGrid(0., 1., 5)
     gp = GaussianProcess.direct(
         grid, MaternCovariance1D(0.3, 1.5, 1.0))
-    before = np.array(gp.parameter.coordinate, copy=True)
     coefficient = np.linspace(-0.5, 0.5, gp.parameterDimension)
+    before = coefficient.copy()
 
     values = gp.evaluate(coefficient, grid)
 
     assert values.shape == (len(grid),)
-    np.testing.assert_array_equal(gp.parameter.coordinate, before)
+    np.testing.assert_array_equal(coefficient, before)
 
 
 def test_dense_gp_measure_is_gaussian():
@@ -120,30 +120,30 @@ def test_dense_gp_parameter_reconstruction_shares_representation():
     gp = GaussianProcess.direct(grid, cov)
 
     coords = np.arange(n, dtype=float)
-    replacement = gp.parameter.with_coordinate(coords)
+    replacement = gp.function(coords)
 
     np.testing.assert_array_equal(
         replacement.coordinate, coords,
         err_msg="replacement did not preserve its coordinate"
     )
-    np.testing.assert_array_equal(gp.parameter.coordinate, np.zeros(n))
-    assert replacement.expansion is gp.parameter.expansion
+    assert replacement.expansion is gp.expansion
 
 
-def test_dense_gp_covariance_update():
+def test_dense_gp_covariance_update_is_functional():
     n = 6
     grid = UniformGrid(LB, RB, n)
     cov1 = ExponentialCovariance1D(alpha=5., marginalVariance=1.)
     cov2 = ExponentialCovariance1D(alpha=2., marginalVariance=0.5)
 
     gp = GaussianProcess.direct(grid, cov1)
-    measure_ref = gp.measure  # capture reference before update
+    measureRef = gp.measure
 
-    gp.covarianceFunction = cov2
+    updated = gp.with_covariance_function(cov2)
 
-    assert gp.measure is measure_ref, \
-        "covarianceFunction setter must update measure in-place"
-    assert gp.covarianceFunction is cov2
+    assert gp.measure is measureRef
+    assert updated.measure is not measureRef
+    assert gp.covarianceFunction is cov1
+    assert updated.covarianceFunction is cov2
 
 
 # ---------------------------------------------------------------------------
@@ -215,23 +215,23 @@ def test_bspline_2d_gp_parameter_reconstruction_shares_representation():
     gp = make_bspline_2d_gp(nx, ny)
 
     coords = np.ones(nx * ny)
-    replacement = gp.parameter.with_coordinate(coords)
+    replacement = gp.function(coords)
 
     np.testing.assert_array_almost_equal(
         replacement.coordinate, coords,
         err_msg="replacement did not preserve its coordinate"
     )
-    np.testing.assert_array_equal(
-        gp.parameter.coordinate, np.zeros(nx * ny))
-    assert replacement.expansion is gp.parameter.expansion
+    assert replacement.expansion is gp.expansion
 
 
-def test_bspline_2d_gp_covariance_update_inplace():
+def test_bspline_2d_gp_covariance_update_is_functional():
     gp = make_bspline_2d_gp()
-    measure_ref = gp.measure
+    measureRef = gp.measure
     cov2 = MaternCovariance2D(lengthScale=0.1, smoothness=1.5, marginalVariance=2.)
-    gp.covarianceFunction = cov2
-    assert gp.measure is measure_ref
+    updated = gp.with_covariance_function(cov2)
+    assert gp.measure is measureRef
+    assert updated.measure is not measureRef
+    assert updated.covarianceFunction is cov2
 
 
 # ---------------------------------------------------------------------------

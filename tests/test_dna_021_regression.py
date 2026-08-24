@@ -1,7 +1,6 @@
 import numpy as np
 import pytest
 
-from styne.backend import BackendCapabilityError
 from styne.gp.dna import DNAFourierComponentExpansion, DNAFourierExpansion
 from styne.gp.gaussianprocess import GaussianProcess
 from styne.gp.dnautility import BC, BoundaryCondition
@@ -244,15 +243,19 @@ def test_pytorch_synthesis_vjp_matches_retained_021_oracle(q, d):
     torch.testing.assert_close(gradient, expected)
 
 
-def test_numpy_dna_exposes_no_runtime_handwritten_adjoint():
+def test_numpy_dna_adjoint_uses_linear_fallback():
     expansion = DNAFourierExpansion(4, d=1)
     evaluation = expansion.bind(np.linspace(0.1, 0.9, 5))
+    coefficient = np.zeros(expansion.dimension)
+    direction = np.linspace(-0.5, 0.5, expansion.dimension)
+    cotangent = np.linspace(0.2, 1.0, 5)
 
     assert not hasattr(expansion, "adjoint_synthesis")
-    with pytest.raises(BackendCapabilityError, match="no NumPy adjoint"):
-        evaluation.adjoint_derivative(
-            np.zeros(expansion.dimension), np.ones(5)
-        )
+    derivative = evaluation.directional_derivative(coefficient, direction)
+    adjoint = evaluation.adjoint_derivative(coefficient, cotangent)
+    np.testing.assert_allclose(
+        np.vdot(derivative, cotangent), np.vdot(direction, adjoint)
+    )
 
 
 def test_jax_dna_hypergradient_matches_analytic_multiplier_oracle():

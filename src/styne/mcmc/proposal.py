@@ -186,7 +186,8 @@ class PartitionedSurrogateProposal(PartitionedProposalMixin, ProposalMethod):
             state, fullProposal, auxiliary=coarseTransition.auxiliary
         ), nextRng
 
-    def log_acceptance_correction(self, state, proposal):
+    def log_acceptance_correction(
+            self, state, proposal, trajectory, proposalTrajectory):
         coarseState = self._coarse_from(state)
         coarseProposal = self._coarse_from(proposal)
         fineState = self._fine_from(state)
@@ -195,5 +196,6 @@ class PartitionedSurrogateProposal(PartitionedProposalMixin, ProposalMethod):
         fineCorrection = -(finePriorDensity.evaluate_log(fineProposal)
                            - finePriorDensity.evaluate_log(fineState))
         coarseCorrection = self._coarseProposal.log_acceptance_correction(
-            coarseState, coarseProposal)
+            coarseState, coarseProposal, trajectory, proposalTrajectory
+        )
         return coarseCorrection + fineCorrection

@@ -62,6 +62,7 @@ class LocalisedSurrogateDensity(RadonNikodym):
         self._tempering = tempering
         self._spectralWeights = spectralWeights
         self._temperFullDensity = temperFullDensity
+        self._scaledDerivative = None
 
         regCov = self._build_reg_covariance(
             surrogateDensity.domainDimension, spectralWeights
@@ -85,6 +86,7 @@ class LocalisedSurrogateDensity(RadonNikodym):
         # be the prior in a Bayesian model. Important for preconditioned MCMCs.
         if isinstance(surrogateDensity, RadonNikodym):
             scaledDerivative = LogScalingWrapper(surrogateDensity.derivative, tempering)
+            self._scaledDerivative = scaledDerivative
 
             if temperFullDensity:
                 scaledCov = surrogateDensity.reference.covariance.with_scaling(
@@ -129,12 +131,12 @@ class LocalisedSurrogateDensity(RadonNikodym):
 
     @location.setter
     def location(self, location: Parameter):
-        self._regGaussian = self._regGaussian.with_mean(location)
+        self._replace_regularisation(self._regGaussian.with_mean(location))
 
     def with_location(self, location: Parameter):
         """Return this density localised at ``location``."""
         result = copy.copy(self)
-        result._regGaussian = self._regGaussian.with_mean(location)
+        result.location = location
         return result
 
     @property
@@ -161,9 +163,20 @@ class LocalisedSurrogateDensity(RadonNikodym):
         if weights is None:
             return
         self._spectralWeights = weights
-        self._regGaussian = self._regGaussian.with_covariance(DiagonalCovarianceMatrix(
-            1.0 / np.clip(self._reg * weights**2, 1e-30, None)
-        ))
+        self._replace_regularisation(
+            self._regGaussian.with_covariance(DiagonalCovarianceMatrix(
+                1.0 / np.clip(self._reg * weights**2, 1e-30, None)
+            ))
+        )
+
+    def _replace_regularisation(self, measure):
+        self._regGaussian = measure
+        if isinstance(self._surrogateDensity, RadonNikodym):
+            self._derivative = ProductWrapper([
+                measure.density, self._scaledDerivative
+            ])
+        else:
+            self._reference = measure
 
 
 

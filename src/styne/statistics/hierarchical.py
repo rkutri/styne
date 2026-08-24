@@ -101,7 +101,12 @@ class SGLMMHyperConditionalDensity(DensityInterface):
         hyperparameterVector = Vector(hyperparameters)
         logPrior = self._pcPrior.evaluate_log(hyperparameterVector)
         logJacobian = backend.namespace.sum(logHyperparameters)
-        linearPredictor = self._model_at(lengthScale, sigma)(self._latentState)
+        try:
+            linearPredictor = self._model_at(
+                lengthScale, sigma
+            )(self._latentState)
+        except np.linalg.LinAlgError:
+            return -np.inf
             
         logLikelihood = self._likelihood.response.log_likelihood(
             self._likelihood.data.measurement, linearPredictor

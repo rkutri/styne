@@ -149,7 +149,12 @@ def test_partitioned_dart_acceptance_invariant():
     logDiffSurr = (surrDens.evaluate_log_surrogate(proposalC)
                    - surrDens.evaluate_log_surrogate(stateC))
     ratioEst = sampler._proposalMethod._coarseProposal.correction
-    logRatioEst = ratioEst.log_ratio_estimate(stateC, proposalC)
+    logRatioEst = ratioEst.log_ratio_estimate(
+        stateC,
+        proposalC,
+        trans.auxiliary["surrogateTrajectory"],
+        trans.auxiliary["proposalTrajectory"],
+    )
     print(f"Computed logRatioEst: {logRatioEst}")
     assert logRatioEst != 0.0
     coarseCorrection = -logDiffSurr - logRatioEst

@@ -5,7 +5,7 @@ from scipy.linalg import toeplitz
 from scipy.special import gamma, kv, gammaln
 from scipy.spatial.distance import cdist
 
-from styne.backend import infer_backend
+from styne.backend import BackendInferenceError, get_backend, infer_backend
 
 from styne.statistics.interface import CovarianceFunctionInterface
 from styne.statistics.covariance import (
@@ -15,6 +15,15 @@ from styne.utility.grid import Grid, UniformGrid
 
 _MATERN_MAX_SCALED_DISTANCE = 800.0
 _MATERN_MIN_SCALED_DISTANCE = 1e-8
+
+
+def backend_array(reference):
+    try:
+        backend = infer_backend(reference)
+    except BackendInferenceError:
+        backend = get_backend("numpy")
+        reference = backend.asarray(reference)
+    return backend, reference
 
 
 def as_point_array(points, backend=None, metadata=None):
@@ -93,7 +102,7 @@ class StationaryCovariance(CovarianceFunctionInterface):
 
 def exponential_covariance(delta, alpha, variance):
     reference = alpha if hasattr(alpha, "shape") else delta
-    backend = infer_backend(reference)
+    backend, reference = backend_array(reference)
     metadata = backend.metadata(reference)
     delta = backend.asarray(delta, dtype=metadata.dtype, device=metadata.device)
     return variance * backend.namespace.exp(-alpha * backend.namespace.abs(delta))
@@ -113,7 +122,7 @@ def matern_covariance(x, lengthScale, smoothness, variance):
         raise ValueError(f"Invalid smoothness parameter: {smoothness}")
 
     reference = lengthScale if hasattr(lengthScale, "shape") else x
-    backend = infer_backend(reference)
+    backend, reference = backend_array(reference)
     metadata = backend.metadata(reference)
     ns = backend.namespace
     x = backend.asarray(x, dtype=metadata.dtype, device=metadata.device)
@@ -190,28 +199,34 @@ def matern_fourier(f, lengthScale, smoothness, variance, d=1):
         f = f.reshape((-1, 1))
     kappa = matern_kappa(lengthScale, smoothness)
     kappa = ns.maximum(kappa, 1e-10)
+    inverseKappa = 1. / kappa
     
     # Vectorized sum over frequency components if multiple dimensions provided
     sSq = ns.sum((2. * np.pi * f)**2, axis=-1)
+    scaledSq = sSq * inverseKappa**2
 
     # Closed-form fast paths for common smoothness values (API contract: vectorized)
     if isclose(smoothness, 0.5):
         if d == 1:
-            return (variance * 2. * kappa) / (kappa**2 + sSq)
+            return variance * 2. * inverseKappa / (1. + scaledSq)
         if d == 2:
-            return (variance * 2. * np.pi * kappa) / (kappa**2 + sSq)**1.5
+            return variance * 2. * np.pi * inverseKappa**2 \
+                / (1. + scaledSq)**1.5
 
     if isclose(smoothness, 1.5):
         if d == 1:
-            return (variance * 4. * kappa**3) / (kappa**2 + sSq)**2
+            return variance * 4. * inverseKappa / (1. + scaledSq)**2
         if d == 2:
-            return (variance * 6. * np.pi * kappa**3) / (kappa**2 + sSq)**2.5
+            return variance * 6. * np.pi * inverseKappa**2 \
+                / (1. + scaledSq)**2.5
 
     if isclose(smoothness, 2.5):
         if d == 1:
-            return (variance * (16. / 3.) * kappa**5) / (kappa**2 + sSq)**3
+            return variance * (16. / 3.) * inverseKappa \
+                / (1. + scaledSq)**3
         if d == 2:
-            return (variance * 10. * np.pi * kappa**5) / (kappa**2 + sSq)**3.5
+            return variance * 10. * np.pi * inverseKappa**2 \
+                / (1. + scaledSq)**3.5
 
     if backend.name != "numpy":
         raise NotImplementedError(

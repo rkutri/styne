@@ -258,7 +258,7 @@ def test_mlda_five_level_method(setup_mlda_test_data):
     )
 
 
-def test_mlda_multilevel_levels():
+def test_mlda_multilevel_levels_are_pure():
     from styne.mcmc.method.mlda import MLDAFactory
     from styne.statistics.gaussian import GaussianDensity
     from styne.statistics.covariance import IIDCovarianceMatrix
@@ -282,4 +282,5 @@ def test_mlda_multilevel_levels():
 
     mainChain.run(5, Vector(np.zeros(2)))
     for subsampler in mainChain.subsamplers:
-        assert subsampler.diagnostics._total > 0
+        assert subsampler.diagnostics._total == 0
+        assert len(subsampler.chain.trajectory) == 0

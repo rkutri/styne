@@ -4,7 +4,7 @@
 
 [![DOI](https://zenodo.org/badge/1278349844.svg)](https://zenodo.org/badge/latestdoi/1278349844) [![DART](https://img.shields.io/badge/DART-arXiv%3A2606.27564-b31b1b)](https://arxiv.org/abs/2606.27564) [![DNA](https://img.shields.io/badge/DNA-10.1137%2F24M1715854-blue)](https://doi.org/10.1137/24M1715854)
 
-*Pre-1.0 (`v0.2.1`)*
+*Pre-1.0 (`v0.3.0`)*
 
 A Python library for Bayesian inference designed for high-dimensional problems
 and computationally expensive forward models.
@@ -28,6 +28,18 @@ Requires Python 3.10+.
 ```bash
 pip install styne
 ```
+
+Optional JAX and PyTorch backends are installed independently:
+
+```bash
+pip install styne[jax]
+pip install styne[torch]
+```
+
+Numerical inputs select their backend. NumPy supports values and explicit
+gradients; JAX and PyTorch additionally differentiate supported density and
+MCMC proposal paths automatically. NumPy MALA and pMALA therefore require an
+explicit gradient callable.
 
 The example scripts save plots and require the plotting extra:
 
@@ -82,6 +94,22 @@ Start with the four runnable examples in `examples/`.
 * `02_gp.py`: interchangeable Gaussian-process representations.
 * `03_sglmm.py`: a spatial GLMM with Poisson observations.
 * `04_pde_inverse_problem.py`: a custom PDE inverse problem.
+
+The PDE example is NumPy/SciPy-specific. The maintained backend-neutral
+examples are the quickstart, GP, and SGLMM examples.
+
+## Migrating from 0.2
+
+Numerical state is now immutable and backend-native. Replace in-place
+configuration such as coordinate or covariance setters with `with_coordinate`,
+`with_mean`, and `with_covariance`. `ForwardMap` evaluation uses explicit
+prepared state, while MCMC proposals take and return explicit backend random
+states through `step` and `sample`. Density values are scalar backend arrays;
+do not coerce them to Python floats inside differentiated code.
+
+Static setup such as grids, expansions, and bound evaluators may be reused.
+Parameter-dependent caches are intentionally not shared: pass prepared state
+explicitly and keep current log densities only within an MCMC transition.
 
 ## Components
 
