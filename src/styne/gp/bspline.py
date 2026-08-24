@@ -4,9 +4,8 @@ from styne.backend import infer_backend
 from styne.model.representation.expansion import backend_constant
 
 from styne.model.representation.bspline import BSpline2D
-from styne.statistics.interface import CovarianceFunctionInterface, Predictor
+from styne.statistics.interface import CovarianceFunctionInterface
 from styne.statistics.covariance import DenseCovarianceMatrix
-from styne.utility.grid import Grid
 
 
 def induced_prior_covariance(
@@ -94,8 +93,8 @@ def induced_prior_covariance_2d(covFunc2d, bspX, bspY, xBounds, yBounds,
     )
 
 
-class _BSplineGPSpecification:
-    """Construction and prediction rules for a B-spline GP."""
+class BSplineGPSpecification:
+    """Construction rules for a B-spline GP."""
 
     def __init__(self, expansion):
         self._expansion = expansion
@@ -118,34 +117,3 @@ class _BSplineGPSpecification:
                 covFcn, bounds, self._expansion
             )
         return covariance, self._expansion
-
-    def create_predictor(
-            self, gpState, queryGrid: Grid,
-            coefficient: np.ndarray, observationGrid=None) -> Predictor:
-        mean = self._expansion.evaluate(coefficient, queryGrid)
-        return BSplineGPPredictor(mean)
-
-
-class BSplineGPPredictor(Predictor):
-    """
-    Immutable out-of-sample mean snapshot for the B-spline parametrisation.
-
-    Parameters
-    ----------
-    mean : np.ndarray
-        Predictive mean computed from the coefficient at construction time.
-    """
-
-    def __init__(self, mean):
-        self._mean = mean
-
-    def mean(self):
-        """
-        Predictive mean at the query sites.
-
-        Returns
-        -------
-        np.ndarray
-            Predictive mean values, `H_pred @ coefficients`.
-        """
-        return self._mean

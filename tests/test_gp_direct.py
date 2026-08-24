@@ -87,12 +87,10 @@ class TestDirectGPConstruction:
         assert cov.dimension == self.n
         assert self.gp.expansion.shapeCovariance.to_dense().shape == (self.n, self.n)
 
-    def test_bound_evaluation_keeps_linear_maps_separate(self):
+    def test_bound_evaluation_caches_covariance_basis(self):
         evaluation = self.gp.bind(UniformGrid(0.1, 0.9, 7))
 
-        assert evaluation._interpolation.shape == (7, self.n)
-        assert evaluation._shapeFactor.shape == (self.n, self.n)
-        assert not hasattr(evaluation, "_operator")
+        assert evaluation._basis.shape == (7, self.n)
 
 
 # ---- GaussianProcess.direct correctness ----
@@ -144,14 +142,15 @@ class TestDirectGPCorrectness:
         frobErr = np.linalg.norm(empiricalCov - trueCov, 'fro')
         assert frobErr / frobTrue < 0.3
 
-    def test_covariance_update_inplace(self):
+    def test_covariance_update_returns_new_process(self):
         newCovFcn = MaternCovariance1D(0.5, 1.5, 1.2)
-        self.gp.covarianceFunction = newCovFcn
-        newK = self.gp.expansion.shapeCovariance.to_dense()
+        updated = self.gp.with_covariance_function(newCovFcn)
+        newK = updated.expansion.shapeCovariance.to_dense()
         expected = newCovFcn.evaluate_covariance(
             self.grid, self.grid
         )
         np.testing.assert_allclose(newK, expected, atol=1e-10)
+        assert updated is not self.gp
 
 
 # ---- DirectSampler evaluate behaviour ----

@@ -140,16 +140,3 @@ class BayesianModelInterface(ABC):
     @abstractmethod
     def prior(self) -> ProbabilityMeasure:
         ...
-
-
-class Predictor(ABC):
-    """
-    Interface for out-of-sample forward predictions.
-    """
-
-    @abstractmethod
-    def mean(self) -> ndarray:
-        """
-        Estimate the mean of the predictor at the query sites.
-        """
-        ...

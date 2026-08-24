@@ -196,6 +196,23 @@ of the prior, not different model classes. Their construction details are
 private; evaluation is exposed uniformly by `gp.evaluate(coefficient, grid)`
 and `gp.bind(grid)`.
 
+Evaluation of an explicit latent coordinate is deterministic and returns a
+backend-native array directly; there is no intermediate predictor object. The
+expansion owns off-grid evaluation, including the covariance projection used
+by the dense direct representation. For repeated or compiled evaluation, bind
+the grid once outside the transformed function and compile the bound method:
+
+```python
+evaluation = gp.bind(query_grid)
+compiled = jax.jit(evaluation.evaluate)
+values = compiled(coefficient)
+```
+
+An SGLMM similarly returns its out-of-sample linear predictor directly through
+`model.predict(prepared_state, query_grid, features=...)`. A future conditional
+GP law with predictive covariance and draws is a probability measure, rather
+than a wrapper around a deterministic mean.
+
 ### Functions and expansions
 
 A `Function` is a parameter that can also be evaluated on a grid. It binds a
@@ -254,6 +271,8 @@ The refactored API replaces the previous mutable-realisation interface:
 | `parameter.clone()` | share `parameter` or call `with_coordinate(...)` |
 | `EvaluationCache` or likelihood `cacheSize` | explicit local prepared state |
 | mutable `GPEngine.sites` and `gp.at_sites(...)` | `gp.evaluate(coefficient, grid)` or `expansion.bind(grid)` |
+| `gp.create_predictor(...).mean()` | `gp.evaluate(coefficient, grid)` |
+| `sglmm.create_predictor(...).mean()` | `sglmm.predict(prepared_state, grid, features=...)` |
 | `apply_jacobian(...)` / `apply_adjoint_jacobian(...)` | `directional_derivative(...)` / `adjoint_derivative(...)` |
 | representation-specific `*Realisation` classes | stateless `*Expansion` classes |
 

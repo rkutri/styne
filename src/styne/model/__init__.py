@@ -6,7 +6,6 @@ _SYMBOL_TO_MODULE = {
     "DifferentiableModel": "styne.model.forwardmap",
     "LinearForwardMap": "styne.model.linear",
     "SGLMM": "styne.model.sglmm",
-    "SGLMMPredictor": "styne.model.sglmm",
     "Trend": "styne.model.trend",
     "ConstantTrend": "styne.model.trend",
     "LinearTrend": "styne.model.trend",

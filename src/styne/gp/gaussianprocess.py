@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-import numpy as np
 from numpy.random import Generator
+from styne.backend import infer_backend
 from styne.parameter.function import Function
 from styne.parameter.vector import Vector
 from styne.model.representation.expansion import LinearExpansion
@@ -10,9 +10,9 @@ from styne.statistics.interface import CovarianceFunctionInterface
 from styne.statistics.measure import ProbabilityMeasure
 from styne.utility.grid import Grid
 
-from styne.gp.direct import _DirectGPSpecification
-from styne.gp.bspline import _BSplineGPSpecification
-from styne.gp.dna import _DNAGPSpecification
+from styne.gp.direct import DirectGPSpecification
+from styne.gp.bspline import BSplineGPSpecification
+from styne.gp.dna import DNAGPSpecification
 
 
 class GPSampler(ProbabilityMeasure):
@@ -45,8 +45,15 @@ class GaussianProcess:
         measureCov, self._expansion = specification.build(covFcn)
         if not isinstance(self._expansion, LinearExpansion):
             raise TypeError("GaussianProcess requires a LinearExpansion")
+        backend = infer_backend(measureCov.scaling)
+        metadata = backend.metadata(measureCov.scaling)
         self._measure = Gaussian(
-            measureCov, Vector(np.zeros(self._expansion.dimension))
+            measureCov,
+            Vector(backend.zeros(
+                self._expansion.dimension,
+                dtype=metadata.dtype,
+                device=metadata.device,
+            )),
         )
 
         self._covFcn = covFcn
@@ -55,17 +62,17 @@ class GaussianProcess:
 
     @classmethod
     def direct(cls, grid: Grid, covFcn: CovarianceFunctionInterface, nugget: float = 0.0) -> GaussianProcess:
-        return cls(covFcn, _DirectGPSpecification(grid, nugget))
+        return cls(covFcn, DirectGPSpecification(grid, nugget))
 
     @classmethod
     def bspline(
             cls, covFcn: CovarianceFunctionInterface,
             expansion: LinearExpansion) -> GaussianProcess:
-        return cls(covFcn, _BSplineGPSpecification(expansion))
+        return cls(covFcn, BSplineGPSpecification(expansion))
 
     @classmethod
     def dna(cls, covFcn:CovarianceFunctionInterface, q: int | tuple, d: int, alpha: float | tuple = 1.0) -> GaussianProcess:
-        return cls(covFcn, _DNAGPSpecification(q, d, alpha))
+        return cls(covFcn, DNAGPSpecification(q, d, alpha))
 
     @classmethod
     def spde(cls, _) -> GaussianProcess:
@@ -124,7 +131,13 @@ class GaussianProcess:
         return GPSampler(self._expansion, self._measure)
 
     def bind(self, grid):
-        """Return the cached expansion evaluator for ``grid``."""
+        """Return the cached expansion evaluator for ``grid``.
+
+        Bind before entering ``jax.jit`` when grid-dependent representation
+        data depends on JAX values. This keeps cache mutation outside the
+        transformed function while the returned evaluator remains
+        differentiable.
+        """
         return self._expansion.bind(grid)
 
     def evaluate(self, coefficient, grid):
@@ -146,12 +159,6 @@ class GaussianProcess:
     @property
     def hasHyperGradient(self) -> bool:
         return hasattr(self._specification, "evaluate_hyper_gradient")
-
-    def create_predictor(
-            self, coefficient, grid, observationGrid=None):
-        return self._specification.create_predictor(
-            self, grid, coefficient, observationGrid
-        )
 
     def evaluate_exact_conditional(self, queryGrid, state, sites):
         if not hasattr(

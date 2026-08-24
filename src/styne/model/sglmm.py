@@ -11,7 +11,6 @@ from styne.parameter.block import BlockParameter
 from styne.model.representation.expansion import backend_constant
 from styne.gp.gaussianprocess import GaussianProcess
 from styne.utility.grid import Grid
-from styne.statistics.interface import Predictor
 
 
 class SGLMM(ForwardMap):
@@ -190,11 +189,9 @@ class SGLMM(ForwardMap):
             (gpAdj, fixedAdjoint), axis=-1
         )
 
-    def create_predictor(
-            self, preparedState, queryGrid: Grid, features=None
-    ) -> 'SGLMMPredictor':
+    def predict(self, preparedState, queryGrid: Grid, features=None):
         """
-        Build an out-of-sample predictor at new sites.
+        Evaluate the linear predictor at new sites.
 
         Parameters
         ----------
@@ -208,48 +205,30 @@ class SGLMM(ForwardMap):
 
         Returns
         -------
-        SGLMMPredictor
+        array-like
+            Backend-native linear-predictor values at ``queryGrid``.
         """
         latentCoordinate, fixedEffect = preparedState
-        gpPredictor = self._gp.create_predictor(
-            latentCoordinate, queryGrid, self._obsSites
-        )
-        return SGLMMPredictor(gpPredictor, queryGrid, features, fixedEffect, self._trend)
+        mean = self._gp.evaluate(latentCoordinate, queryGrid)
 
-
-class SGLMMPredictor(Predictor):
-    """
-    Immutable out-of-sample mean snapshot for the SGLMM model.
-    """
-    def __init__(
-        self, gpPredictor: Predictor, queryGrid: Grid, features, fixedEffect, trend
-    ):
-        mean = np.array(gpPredictor.mean(), dtype=float, copy=True)
-
-        if trend is not None:
-            mean = mean + np.array(
-                trend.evaluate(queryGrid), dtype=float, copy=True)
+        if self._trend is not None:
+            mean = mean + backend_constant(
+                self._trend.evaluate(queryGrid), mean
+            )
 
         if fixedEffect is not None:
             if features is None:
-                raise ValueError("Out-of-sample features required for prediction.")
-            frozenFeatures = np.array(features, dtype=float, copy=True)
-            if frozenFeatures.ndim == 1:
-                frozenFeatures = frozenFeatures[:, None]
-            if len(frozenFeatures) != len(queryGrid):
-                raise ValueError("features must have shape (len(queryGrid), p)")
-            frozenFixedEffect = np.array(
-                fixedEffect, dtype=float, copy=True)
-            mean = mean + frozenFeatures @ frozenFixedEffect
+                raise ValueError(
+                    "Out-of-sample features required for prediction."
+                )
+            featureArray = np.asarray(features)
+            if featureArray.ndim == 1:
+                featureArray = featureArray[:, None]
+            if len(featureArray) != len(queryGrid):
+                raise ValueError(
+                    "features must have shape (len(queryGrid), p)"
+                )
+            featureArray = backend_constant(featureArray, fixedEffect)
+            mean = mean + fixedEffect @ featureArray.T
 
-        self._mean = np.array(mean, dtype=float, copy=True)
-
-    def mean(self) -> np.ndarray:
-        """
-        Predictive mean at the query sites.
-
-        Returns
-        -------
-        np.ndarray
-        """
-        return self._mean.copy()
+        return mean

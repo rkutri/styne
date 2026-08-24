@@ -18,7 +18,7 @@ def _numerical_jacobian(f, x, epsilon=1e-6):
     return J
 
 def test_sglmm_predictor_identical_sites():
-    """Test SGLMMPredictor when GP sites exactly match observation sites."""
+    """Test SGLMM derivatives when GP sites match observation sites."""
     obsGrid = UniformGrid(0.0, 1.0, 10)
     cov = MaternCovariance1D(0.2, 1.5, 1.0)
     gp = GaussianProcess.dna(cov, q=10, d=1)
@@ -44,4 +44,3 @@ def test_sglmm_predictor_identical_sites():
     innerFwd = np.dot(deriv, w)
     innerBwd = np.dot(v, adj)
     np.testing.assert_allclose(innerFwd, innerBwd, rtol=1e-5)
-

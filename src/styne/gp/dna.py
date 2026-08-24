@@ -10,14 +10,14 @@ from styne.model.representation.expansion import (
     LinearExpansion,
     backend_constant,
 )
-from styne.statistics.interface import CovarianceFunctionInterface, Predictor
+from styne.statistics.interface import CovarianceFunctionInterface
 from styne.utility.grid import Grid, UniformGrid
 from styne.utility.interpolation import (
     linear_interpolation_matrix, bilinear_interpolation_matrix
 )
 
 
-def _validate_coefficient(coefficient):
+def validate_coefficient(coefficient):
     if coefficient.ndim < 1:
         raise ValueError(
             "coefficient must have shape (..., dimension)"
@@ -25,7 +25,7 @@ def _validate_coefficient(coefficient):
     return coefficient
 
 
-def _backend_zeros(reference, shape):
+def backend_zeros(reference, shape):
     backend = infer_backend(reference)
     metadata = backend.metadata(reference)
     return backend.zeros(
@@ -33,13 +33,19 @@ def _backend_zeros(reference, shape):
     )
 
 
-def _cos_series_backend(coefficient):
+def backend_indices(indices, reference):
+    backend = infer_backend(reference)
+    metadata = backend.metadata(reference)
+    return backend.asarray(indices, device=metadata.device)
+
+
+def cos_series_backend(coefficient):
     backend = infer_backend(coefficient)
     namespace = backend.namespace
     rootTwo = backend_constant(np.sqrt(2.0), coefficient)
     first = coefficient[..., :1]
     rest = coefficient[..., 1:] / rootTwo
-    zero = _backend_zeros(
+    zero = backend_zeros(
         coefficient, coefficient.shape[:-1] + (1,)
     )
     padded = namespace.concatenate(
@@ -49,26 +55,26 @@ def _cos_series_backend(coefficient):
     return backend.dct1(padded, axis=-1)
 
 
-def _sin_series_backend(coefficient):
+def sin_series_backend(coefficient):
     backend = infer_backend(coefficient)
     namespace = backend.namespace
     rootTwo = backend_constant(np.sqrt(2.0), coefficient)
     interior = backend.dst1(
         coefficient[..., 1:] / rootTwo, axis=-1
     )
-    zero = _backend_zeros(coefficient, coefficient.shape[:-1] + (1,))
+    zero = backend_zeros(coefficient, coefficient.shape[:-1] + (1,))
     return namespace.concatenate((zero, interior, zero), axis=-1)
 
 
-def _series_backend(coefficient, boundaryCondition, axis):
+def series_backend(coefficient, boundaryCondition, axis):
     moved = coefficient if axis == -1 else coefficient.swapaxes(axis, -1)
-    result = _sin_series_backend(moved) \
+    result = sin_series_backend(moved) \
         if boundaryCondition == BC.DIRICHLET \
-        else _cos_series_backend(moved)
+        else cos_series_backend(moved)
     return result if axis == -1 else result.swapaxes(axis, -1)
 
 
-def _as_axis_tuple(value, d):
+def as_axis_tuple(value, d):
     if np.isscalar(value):
         return (value,) * d
     t = tuple(value)
@@ -95,8 +101,8 @@ class DNAFourierComponentExpansion(LinearExpansion):
             self, bc: BoundaryCondition, q, alpha=1.0,
             spectralWeights=None):
         self._bc = bc
-        self._q = _as_axis_tuple(q, bc.d)
-        self._alpha = _as_axis_tuple(alpha, bc.d)
+        self._q = as_axis_tuple(q, bc.d)
+        self._alpha = as_axis_tuple(alpha, bc.d)
         if spectralWeights is None:
             spectralWeights = np.ones(self.dimension)
         elif not hasattr(spectralWeights, "shape"):
@@ -138,7 +144,7 @@ class DNAFourierComponentExpansion(LinearExpansion):
         )
 
     def _validate(self, coefficient):
-        coefficient = _validate_coefficient(coefficient)
+        coefficient = validate_coefficient(coefficient)
         if coefficient.shape[-1] != self.dimension:
             raise ValueError(
                 f"Expected coefficient of dimension {self.dimension}, "
@@ -156,15 +162,15 @@ class DNAFourierComponentExpansion(LinearExpansion):
         c = coefficient * backend_constant(self._weights, coefficient)
 
         if self._bc[0] == BC.NEUMANN:
-            return _cos_series_backend(c)
+            return cos_series_backend(c)
 
         # Dirichlet (sine) coefficients have size q, but sin_series expects
         # size q+1 with a[0]=0, so prepend the zero mode before synthesis.
-        padding = _backend_zeros(coefficient, coefficient.shape[:-1] + (1,))
+        padding = backend_zeros(coefficient, coefficient.shape[:-1] + (1,))
         paddedCoefficient = infer_backend(coefficient).namespace.concatenate(
             (padding, c), axis=-1
         )
-        return _sin_series_backend(paddedCoefficient)
+        return sin_series_backend(paddedCoefficient)
 
     def _evaluate_interior_2d(self, coefficient) -> np.ndarray:
         nX = (self._q[0] + 1) if self._bc[0] == BC.NEUMANN else self._q[0]
@@ -176,20 +182,20 @@ class DNAFourierComponentExpansion(LinearExpansion):
         spectral = c.reshape(coefficient.shape[:-1] + (nX, nY))
 
         if self._bc[1] == BC.DIRICHLET:
-            zeroColumn = _backend_zeros(
+            zeroColumn = backend_zeros(
                 coefficient, spectral.shape[:-1] + (1,)
             )
             spectral = namespace.concatenate(
                 (zeroColumn, spectral), axis=-1
             )
         if self._bc[0] == BC.DIRICHLET:
-            zeroRow = _backend_zeros(
+            zeroRow = backend_zeros(
                 coefficient, spectral.shape[:-2] + (1, spectral.shape[-1])
             )
             spectral = namespace.concatenate((zeroRow, spectral), axis=-2)
 
-        result = _series_backend(spectral, self._bc[1], axis=-1)
-        return _series_backend(result, self._bc[0], axis=-2)
+        result = series_backend(spectral, self._bc[1], axis=-1)
+        return series_backend(result, self._bc[0], axis=-2)
 
     def evaluate_native(self, coefficient) -> np.ndarray:
         """Evaluate explicit component coefficients on the native grid."""
@@ -202,7 +208,7 @@ class DNAFourierComponentExpansion(LinearExpansion):
         return interior.reshape(coefficient.shape[:-1] + (-1,))
 
     def _bind(self, grid: Grid) -> BoundLinearExpansion:
-        return _DNAEvaluation(self, grid)
+        return DNAEvaluation(self, grid)
 
 # ---- Full DNA field ----
 
@@ -215,9 +221,9 @@ class DNAFourierExpansion(LinearExpansion):
     """
 
     def __init__(self, q, d: int, alpha=1.0, spectralWeights=None):
-        self._q = _as_axis_tuple(q, d)
+        self._q = as_axis_tuple(q, d)
         self._d = d
-        self._alpha = _as_axis_tuple(alpha, d)
+        self._alpha = as_axis_tuple(alpha, d)
         bcs = BoundaryCondition.all_combinations(d)
         dimensions = [bc.block_size(self._q) for bc in bcs]
         totalDimension = sum(dimensions)
@@ -272,7 +278,7 @@ class DNAFourierExpansion(LinearExpansion):
         )
 
     def _validate(self, coefficient):
-        coefficient = _validate_coefficient(coefficient)
+        coefficient = validate_coefficient(coefficient)
         if coefficient.shape[-1] != self.dimension:
             raise ValueError(
                 f"Expected coefficient of dimension {self.dimension}, "
@@ -303,10 +309,10 @@ class DNAFourierExpansion(LinearExpansion):
         )
 
     def _bind(self, grid: Grid) -> BoundLinearExpansion:
-        return _DNAEvaluation(self, grid)
+        return DNAEvaluation(self, grid)
 
 
-class _DNAEvaluation(BoundLinearExpansion):
+class DNAEvaluation(BoundLinearExpansion):
 
     def __init__(self, expansion, grid):
         self._expansion = expansion
@@ -316,15 +322,23 @@ class _DNAEvaluation(BoundLinearExpansion):
             else np.asarray(grid)
         if expansion.spatialDimension == 1:
             axis = np.linspace(0., alpha[0], q[0] + 2)
-            self._interpolation = linear_interpolation_matrix(
+            self._native = np.array_equal(points.ravel(), axis)
+            interpolation = linear_interpolation_matrix(
                 points.ravel(), axis
-            ).toarray()
+            )
         else:
             axis0 = np.linspace(0., alpha[0], q[0] + 2)
             axis1 = np.linspace(0., alpha[1], q[1] + 2)
-            self._interpolation = bilinear_interpolation_matrix(
+            self._native = np.array_equal(
+                points, expansion.nativeGrid.to_array()
+            )
+            interpolation = bilinear_interpolation_matrix(
                 points, axis0, axis1
-            ).toarray()
+            )
+        if not self._native:
+            neighbours = 2 if expansion.spatialDimension == 1 else 4
+            self._indices = interpolation.indices.reshape(-1, neighbours)
+            self._weights = interpolation.data.reshape(-1, neighbours)
 
     @property
     def dimension(self):
@@ -332,17 +346,23 @@ class _DNAEvaluation(BoundLinearExpansion):
 
     def evaluate(self, coefficient):
         native = self._expansion.evaluate_native(coefficient)
-        interpolation = backend_constant(self._interpolation, coefficient)
-        return native @ interpolation.T
+        if self._native:
+            return native
+        indices = backend_indices(self._indices, coefficient)
+        weights = backend_constant(self._weights, coefficient)
+        values = native[..., indices]
+        return infer_backend(coefficient).namespace.sum(
+            values * weights, axis=-1
+        )
 
 
-class _DNAGPSpecification:
+class DNAGPSpecification:
     """Construction and prediction rules for a DNA GP parametrisation."""
 
     def __init__(self, q, d: int, alpha=1.0):
-        self._q = _as_axis_tuple(q, d)
+        self._q = as_axis_tuple(q, d)
         self._d = d
-        self._alpha = _as_axis_tuple(alpha, d)
+        self._alpha = as_axis_tuple(alpha, d)
 
     @property
     def spatialDimension(self) -> int:
@@ -438,21 +458,3 @@ class _DNAGPSpecification:
         kStarArr = kStar.to_dense() if isinstance(kStar, DenseCovarianceMatrix) else np.asarray(kStar)
 
         return kStarArr @ cho_solve((L, True), uObs)
-
-    def create_predictor(
-            self, gpState, queryGrid: Grid,
-            coefficient: np.ndarray, observationGrid=None) -> Predictor:
-        frozenCoefficient = np.array(coefficient, dtype=float, copy=True)
-        mean = gpState.expansion.evaluate(frozenCoefficient, queryGrid)
-        return DNAGPPredictor(mean)
-
-
-class DNAGPPredictor(Predictor):
-    """Immutable out-of-sample mean snapshot for the DNA parametrisation."""
-
-    def __init__(self, mean: np.ndarray):
-        self._mean = np.array(mean, dtype=float, copy=True)
-
-    def mean(self) -> np.ndarray:
-        """Return an independent copy of the snapshotted mean."""
-        return self._mean.copy()

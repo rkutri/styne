@@ -7,7 +7,6 @@ _SYMBOL_TO_MODULE = {
     "CovarianceFunctionInterface": "styne.statistics.interface",
     "CovarianceOperatorInterface": "styne.statistics.interface",
     "BayesianModelInterface": "styne.statistics.interface",
-    "Predictor": "styne.statistics.interface",
     "ProbabilityMeasure": "styne.statistics.measure",
     "AbsolutelyContinuousProbabilityMeasure": "styne.statistics.measure",
     "ConditionalMeasure": "styne.statistics.measure",
