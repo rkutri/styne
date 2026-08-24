@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
 
-from styne.model import DifferentiableModel
+from styne.model import DifferentiableForwardMap
 from styne.model.linear import LinearForwardMap
 from styne.parameter.vector import Vector
 from styne.statistics.data import Data
@@ -22,7 +22,7 @@ def test_linear_forward_map_prepare_evaluate():
         rtol=0.0, atol=1e-12,
     )
 
-    assert isinstance(model, DifferentiableModel)
+    assert isinstance(model, DifferentiableForwardMap)
     cotangent = np.array([0.5, -1.0, 2.0])
     np.testing.assert_allclose(
         model.adjoint_derivative(parameter, cotangent),

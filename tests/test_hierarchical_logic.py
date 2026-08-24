@@ -4,7 +4,7 @@ from styne.gp.gaussianprocess import GaussianProcess
 from styne.model.sglmm import SGLMM
 from styne.statistics.stationary import MaternCovariance1D
 from styne.statistics.response import PoissonResponse
-from styne.statistics.likelihood import SGLMMLikelihood
+from styne.statistics.likelihood import RegressionLikelihood
 from styne.statistics.data import Data
 from styne.statistics.hierarchical import SGLMMHyperConditional
 from styne.parameter.vector import Vector
@@ -28,7 +28,7 @@ class TestHierarchicalLogic(unittest.TestCase):
         response = PoissonResponse()
         data = Data(1, sites.to_array())
         data.measurement = np.ones((100, 1))
-        likelihood = SGLMMLikelihood(data, predictor, response)
+        likelihood = RegressionLikelihood(data, predictor, response)
         
         from styne.statistics.pc import JointMaternPCPrior
         pcPrior = JointMaternPCPrior(0.5, 0.05, 3.0, 0.05)
@@ -70,7 +70,7 @@ class TestHierarchicalLogic(unittest.TestCase):
         response = PoissonResponse()
         data = Data(1, sites.to_array())
         data.measurement = np.ones((100, 1))
-        likelihood = SGLMMLikelihood(data, predictor, response)
+        likelihood = RegressionLikelihood(data, predictor, response)
         
         from styne.statistics.pc import JointMaternPCPrior
         pcPrior = JointMaternPCPrior(0.5, 0.05, 3.0, 0.05)

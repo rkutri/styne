@@ -22,7 +22,7 @@ except PackageNotFoundError:
 
 _SYMBOL_TO_MODULE = {
     "ForwardMap": "styne.model.forwardmap",
-    "DifferentiableModel": "styne.model.forwardmap",
+    "DifferentiableForwardMap": "styne.model.forwardmap",
     "Parameter": "styne.parameter.parameter",
     "MetropolisHastings": "styne.mcmc.metropolishastings",
 }

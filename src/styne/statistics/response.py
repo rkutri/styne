@@ -51,15 +51,10 @@ class GaussianResponse(ResponseFamily):
         )
         return Gaussian(self._covariance, Vector(zero)).density.evaluate_log(residual)
 
-    # Compatibility helper; likelihood code should use automatic differentiation.
+    # Explicit score used by the NumPy likelihood-gradient path.
     def score(self, y, evaluation):
         residual = y.reshape((-1,)) - evaluation.reshape((-1,))
         return self._covariance.apply_inverse(residual)
-
-    @property
-    def density(self):
-        """Zero-mean Gaussian density retained for compatibility."""
-        return Gaussian(self._covariance).density
 
 
 class PoissonResponse(ResponseFamily):

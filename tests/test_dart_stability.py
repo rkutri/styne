@@ -17,8 +17,7 @@ def setup_mcmc_factory(factory_class, dim, gamma=None, tempering=1.0):
     
     # 1. Prior
     priorCov = IIDCovarianceMatrix(dim, 1.0)
-    prior = Gaussian(priorCov)
-    prior.mean = Vector(np.zeros(dim))
+    prior = Gaussian(priorCov, Vector(np.zeros(dim)))
     
     # 2. Likelihood (Fine)
     data = Data(1, np.zeros((1, dim)))

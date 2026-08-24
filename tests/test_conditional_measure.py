@@ -26,7 +26,7 @@ class ConditionalGaussian(ConditionalMeasure):
         return self._gaussian.density
 
     def condition_on(self, state):
-        self._gaussian.mean = state.block(0)
+        self._gaussian = self._gaussian.with_mean(state.block(0))
 
     def draw(self, rng):
         return self._gaussian.draw(rng)

@@ -60,11 +60,6 @@ class GaussianDensity(DensityInterface):
     def with_mean(self, mean: Parameter):
         return type(self)(self._cov, mean)
 
-    @mean.setter
-    def mean(self, mean: Parameter):
-        # Compatibility for pre-0.3 callers; new code should use with_mean.
-        self._mean = mean
-
     @property
     def domainType(self):
         self._require_mean()
@@ -82,12 +77,6 @@ class GaussianDensity(DensityInterface):
     def with_covariance(self, covariance: CovarianceMatrix):
         self._validate_covariance(covariance)
         return type(self)(covariance, self._mean)
-
-    @covariance.setter
-    def covariance(self, covariance: CovarianceMatrix):
-        # Compatibility for pre-0.3 callers; new code should use with_covariance.
-        self._validate_covariance(covariance)
-        self._cov = covariance
 
     def evaluate_log(
             self, parameter: Parameter, normalised=False
@@ -120,7 +109,7 @@ class GaussianDensity(DensityInterface):
 
         return logDens
 
-    # Retained concrete legacy derivative API.
+    # Explicit derivative API for NumPy gradient-based methods.
     def evaluate_log_gradient(self, parameter: Parameter) -> ndarray:
         """
         Gradient of the log-density with respect to the parameter.
@@ -135,7 +124,7 @@ class GaussianDensity(DensityInterface):
         v = parameter.coordinate - self._mean.coordinate
         return -self._cov.apply_inverse(v)
 
-    # Retained concrete legacy derivative API.
+    # Explicit derivative API for NumPy gradient-based methods.
     def evaluate_log_hessian(self, parameter: Parameter) -> ndarray:
         """
         Hessian of the log-density with respect to the parameter.
@@ -174,20 +163,12 @@ class Gaussian(AbsolutelyContinuousProbabilityMeasure):
     def with_mean(self, mean: Parameter):
         return type(self)(self.covariance, mean)
 
-    @mean.setter
-    def mean(self, mean: Parameter):
-        self._density.mean = mean
-
     @property
     def covariance(self) -> CovarianceMatrix:
         return self._density.covariance
 
     def with_covariance(self, covariance: CovarianceMatrix):
         return type(self)(covariance, self._density._mean)
-
-    @covariance.setter
-    def covariance(self, covariance: CovarianceMatrix):
-        self._density.covariance = covariance
 
     @property
     def density(self) -> DensityInterface:

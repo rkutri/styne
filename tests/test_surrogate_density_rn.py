@@ -9,8 +9,7 @@ from styne.mcmc.localised import LocalisedSurrogateDensity
 
 def make_rn_surrogate(priorVar, likVar, dim):
     priorCov = IIDCovarianceMatrix(dim, priorVar)
-    prior = Gaussian(priorCov)
-    prior.mean = Vector(np.zeros(dim))
+    prior = Gaussian(priorCov, Vector(np.zeros(dim)))
     likCov = IIDCovarianceMatrix(dim, likVar)
     likelihood = GaussianDensity(likCov, Vector(np.zeros(dim)))
     return RadonNikodym(prior, likelihood)

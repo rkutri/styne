@@ -140,8 +140,7 @@ def test_surrogate_decomposition():
     from styne.statistics.gaussian import Gaussian
     baseCov = IIDCovarianceMatrix(dim, 1.0)
     baseMean = Vector(np.zeros(dim))
-    baseMeasure = Gaussian(baseCov)
-    baseMeasure.mean = baseMean
+    baseMeasure = Gaussian(baseCov, baseMean)
     
     from styne.statistics.interface import DensityInterface
     class DummyDerivative(DensityInterface):

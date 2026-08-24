@@ -123,10 +123,8 @@ def build_dart(
 def make_target(separation, modeVar):
     modeCov = IIDCovarianceMatrix(DIM, modeVar)
 
-    gauss1 = GaussianDensity(modeCov)
-    gauss2 = GaussianDensity(modeCov)
-    gauss1.mean = Scalar(-0.5 * separation)
-    gauss2.mean = Scalar(0.5 * separation)
+    gauss1 = GaussianDensity(modeCov, Scalar(-0.5 * separation))
+    gauss2 = GaussianDensity(modeCov, Scalar(0.5 * separation))
 
     return GaussianMixtureDensity([gauss1, gauss2])
 

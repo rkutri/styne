@@ -2,7 +2,7 @@ import numpy as np
 import pytest
 
 from styne.gp.gaussianprocess import GaussianProcess
-from styne.model import DifferentiableModel
+from styne.model import DifferentiableForwardMap
 from styne.model.sglmm import SGLMM
 from styne.model.trend import ConstantTrend
 from styne.parameter.block import BlockParameter
@@ -61,7 +61,7 @@ def test_numpy_sglmm_value_matches_explicit_components(responseName):
 
     np.testing.assert_allclose(evaluation, expected)
     assert np.isfinite(likelihood.evaluate_log(parameter))
-    assert isinstance(model, DifferentiableModel)
+    assert isinstance(model, DifferentiableForwardMap)
     assert np.all(np.isfinite(
         likelihood.evaluate_log_gradient(parameter)
     ))

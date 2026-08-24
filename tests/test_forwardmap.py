@@ -29,7 +29,7 @@ def test_forward_map_public_exports():
         "enable_logging",
         "__version__",
         "ForwardMap",
-        "DifferentiableModel",
+        "DifferentiableForwardMap",
         "Parameter",
         "MetropolisHastings",
     ]

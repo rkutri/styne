@@ -24,7 +24,7 @@ Callers drive the forward map through a two-phase protocol:
 
 Gradient support (optional)
 ---------------------------
-Implementing the 'DifferentiableModel' protocol on your subclass unlocks
+Implementing the 'DifferentiableForwardMap' protocol on your subclass unlocks
 gradient-based MCMC (e.g. MALA). The library detects this at runtime via
 isinstance; no registration required.
 """
@@ -104,13 +104,13 @@ class ForwardMap(ABC):
 
 
 @runtime_checkable
-class DifferentiableModel(Protocol):
+class DifferentiableForwardMap(Protocol):
     """
     Protocol for models that expose Jacobian actions.
 
     Implement this on a 'ForwardMap' subclass to enable gradient-based MCMC
     (e.g. MALA). The library detects support at runtime via
-    'isinstance(model, DifferentiableModel)'; no registration needed.
+    'isinstance(model, DifferentiableForwardMap)'; no registration needed.
 
     Both methods receive their needed parameter state through their own
     arguments; they must not depend on a previous forward-map evaluation.

@@ -14,8 +14,9 @@ def make_rn_surrogate(
     priorVariance: float, likelihoodVariance: float, dimension: int
 ) -> RadonNikodym:
     priorCovariance = IIDCovarianceMatrix(dimension, priorVariance)
-    priorMeasure = Gaussian(priorCovariance)
-    priorMeasure.mean = Vector(np.zeros(dimension))
+    priorMeasure = Gaussian(
+        priorCovariance, Vector(np.zeros(dimension))
+    )
     likelihoodCovariance = IIDCovarianceMatrix(dimension, likelihoodVariance)
     likelihoodDensity = GaussianDensity(
         likelihoodCovariance, Vector(np.zeros(dimension))

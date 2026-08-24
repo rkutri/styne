@@ -23,7 +23,7 @@ from styne.gp.gaussianprocess import GaussianProcess
 from styne.statistics.bayes import UnnormalisedPosterior
 from styne.statistics.response import PoissonResponse
 from styne.statistics.data import Data
-from styne.statistics.likelihood import SGLMMLikelihood
+from styne.statistics.likelihood import RegressionLikelihood
 from styne.statistics.stationary import MaternCovariance1D
 from styne.model.sglmm import SGLMM
 from styne.model.trend import ConstantTrend
@@ -40,8 +40,8 @@ from styne.utility.postprocessing import (
 )
 from styne.statistics.welford import WelfordAccumulator
 from styne.gp.dnautility import DNACoarseFinePartition
-from styne.gp.direct import DirectGPEngine
-from styne.gp.dna import DNAFourierEngine
+from styne.gp.direct import DirectExpansion
+from styne.gp.dna import DNAFourierExpansion
 from styne.parameter.vector import Vector
 import re
 if hasMatplotlib:
@@ -148,7 +148,7 @@ def compute_observations(rng, trueRealisation, observationSites, trend):
     """Generate Poisson observations for a given trend."""
 
     latentAtObservations = (
-        trueRealisation.function.evaluate(observationSites) + trend.evaluate(observationSites)
+        trueRealisation.evaluate(observationSites) + trend.evaluate(observationSites)
     )
 
     measurements = PoissonResponse().simulate(latentAtObservations, rng=rng)
@@ -185,9 +185,9 @@ def get_sampler_name(mcmc):
 
 def get_parametrisation_name(gp):
 
-    if isinstance(gp.engine, DirectGPEngine):
+    if isinstance(gp.expansion, DirectExpansion):
         return "Cholesky"
-    elif isinstance(gp.engine, DNAFourierEngine):
+    elif isinstance(gp.expansion, DNAFourierExpansion):
         return "DNA"
 
     return "Unknown"
@@ -197,7 +197,7 @@ def get_parametrisation_name(gp):
 
 
 def run_mcmc_chain_online(
-    sampler, initialState, predictor, evaluationPredictor, iatIndices
+    sampler, initialState, predictor, evaluationGrid, iatIndices
 ):
     """Run MCMC without storing chain, track IAT traces and posterior mean online."""
 
@@ -215,10 +215,10 @@ def run_mcmc_chain_online(
         )
     ):
         if stepIndex >= nBurninSteps:
-            predictor.reset()
-            predictor.interpolate(state)
-            
-            fieldEvaluations = evaluationPredictor.mean()
+            preparedState = predictor.prepare(state)
+            fieldEvaluations = predictor.predict(
+                preparedState, evaluationGrid
+            )
             welford.update(fieldEvaluations)
             
             iatFieldEvaluations = fieldEvaluations[iatIndices]
@@ -286,7 +286,7 @@ def run_experiment(rng, trueRealisation, observationSites):
 
     fineGrid = UniformGrid(0.0, 1.0, nDoFTruth + 2)
     trueField = (
-        trueRealisation.function.evaluate(fineGrid) + trend.evaluate(fineGrid)
+        trueRealisation.evaluate(fineGrid) + trend.evaluate(fineGrid)
     )
 
     choleskyGaussianProcess = GaussianProcess.direct(
@@ -298,7 +298,7 @@ def run_experiment(rng, trueRealisation, observationSites):
     choleskyPredictor = SGLMM(choleskyGaussianProcess, observationSites, trend=trend)
     choleskyTarget = UnnormalisedPosterior(
         choleskyGaussianProcess.measure,
-        SGLMMLikelihood(data, choleskyPredictor, PoissonResponse())
+        RegressionLikelihood(data, choleskyPredictor, PoissonResponse())
     )
 
     dnaGaussianProcess = GaussianProcess.dna(
@@ -307,7 +307,7 @@ def run_experiment(rng, trueRealisation, observationSites):
     dnaPredictor = SGLMM(dnaGaussianProcess, observationSites, trend=trend)
     dnaTarget = UnnormalisedPosterior(
         dnaGaussianProcess.measure,
-        SGLMMLikelihood(data, dnaPredictor, PoissonResponse())
+        RegressionLikelihood(data, dnaPredictor, PoissonResponse())
     )
 
     coarseGaussianProcess = GaussianProcess.dna(
@@ -315,7 +315,7 @@ def run_experiment(rng, trueRealisation, observationSites):
     )
     coarseTarget = UnnormalisedPosterior(
         coarseGaussianProcess.measure,
-        SGLMMLikelihood(
+        RegressionLikelihood(
             data, SGLMM(
                 coarseGaussianProcess, observationSites, trend=trend
             ),
@@ -333,9 +333,6 @@ def run_experiment(rng, trueRealisation, observationSites):
     xValues = np.linspace(0.0, 1.0, nIatLocations)
     iatIndices = [int(np.argmin(np.abs(gridArray - x))) for x in xValues]
     
-    choleskyEvaluationPredictor = choleskyPredictor.create_predictor(evaluationGrid)
-    dnaEvaluationPredictor = dnaPredictor.create_predictor(evaluationGrid)
-
     results = {}
 
     print("  [Cholesky + MALA]")
@@ -366,7 +363,7 @@ def run_experiment(rng, trueRealisation, observationSites):
             mcmc,
             choleskyGaussianProcess.measure.mean.clone(),
             choleskyPredictor,
-            choleskyEvaluationPredictor,
+            evaluationGrid,
             iatIndices,
         )
 
@@ -408,7 +405,7 @@ def run_experiment(rng, trueRealisation, observationSites):
             mcmc,
             dnaGaussianProcess.measure.mean.clone(),
             dnaPredictor,
-            dnaEvaluationPredictor,
+            evaluationGrid,
             iatIndices,
         )
 
@@ -460,7 +457,7 @@ def run_experiment(rng, trueRealisation, observationSites):
             mcmc,
             dnaGaussianProcess.measure.mean.clone(),
             dnaPredictor,
-            dnaEvaluationPredictor,
+            evaluationGrid,
             iatIndices,
         )
 
@@ -514,7 +511,7 @@ def run_experiment(rng, trueRealisation, observationSites):
             mcmc,
             dnaGaussianProcess.measure.mean.clone(),
             dnaPredictor,
-            dnaEvaluationPredictor,
+            evaluationGrid,
             iatIndices,
         )
         tracesList.append(iatTraces)

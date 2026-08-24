@@ -1,6 +1,6 @@
 from numpy import ndarray
 
-from styne.model.forwardmap import ForwardMap, DifferentiableModel
+from styne.model.forwardmap import ForwardMap, DifferentiableForwardMap
 from styne.parameter.parameter import Parameter
 from styne.statistics.interface import LikelihoodInterface
 from styne.statistics.data import Data
@@ -40,8 +40,8 @@ class RegressionLikelihood(LikelihoodInterface):
         return self._response.log_likelihood(self._data.measurement, evaluation)
 
     def evaluate_log_gradient(self, parameter: Parameter) -> ndarray:
-        """Legacy explicit gradient; differentiate ``evaluate_log`` instead."""
-        if not isinstance(self._forwardMap, DifferentiableModel):
+        """Evaluate the explicit NumPy gradient through the forward map."""
+        if not isinstance(self._forwardMap, DifferentiableForwardMap):
             raise RuntimeError(
                 f"{type(self._forwardMap).__name__} does not provide an adjoint."
             )
@@ -49,10 +49,3 @@ class RegressionLikelihood(LikelihoodInterface):
         return self._forwardMap.adjoint_derivative(
             parameter, self._response.score(self._data.measurement, evaluation)
         )
-
-
-class SGLMMLikelihood(RegressionLikelihood):
-    """Compatibility name for the unified :class:`RegressionLikelihood`."""
-
-    def __init__(self, data: Data, predictor: ForwardMap, response: ResponseFamily):
-        super().__init__(data, predictor, response)

@@ -324,20 +324,6 @@ class MaternCovariance1D(StationaryCovariance):
         }
 
 
-class Matern32Covariance1D(MaternCovariance1D):
-
-    def __init__(self, lengthScale, marginalVariance):
-        super().__init__(lengthScale, 1.5, marginalVariance)
-
-    def spde_parameters(self) -> tuple:
-        kappa = np.sqrt(3.) / self._lengthScale
-        tau = np.sqrt(
-            gamma(1.5) / (gamma(2.) * np.sqrt(4. * np.pi)
-                          * kappa**3 * self._marginalVariance)
-        )
-        return kappa, tau
-
-
 class MaternCovariance2D(StationaryCovariance):
     r"""
     Matern covariance in 2D, arbitrary smoothness $\nu$. Closed-form fast
@@ -378,16 +364,3 @@ class MaternCovariance2D(StationaryCovariance):
             'log_rho': rhoGrad.reshape(distances.shape),
             'log_sigma': sigmaGrad.reshape(distances.shape)
         }
-
-
-class Matern1Covariance2D(MaternCovariance2D):
-
-    def __init__(self, lengthScale, marginalVariance):
-        super().__init__(lengthScale, 1.0, marginalVariance)
-
-    def spde_parameters(self) -> tuple:
-        kappa = np.sqrt(2.) / self._lengthScale
-        tau = np.sqrt(
-            gamma(1.) / (gamma(2.) * 4. * np.pi * kappa**2 * self._marginalVariance)
-        )
-        return kappa, tau

@@ -24,7 +24,6 @@ from styne.statistics import (
     MaternCovariance2D,
     PoissonResponse,
     RegressionLikelihood,
-    SGLMMLikelihood,
     UnnormalisedPosterior,
 )
 from styne.utility import Grid, UniformGrid
@@ -258,7 +257,7 @@ def test_reduced_sglmm_example_output():
     parameter = Vector(np.linspace(-0.3, 0.5, gp.parameterDimension))
     data = Data(1, sites.to_array())
     data.measurement = np.array([[1.0], [0.0], [3.0]])
-    likelihood = SGLMMLikelihood(data, model, PoissonResponse())
+    likelihood = RegressionLikelihood(data, model, PoissonResponse())
 
     assert np.isclose(likelihood.evaluate_log(parameter), -3.1271698680170905)
     np.testing.assert_allclose(

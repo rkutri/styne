@@ -16,10 +16,6 @@ class Poisson(ProbabilityMeasure):
     def rate(self):
         return self._rate
 
-    @rate.setter
-    def rate(self, rate):
-        self._rate = rate
-
     @property
     def mean(self):
         return self._rate

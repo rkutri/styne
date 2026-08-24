@@ -137,7 +137,7 @@ def test_run_zero_steps():
 def test_metropolis_within_gibbs():
     from styne.model.trend import ConstantTrend
     from styne.model.sglmm import SGLMM
-    from styne.statistics.likelihood import SGLMMLikelihood
+    from styne.statistics.likelihood import RegressionLikelihood
     from styne.statistics.response import PoissonResponse
     from styne.statistics.data import Data
     from styne.gp.gaussianprocess import GaussianProcess
@@ -162,7 +162,7 @@ def test_metropolis_within_gibbs():
     gp = GaussianProcess.dna(covFcn, q=20, d=1)
     predictor = SGLMM(gp, sites, trend=ConstantTrend(0.0))
 
-    likelihood = SGLMMLikelihood(data, predictor, PoissonResponse())
+    likelihood = RegressionLikelihood(data, predictor, PoissonResponse())
     
     latentTarget = RadonNikodym(gp.measure, likelihood)
     rng = default_rng(42)
@@ -196,7 +196,7 @@ def test_metropolis_within_gibbs_does_not_mutate_template_sampler():
     """Each conditioned inner sampler is isolated from the template."""
     from styne.model.trend import ConstantTrend
     from styne.model.sglmm import SGLMM
-    from styne.statistics.likelihood import SGLMMLikelihood
+    from styne.statistics.likelihood import RegressionLikelihood
     from styne.statistics.response import PoissonResponse
     from styne.statistics.data import Data
     from styne.gp.gaussianprocess import GaussianProcess
@@ -216,7 +216,7 @@ def test_metropolis_within_gibbs_does_not_mutate_template_sampler():
     covFcn = MaternCovariance1D(0.2, 1.5, 1.0)
     gp = GaussianProcess.dna(covFcn, q=20, d=1)
     predictor = SGLMM(gp, sites, trend=ConstantTrend(0.0))
-    likelihood = SGLMMLikelihood(data, predictor, PoissonResponse())
+    likelihood = RegressionLikelihood(data, predictor, PoissonResponse())
     latentTarget = RadonNikodym(gp.measure, likelihood)
     rng = default_rng(43)
     latentInit = gp.measure.generate_realisation(rng=rng)

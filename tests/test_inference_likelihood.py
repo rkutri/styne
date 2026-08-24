@@ -11,7 +11,7 @@ from styne.statistics.response import GaussianResponse
 
 
 class DifferentiableMock(ForwardMap):
-    """Identity model that satisfies DifferentiableModel."""
+    """Identity model that satisfies DifferentiableForwardMap."""
 
     def __init__(self, dim=2):
         super().__init__()

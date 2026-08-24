@@ -37,7 +37,7 @@ from styne.statistics.data import Data
 from styne.statistics.hierarchical import (
     SGLMMHyperConditionalDensity, SGLMMLatentConditional
 )
-from styne.statistics.likelihood import SGLMMLikelihood
+from styne.statistics.likelihood import RegressionLikelihood
 from styne.statistics.pc import JointMaternPCPrior
 from styne.statistics.radonnikodym import RadonNikodym
 from styne.statistics.response import PoissonResponse
@@ -235,7 +235,7 @@ def run_demonstration(smoothness, seedIndex, coarseResolution, coordinates,
             q=fineResolution, d=2)
 
         predictor = SGLMM(gp, sites, trend=ConstantTrend(config.trendOffset))
-        likelihood = SGLMMLikelihood(data, predictor, PoissonResponse())
+        likelihood = RegressionLikelihood(data, predictor, PoissonResponse())
 
         latentTarget = RadonNikodym(gp.measure, likelihood)
         pcPrior = JointMaternPCPrior(
@@ -247,7 +247,7 @@ def run_demonstration(smoothness, seedIndex, coarseResolution, coordinates,
             coarseGP, sites, trend=ConstantTrend(config.trendOffset))
         coarseSurrogate = RadonNikodym(
             coarseGP.measure,
-            SGLMMLikelihood(data, coarsePredictor, PoissonResponse()))
+            RegressionLikelihood(data, coarsePredictor, PoissonResponse()))
 
         partition = DNACoarseFinePartition(gp, coarseResolution, d=2)
         finePrior = partition.fine_measure()
@@ -265,7 +265,7 @@ def run_demonstration(smoothness, seedIndex, coarseResolution, coordinates,
         factory.tempering = [theta]
         factory.nChain = [config.nSubchain]
         factory.crankUpSteps = config.surrogateCrankUp
-        factory.spectralWeights = coarseGP.engine.spectralWeights
+        factory.spectralWeights = coarseGP.expansion.spectralWeights
         factory.crankUpInitialState = latentInit
         factory.subDiagnostics = PersistentAcceptanceRateDiagnostics
 
@@ -308,8 +308,9 @@ def run_demonstration(smoothness, seedIndex, coarseResolution, coordinates,
         sampler.storeChain = False
 
         resolution = config.predictionResolution
-        fidelityPredictor = predictor.create_predictor(
-            UniformGrid((0., 1., resolution), (0., 1., resolution)))
+        predictionGrid = UniformGrid(
+            (0., 1., resolution), (0., 1., resolution)
+        )
 
         thinningStep = max(
             1, (config.nSteps - config.nBurnIn) // TARGET_BAND_SAMPLES)
@@ -325,9 +326,10 @@ def run_demonstration(smoothness, seedIndex, coarseResolution, coordinates,
             if step >= config.nBurnIn and (
                     step - config.nBurnIn) % thinningStep == 0:
 
-                predictor.reset()
-                predictor.interpolate(state.block(0))
-                fieldSamples.append(np.asarray(fidelityPredictor.mean()))
+                preparedState = predictor.prepare(state.block(0))
+                fieldSamples.append(np.asarray(
+                    predictor.predict(preparedState, predictionGrid)
+                ))
 
         latentAcceptance = latentMCMC.diagnostics.global_acceptance_rate()
         hyperAcceptance = (

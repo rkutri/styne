@@ -28,7 +28,6 @@ _SYMBOL_TO_MODULE = {
     "PoissonResponse": "styne.statistics.response",
     "BinomialResponse": "styne.statistics.response",
     "RegressionLikelihood": "styne.statistics.likelihood",
-    "SGLMMLikelihood": "styne.statistics.likelihood",
     "MetropolisWithinGibbsConditional": "styne.statistics.conditional",
     "UnnormalisedPosterior": "styne.statistics.bayes",
     "HierarchicalBayes": "styne.statistics.bayes",

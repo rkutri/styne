@@ -53,7 +53,9 @@ class CorrelatedGaussianConditional(ConditionalMeasure):
 
     def condition_on(self, state) -> None:
         otherVal = state.block(self._otherIdx).coordinate[0]
-        self._gaussian.mean = Vector(np.array([self._rho * otherVal]))
+        self._gaussian = self._gaussian.with_mean(
+            Vector(np.array([self._rho * otherVal]))
+        )
 
     def draw(self, rng):
         return self._gaussian.draw(rng)

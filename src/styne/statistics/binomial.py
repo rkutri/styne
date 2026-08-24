@@ -17,10 +17,6 @@ class Binomial(ProbabilityMeasure):
     def prob(self):
         return self._prob
 
-    @prob.setter
-    def prob(self, prob):
-        self._prob = prob
-
     def sample(self, randomState):
         if self._prob is None:
             raise RuntimeError("Binomial probability not set.")

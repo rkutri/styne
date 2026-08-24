@@ -74,10 +74,6 @@ class GaussianProcess:
     def dna(cls, covFcn:CovarianceFunctionInterface, q: int | tuple, d: int, alpha: float | tuple = 1.0) -> GaussianProcess:
         return cls(covFcn, DNAGPSpecification(q, d, alpha))
 
-    @classmethod
-    def spde(cls, _) -> GaussianProcess:
-        raise NotImplementedError("SPDE parametrisation migration deferred.")
-
     # ---- Properties and setters ----
 
     @property

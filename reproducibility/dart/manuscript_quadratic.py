@@ -17,6 +17,7 @@ number kappa = L / alpha are the same at every dimension.
 
 import numpy as np
 from scipy.special import expit
+from scipy.optimize import approx_fprime, minimize
 from pathlib import Path
 
 from manuscript_boilerplate import (
@@ -31,7 +32,6 @@ from styne.statistics.covariance import DenseCovarianceMatrix, IIDCovarianceMatr
 from styne.statistics.likelihood import RegressionLikelihood
 from styne.statistics.radonnikodym import RadonNikodym
 from styne.model.linear import LinearForwardMap
-from styne.utility.map import determine_map
 
 from styne.mcmc.method.mala import MALAFactory
 from styne.mcmc.method.mrw import MRWFactory
@@ -44,6 +44,34 @@ from styne.utility.tuning import (
 from styne.utility.postprocessing import multichain_ess_per_iter
 # pyrefly: ignore [missing-import]
 from manuscript_style import METHOD_COLORS
+
+
+def determine_map(density, initialGuess, method="L-BFGS-B"):
+    """Return the MAP state and local precision for this experiment."""
+    if not callable(getattr(density, "evaluate_log_gradient", None)):
+        raise TypeError("density must expose evaluate_log_gradient")
+
+    def objective(coordinate):
+        return -density.evaluate_log(initialGuess.with_coordinate(coordinate))
+
+    def gradient(coordinate):
+        return -density.evaluate_log_gradient(
+            initialGuess.with_coordinate(coordinate)
+        )
+
+    result = minimize(
+        objective, initialGuess.coordinate, jac=gradient, method=method
+    )
+    if not result.success:
+        raise RuntimeError(f"MAP optimisation failed: {result.message}")
+
+    mapState = initialGuess.with_coordinate(result.x)
+    if callable(getattr(density, "evaluate_log_hessian", None)):
+        precision = -density.evaluate_log_hessian(mapState)
+    else:
+        precision = approx_fprime(result.x, gradient, epsilon=1e-8)
+        precision = 0.5 * (precision + precision.T)
+    return mapState, precision
 
 randomSeed = 2026
 nObservations = 240

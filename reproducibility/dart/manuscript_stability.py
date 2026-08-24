@@ -137,11 +137,8 @@ def run_cell(d, gammaValue, childSeed):
     mean1 = a * np.ones(d)
     mean2 = -a * np.ones(d)
 
-    g1 = GaussianDensity(surrogateCovariance)
-    g1.mean = Vector(mean1)
-
-    g2 = GaussianDensity(surrogateCovariance)
-    g2.mean = Vector(mean2)
+    g1 = GaussianDensity(surrogateCovariance, Vector(mean1))
+    g2 = GaussianDensity(surrogateCovariance, Vector(mean2))
 
     surrogateDensity = GaussianMixtureDensity([g1, g2], weights=mixWeights)
 

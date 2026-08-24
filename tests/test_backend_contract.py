@@ -140,6 +140,30 @@ def test_gaussian_measure_shared_backend_contract(backend):
         assert nextState is randomState
 
 
+def test_gaussian_updates_are_functional(backend):
+    mean = Vector(backend.zeros(2, dtype="float32"))
+    covariance = IIDCovarianceMatrix(
+        2, backend.asarray(1.5, dtype="float32")
+    )
+    measure = Gaussian(covariance, mean)
+    replacementMean = Vector(backend.ones(2, dtype="float32"))
+    replacementCovariance = IIDCovarianceMatrix(
+        2, backend.asarray(0.5, dtype="float32")
+    )
+
+    withMean = measure.with_mean(replacementMean)
+    withCovariance = measure.with_covariance(replacementCovariance)
+
+    assert measure.mean is mean
+    assert measure.covariance is covariance
+    assert withMean.mean is replacementMean
+    assert withCovariance.covariance is replacementCovariance
+    with pytest.raises(AttributeError):
+        measure.mean = replacementMean
+    with pytest.raises(AttributeError):
+        measure.covariance = replacementCovariance
+
+
 def test_pytorch_gaussian_density_has_first_and_second_derivatives():
     torch = pytest.importorskip("torch")
     backend = get_backend("pytorch")
