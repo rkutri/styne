@@ -41,6 +41,18 @@ class Function(Parameter):
         """Evaluate this parameter's coefficients on ``grid``."""
         return self._expansion.evaluate(self._coordinate, grid)
 
+    def directional_derivative(self, direction, grid):
+        """Apply the expansion derivative at this function's coordinate."""
+        return self._expansion.bind(grid).directional_derivative(
+            self._coordinate, direction
+        )
+
+    def adjoint_derivative(self, cotangent, grid):
+        """Apply the adjoint expansion derivative at this coordinate."""
+        return self._expansion.bind(grid).adjoint_derivative(
+            self._coordinate, cotangent
+        )
+
     def clone(self) -> Function:
         """Return an equivalent parameter sharing the static expansion."""
         backend = self.backend

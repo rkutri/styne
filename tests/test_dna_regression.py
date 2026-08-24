@@ -1,8 +1,7 @@
 import os
 import numpy as np
-import pytest
 
-from styne.gp.dna import DNAFourierEngine
+from styne.gp.gaussianprocess import GaussianProcess
 from styne.statistics.stationary import matern_fourier
 
 
@@ -25,16 +24,15 @@ ELL = 0.2
 
 def _outputs():
     """Deterministic outputs for a fixed square configuration. No RNG."""
-    eng = DNAFourierEngine(Q, D, ALPHA)
     cov = StubFourierCov(ELL)
-    eng.build_covariance(cov)                      # sets eng.spectralWeights
-    weights = np.asarray(eng.spectralWeights)
+    gp = GaussianProcess.dna(cov, Q, D, ALPHA)
+    weights = np.asarray(gp.expansion.spectralWeights)
 
-    expansion = eng.build_expansion()
+    expansion = gp.expansion
     coeff = np.linspace(-1.0, 1.0, weights.size)   # fixed, not random
     native = expansion.evaluate_native(coeff)
 
-    mult = eng.compute_log_length_multiplier(nu=1.5, lengthScale=ELL)
+    mult = gp.compute_log_length_multiplier(1.5, ELL)
     return {"weights": weights, "native": np.asarray(native), "mult": np.asarray(mult)}
 
 

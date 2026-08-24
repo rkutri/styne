@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
 
-from styne.gp.dna import DNAFourierEngine
+from styne.gp.gaussianprocess import GaussianProcess
 from styne.utility.grid import UniformGrid
 from styne.statistics.stationary import matern_fourier
 
@@ -26,21 +26,21 @@ class StubFourierCov:
 ])
 def test_jacobian_adjoint_rectangular(q, alpha):
     d = 2
-    eng = DNAFourierEngine(q, d, alpha)
-    eng.build_covariance(StubFourierCov(0.2))
+    gp = GaussianProcess.dna(StubFourierCov(0.2), q, d, alpha)
 
     sites = UniformGrid((0.13, 0.87, 5), (0.11, 0.83, 7))
-    eng.set_sites(sites)
+    evaluation = gp.bind(sites)
 
-    n_spec = np.asarray(eng.spectralWeights).size
+    n_spec = gp.parameterDimension
     n_obs = sites.to_array().shape[0]
 
     rng = np.random.default_rng(0)
     v = rng.standard_normal(n_spec)
     w = rng.standard_normal(n_obs)
 
-    Jv = eng.apply_jacobian(v, None)
-    JTw = eng.apply_adjoint_jacobian(w, None)
+    coefficient = np.zeros(n_spec)
+    Jv = evaluation.directional_derivative(coefficient, v)
+    JTw = evaluation.adjoint_derivative(coefficient, w)
 
     lhs = float(np.dot(np.ravel(Jv), w))
     rhs = float(np.dot(v, np.ravel(JTw)))

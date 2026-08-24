@@ -63,15 +63,14 @@ class EllipticForwardMap(styne.ForwardMap):
         self._gp = gp
         self._vertices = feMesh.axis
 
-        # anchor the GP at the element midpoints, once. Repeatedly mutating
-        # gp.sites is expensive, see the GaussianProcess.sites docstring.
+        # Evaluate the GP at the element midpoints used by the FE operator.
         h = self._vertices[1] - self._vertices[0]
         midpoints = UniformGrid(
             self._vertices[0] + 0.5 * h,
             self._vertices[-1] - 0.5 * h,
             len(feMesh) - 1,
         )
-        self._gp.sites = midpoints
+        self._gpGrid = midpoints
 
         # interpolation matrix from the FE solution to the observation sites
         self._obsInterp = linear_interpolation_matrix(obsSites, self._vertices)
@@ -104,7 +103,9 @@ class EllipticForwardMap(styne.ForwardMap):
         Set parameter as new state of the forward map and perform the
         parameter-dependent precomputation.
         """
-        diffusion = np.exp(self._gp.at_sites(parameter.coordinate))
+        diffusion = np.exp(
+            self._gp.evaluate(parameter.coordinate, self._gpGrid)
+        )
 
         stiffMat = p1_stiffness_1d(self._vertices, diffusion)
         return apply_dirichlet_1d(stiffMat)
@@ -217,13 +218,11 @@ print(f"acceptance rate={acceptanceRate:.3f}")
 # --- POSTPROCESSING ---
 
 # reconstruct the diffusion coefficient exp(theta) on a display grid.
-# Sampling is finished, so re-anchoring the GP once is fine here.
 plotMesh = UniformGrid(0., 1., 200)
-gp.sites = plotMesh
 
 fields = np.empty((len(trajectory), len(plotMesh)))
 for i, coefficients in enumerate(trajectory):
-    fields[i] = np.exp(gp.at_sites(coefficients))
+    fields[i] = np.exp(gp.evaluate(coefficients, plotMesh))
 
 # posterior mean and pointwise 95% credible band
 posteriorMean = fields.mean(axis=0)

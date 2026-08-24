@@ -13,7 +13,7 @@ from styne.statistics.likelihood import RegressionLikelihood
 from styne.statistics.response import GaussianResponse
 from styne.statistics.bayes import UnnormalisedPosterior
 from styne.statistics.stationary import MaternCovariance2D
-from styne.model.sglmm import SGLMM, SGLMMPredictor
+from styne.model.sglmm import SGLMM
 from styne.utility.grid import Grid
 
 def _compute_jacobian(model: SGLMM) -> np.ndarray:
@@ -24,24 +24,30 @@ def _compute_jacobian(model: SGLMM) -> np.ndarray:
 
     if model._features is not None:
         p = model._features.shape[1]
+        point = BlockParameter([
+            Vector(np.zeros(latentDim)), Vector(np.zeros(p))
+        ])
         for i in range(latentDim):
             e_zeta = np.zeros(latentDim)
             e_zeta[i] = 1.0
             e_beta = np.zeros(p)
             param = BlockParameter([Vector(e_zeta), Vector(e_beta)])
-            columns.append(model.directional_derivative(param))
+            columns.append(model.directional_derivative(point, param))
 
         for j in range(p):
             e_zeta = np.zeros(latentDim)
             e_beta = np.zeros(p)
             e_beta[j] = 1.0
             param = BlockParameter([Vector(e_zeta), Vector(e_beta)])
-            columns.append(model.directional_derivative(param))
+            columns.append(model.directional_derivative(point, param))
     else:
+        point = Vector(np.zeros(nParam))
         for i in range(nParam):
             e = np.zeros(nParam)
             e[i] = 1.0
-            columns.append(model.directional_derivative(Vector(e)))
+            columns.append(
+                model.directional_derivative(point, Vector(e))
+            )
 
     return np.column_stack(columns)
 

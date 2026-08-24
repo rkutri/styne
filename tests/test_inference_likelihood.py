@@ -28,11 +28,11 @@ class _DifferentiableMock(ForwardMap):
     def _evaluate(self, preparedState):
         return preparedState
 
-    def directional_derivative(self, parameter):
-        return parameter.clone()
+    def directional_derivative(self, parameter, direction):
+        return direction.clone()
 
-    def adjoint_directional_derivative(self, w):
-        return np.asarray(w)
+    def adjoint_derivative(self, parameter, cotangent):
+        return np.asarray(cotangent)
 
 
 class _NonDifferentiableMock(ForwardMap):

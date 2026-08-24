@@ -1,5 +1,4 @@
 import numpy as np
-import pytest
 
 from numpy.random import default_rng
 
@@ -71,12 +70,12 @@ class TestDNAFourierComponentExpansion1D:
             r.evaluate_interior(np.zeros(self.q)), 0.
         )
 
-    def test_evaluate_raises(self):
+    def test_evaluate_at_coordinates(self):
         r = DNAFourierComponentExpansion(_bc1d(BC.NEUMANN), self.q)
-        with pytest.raises(NotImplementedError):
-            r.evaluate(
-                np.zeros(self.q + 1), np.linspace(0.1, 0.9, 15)
-            )
+        result = r.evaluate(
+            np.zeros(self.q + 1), np.linspace(0.1, 0.9, 15)
+        )
+        assert result.shape == (15,)
 
     def test_multiple_coefficients_do_not_mutate_expansion(self):
         r = DNAFourierComponentExpansion(_bc1d(BC.NEUMANN), self.q)
@@ -144,12 +143,12 @@ class TestDNAFourierComponentExpansion2D:
                 r.evaluate_interior(np.zeros(r.dimension)), 0.
             )
 
-    def test_evaluate_raises(self):
+    def test_evaluate_at_coordinates(self):
         r = DNAFourierComponentExpansion(
             _bc2d(BC.NEUMANN, BC.NEUMANN), self.q)
         pts = np.stack(
             [np.linspace(0.1, 0.9, 8),
              np.linspace(0.1, 0.9, 8)],
             axis=1)
-        with pytest.raises(NotImplementedError):
-            r.evaluate(np.zeros(r.dimension), pts)
+        result = r.evaluate(np.zeros(r.dimension), pts)
+        assert result.shape == (8,)

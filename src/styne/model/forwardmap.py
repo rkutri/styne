@@ -116,29 +116,37 @@ class DifferentiableModel(Protocol):
     arguments; they must not depend on a previous forward-map evaluation.
     """
 
-    def directional_derivative(self, parameter: Parameter) -> ndarray:
+    def directional_derivative(
+            self, parameter: Parameter,
+            direction: Parameter) -> ndarray:
         """
         Apply the model Jacobian J to a direction in parameter space.
 
         Parameters
         ----------
         parameter : Parameter
+            Point at which the derivative is evaluated.
+        direction : Parameter
             Direction vector in parameter space.
 
         Returns
         -------
         ndarray, shape (N,)
-            J @ parameter.coordinate, a vector in observation space.
+            D G(parameter)[direction], a vector in observation space.
         """
         ...
 
-    def adjoint_directional_derivative(self, w: ndarray) -> ndarray:
+    def adjoint_derivative(
+            self, parameter: Parameter,
+            cotangent: ndarray) -> ndarray:
         """
         Apply the adjoint Jacobian J^T to a vector in observation space.
 
         Parameters
         ----------
-        w : ndarray, shape (N,)
+        parameter : Parameter
+            Point at which the derivative is evaluated.
+        cotangent : ndarray, shape (N,)
             Vector in observation space (e.g. a score residual).
 
         Returns

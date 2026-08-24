@@ -2,10 +2,9 @@ import numpy as np
 
 from numpy.linalg import LinAlgError
 
-from styne.gp.engine import GPEngine, GPState
 from styne.model.representation.bspline import BSpline2D
 from styne.statistics.interface import CovarianceFunctionInterface, Predictor
-from styne.statistics.covariance import CovarianceMatrix, DenseCovarianceMatrix
+from styne.statistics.covariance import DenseCovarianceMatrix
 from styne.utility.grid import Grid
 
 
@@ -114,72 +113,42 @@ def induced_prior_covariance_2d(covFunc2d, bspX, bspY, xBounds, yBounds,
             eps *= 100.
 
 
-class BSplineGPEngine(GPEngine):
-    """
-    GPEngine using a B-spline basis parametrisation, 1D or 2D depending on
-    the expansion supplied.
-
-    Parameters
-    ----------
-    expansion : BSpline1D | BSpline2D
-        The B-spline basis. Dimensionality is inferred from its type.
-    """
+class _BSplineGPSpecification:
+    """Construction and prediction rules for a B-spline GP."""
 
     def __init__(self, expansion):
         self._expansion = expansion
         self._is2d = isinstance(expansion, BSpline2D)
-        self._H = None
 
     @property
     def spatialDimension(self) -> int:
         return 2 if self._is2d else 1
 
-    def set_sites(self, sites: Grid) -> None:
-        if sites is None:
-            self._H = None
-            return
-        pts = sites.to_array()
-        self._H = self._expansion.design_matrix(pts if self._is2d else pts.ravel())
-
-    def build_expansion(self):
-        """Return the engine's static B-spline representation."""
-        return self._expansion
-
-    def build_covariance(
-            self, covFcn: CovarianceFunctionInterface) -> CovarianceMatrix:
+    def build(self, covFcn: CovarianceFunctionInterface):
         if self._is2d:
             bspX = self._expansion.splineX
             bspY = self._expansion.splineY
-            return induced_prior_covariance_2d(
+            covariance = induced_prior_covariance_2d(
                 covFcn, bspX, bspY, bspX.boundary, bspY.boundary
             )
-        bounds = np.array(self._expansion.boundary)
-        return induced_prior_covariance(covFcn, bounds, self._expansion)
-
-    def apply_jacobian(
-            self, vector: np.ndarray,
-            covariance: CovarianceMatrix) -> np.ndarray:
-        return vector @ self._H.T
-
-    def apply_adjoint_jacobian(
-            self, cotangent: np.ndarray,
-            covariance: CovarianceMatrix) -> np.ndarray:
-        return cotangent @ self._H
+        else:
+            bounds = np.array(self._expansion.boundary)
+            covariance = induced_prior_covariance(
+                covFcn, bounds, self._expansion
+            )
+        return covariance, self._expansion
 
     def create_predictor(
-            self, gpState: GPState, queryGrid: Grid,
-            coefficient: np.ndarray) -> Predictor:
-        pts = queryGrid.to_array()
-        H_pred = self._expansion.design_matrix(pts if self._is2d else pts.ravel())
+            self, gpState, queryGrid: Grid,
+            coefficient: np.ndarray, observationGrid=None) -> Predictor:
         frozenCoefficient = np.array(coefficient, dtype=float, copy=True)
-        mean = H_pred @ frozenCoefficient if frozenCoefficient.ndim == 1 \
-            else frozenCoefficient @ H_pred.T
+        mean = self._expansion.evaluate(frozenCoefficient, queryGrid)
         return BSplineGPPredictor(mean)
 
 
 class BSplineGPPredictor(Predictor):
     """
-    Immutable out-of-sample mean snapshot for the B-spline GP engine.
+    Immutable out-of-sample mean snapshot for the B-spline parametrisation.
 
     Parameters
     ----------

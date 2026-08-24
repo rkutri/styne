@@ -3,7 +3,7 @@ import pytest
 
 from numpy.random import default_rng
 
-from styne.gp.direct import DirectExpansion, DirectGPEngine
+from styne.gp.direct import DirectExpansion
 from styne.gp.gaussianprocess import GaussianProcess
 from styne.statistics.gaussian import Gaussian
 from styne.statistics.covariance import CovarianceMatrix
@@ -59,37 +59,40 @@ class TestDirectExpansionAPI:
         grid2d = Grid(np.column_stack([xx.ravel(), yy.ravel()]))
         values = xx.ravel() + yy.ravel()
         r = DirectExpansion(grid2d, len(grid2d))
-        with pytest.raises(NotImplementedError):
-            r.evaluate(values, grid2d)
+        np.testing.assert_allclose(r.evaluate(values, grid2d), values)
 
 
-# ---- DirectGPEngine API sanity ----
+# ---- Direct GP construction sanity ----
 
-class TestDirectGPEngineAPI:
+class TestDirectGPConstruction:
 
     def setup_method(self):
         self.n = 10
         self.grid = UniformGrid(0., 1., self.n)
         self.variance = 0.7
         self.covFcn = MaternCovariance1D(0.3, 1.5, self.variance)
-        self.engine = DirectGPEngine(self.grid)
+        self.gp = GaussianProcess.direct(self.grid, self.covFcn)
 
     def test_expansion_type(self):
-        r = self.engine.build_expansion()
-        assert isinstance(r, DirectExpansion)
+        assert isinstance(self.gp.expansion, DirectExpansion)
 
     def test_expansion_dimension(self):
-        r = self.engine.build_expansion()
-        assert r.dimension == self.n
+        assert self.gp.expansion.dimension == self.n
 
     def test_covariance_type(self):
-        cov = self.engine.build_covariance(self.covFcn)
-        assert isinstance(cov, CovarianceMatrix)
+        assert isinstance(self.gp.measure.covariance, CovarianceMatrix)
 
     def test_covariance_dimension(self):
-        cov = self.engine.build_covariance(self.covFcn)
+        cov = self.gp.measure.covariance
         assert cov.dimension == self.n
-        assert self.engine._shapeCovariance.to_dense().shape == (self.n, self.n)
+        assert self.gp.expansion.shapeCovariance.to_dense().shape == (self.n, self.n)
+
+    def test_bound_evaluation_keeps_linear_maps_separate(self):
+        evaluation = self.gp.bind(UniformGrid(0.1, 0.9, 7))
+
+        assert evaluation._interpolation.shape == (7, self.n)
+        assert evaluation._shapeFactor.shape == (self.n, self.n)
+        assert not hasattr(evaluation, "_operator")
 
 
 # ---- GaussianProcess.direct correctness ----
@@ -110,7 +113,7 @@ class TestDirectGPCorrectness:
         samples = []
         for _ in range(self.nSamples):
             sample = sampler.draw(self.rng)
-            val = sample.evaluate(self.gp.engine.grid)
+            val = sample.evaluate(self.gp.nativeGrid)
             samples.append(val)
         return np.array(samples)
 
@@ -136,7 +139,7 @@ class TestDirectGPCorrectness:
     def test_sample_covariance(self):
         samples = self._draw_samples()
         empiricalCov = np.cov(samples.T)
-        trueCov = self.gp.engine._shapeCovariance.to_dense()
+        trueCov = self.gp.expansion.shapeCovariance.to_dense()
         frobTrue = np.linalg.norm(trueCov, 'fro')
         frobErr = np.linalg.norm(empiricalCov - trueCov, 'fro')
         assert frobErr / frobTrue < 0.3
@@ -144,7 +147,7 @@ class TestDirectGPCorrectness:
     def test_covariance_update_inplace(self):
         newCovFcn = MaternCovariance1D(0.5, 1.5, 1.2)
         self.gp.covarianceFunction = newCovFcn
-        newK = self.gp.engine._shapeCovariance.to_dense()
+        newK = self.gp.expansion.shapeCovariance.to_dense()
         expected = newCovFcn.evaluate_covariance(
             self.grid, self.grid
         )
@@ -162,13 +165,12 @@ class TestDirectSamplerEvaluate:
         self.variance = 0.8
         self.covariance = MaternCovariance1D(0.3, 1.5, self.variance)
         self.process = GaussianProcess.direct(self.grid, self.covariance)
-        self.process.sites = self.grid
         self.randomGenerator = default_rng(2026)
 
-    def test_sampler_evaluate_matches_at_sites(self):
+    def test_sampler_evaluate_matches_gp_evaluate(self):
         sample = self.process.sampler.generate_realisation(rng=self.randomGenerator)
         evaluated = sample.evaluate(self.grid)
-        atSites = self.process.at_sites(sample.coordinate)
+        atSites = self.process.evaluate(sample.coordinate, self.grid)
         np.testing.assert_allclose(evaluated, atSites, atol=1e-12)
 
     def test_sampler_evaluate_marginal_variance(self):

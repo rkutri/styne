@@ -8,6 +8,7 @@ from styne.parameter.parameter import Parameter
 from styne.parameter.vector import Vector
 from styne.parameter.function import Function
 from styne.parameter.block import BlockParameter
+from styne.model.representation.expansion import backend_constant
 from styne.gp.gaussianprocess import GaussianProcess
 from styne.utility.grid import Grid
 from styne.statistics.interface import Predictor
@@ -61,12 +62,6 @@ class SGLMM(ForwardMap):
         self._obsSites = obsSites
 
         self._gp = gp
-        # SGLMM owns the GP's site configuration for its lifetime: the latent
-        # field must be synthesised at the observation sites. Pin it once here
-        # so evaluation and gradients need no per-call site mutation. Callers
-        # must not re-site this GP while it is owned by an SGLMM.
-        if self._gp.sites is not self._obsSites:
-            self._gp.sites = self._obsSites
 
         if features is None:
             self._features = None
@@ -110,17 +105,22 @@ class SGLMM(ForwardMap):
 
     def _evaluate(self, preparedState):
         latentCoordinate, fixedEffect = preparedState
-        evaluation = self._gp.at_sites(latentCoordinate)
+        evaluation = self._gp.evaluate(
+            latentCoordinate, self._obsSites
+        )
 
         if self._features is not None:
-            evaluation = evaluation + self._features @ fixedEffect
+            features = backend_constant(self._features, fixedEffect)
+            evaluation = evaluation + fixedEffect @ features.T
 
         if self._trendValues is not None:
             evaluation = evaluation + self._trendValues
 
         return evaluation
 
-    def directional_derivative(self, parameter: Parameter) -> np.ndarray:
+    def directional_derivative(
+            self, parameter: Parameter,
+            direction: Parameter) -> np.ndarray:
         """
         Apply the model's Jacobian to a parameter direction.
 
@@ -131,6 +131,8 @@ class SGLMM(ForwardMap):
         Parameters
         ----------
         parameter : Parameter
+            Point in parameter space.
+        direction : Parameter
             Direction in parameter space, `Vector` or `BlockParameter`
             depending on whether `features` was set at construction.
 
@@ -138,16 +140,23 @@ class SGLMM(ForwardMap):
         -------
         np.ndarray
         """
-        coord = parameter.block(0).coordinate if self._features is not None else parameter.coordinate
-        deriv = self._gp.directional_derivative(coord)
+        latentCoordinate, _ = self._prepare(parameter)
+        directionCoordinate, _ = self._prepare(direction)
+        deriv = self._gp.directional_derivative(
+            latentCoordinate, directionCoordinate, self._obsSites
+        )
 
         if self._features is not None:
-            deriv = deriv + self._features @ parameter.block(1).coordinate
+            fixedDirection = direction.block(1).coordinate
+            features = backend_constant(self._features, fixedDirection)
+            deriv = deriv + fixedDirection @ features.T
         return deriv
 
-    def adjoint_directional_derivative(self, w: np.ndarray) -> np.ndarray:
+    def adjoint_derivative(
+            self, parameter: Parameter,
+            cotangent: np.ndarray) -> np.ndarray:
         """
-        Apply the adjoint of the model's Jacobian to `w`.
+        Apply the adjoint of the model's Jacobian to a cotangent.
 
         Splits the same way as `directional_derivative`, adjoint GP action for
         the latent block, concatenated with `features.T @ w` for the
@@ -155,8 +164,10 @@ class SGLMM(ForwardMap):
 
         Parameters
         ----------
-        w : np.ndarray
-            Vector in observation space.
+        parameter : Parameter
+            Point in parameter space.
+        cotangent : np.ndarray
+            Cotangent in observation space.
 
         Returns
         -------
@@ -164,16 +175,20 @@ class SGLMM(ForwardMap):
             `Vector`-shaped if no fixed effects, otherwise concatenated with
             the fixed-effect block's adjoint contribution.
         """
-        w = np.asarray(w).ravel()
-        gpAdj = self._gp.adjoint_directional_derivative(w)
+        latentCoordinate, _ = self._prepare(parameter)
+        gpAdj = self._gp.adjoint_derivative(
+            latentCoordinate, cotangent, self._obsSites
+        )
 
         if self._features is None:
             return gpAdj
 
-        return np.concatenate([
-            gpAdj,
-            self._features.T @ w
-        ])
+        features = backend_constant(self._features, cotangent)
+        fixedAdjoint = cotangent @ features
+        backend = parameter.backend
+        return backend.namespace.concatenate(
+            (gpAdj, fixedAdjoint), axis=-1
+        )
 
     def create_predictor(
             self, preparedState, queryGrid: Grid, features=None
@@ -196,8 +211,9 @@ class SGLMM(ForwardMap):
         SGLMMPredictor
         """
         latentCoordinate, fixedEffect = preparedState
-        gpPredictor = self._gp.engine.create_predictor(
-            self._gp, queryGrid, latentCoordinate)
+        gpPredictor = self._gp.create_predictor(
+            latentCoordinate, queryGrid, self._obsSites
+        )
         return SGLMMPredictor(gpPredictor, queryGrid, features, fixedEffect, self._trend)
 
 

@@ -1,4 +1,7 @@
+import importlib
+
 import numpy as np
+import pytest
 
 from numpy.random import default_rng
 
@@ -22,9 +25,23 @@ def test_gp_package_exports_expansions_without_legacy_realisations():
     assert "DNAFourierExpansion" in gp_module.__all__
     for removed_name in (
             "DirectRealisation", "BSplineRealisation1D",
-            "BSplineRealisation2D", "DNAFourierRealisation"):
+            "BSplineRealisation2D", "DNAFourierRealisation",
+            "GPEngine", "DirectGPEngine", "BSplineGPEngine",
+            "DNAFourierEngine"):
         assert removed_name not in gp_module.__all__
         assert not hasattr(gp_module, removed_name)
+
+    with pytest.raises(ModuleNotFoundError):
+        importlib.import_module("styne.gp.engine")
+    assert not hasattr(
+        importlib.import_module("styne.gp.direct"), "DirectGPEngine"
+    )
+    assert not hasattr(
+        importlib.import_module("styne.gp.bspline"), "BSplineGPEngine"
+    )
+    assert not hasattr(
+        importlib.import_module("styne.gp.dna"), "DNAFourierEngine"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -41,15 +58,14 @@ def test_dense_gp_sampler_shape():
     assert function.coordinate.shape == (n,)
 
 
-def test_at_sites_uses_explicit_coefficient_without_mutating_parameter():
+def test_evaluate_uses_explicit_coefficient_without_mutating_parameter():
     grid = UniformGrid(0., 1., 5)
     gp = GaussianProcess.direct(
         grid, MaternCovariance1D(0.3, 1.5, 1.0))
-    gp.sites = grid
     before = np.array(gp.parameter.coordinate, copy=True)
     coefficient = np.linspace(-0.5, 0.5, gp.parameterDimension)
 
-    values = gp.at_sites(coefficient)
+    values = gp.evaluate(coefficient, grid)
 
     assert values.shape == (len(grid),)
     np.testing.assert_array_equal(gp.parameter.coordinate, before)
@@ -71,7 +87,7 @@ def test_dense_gp_zero_mean():
     sampler = gp.sampler
 
     samples = np.array(
-        [sampler.draw(rng).evaluate(gp.engine.grid) for _ in range(nSamples)])
+        [sampler.draw(rng).evaluate(gp.nativeGrid) for _ in range(nSamples)])
     mean = np.mean(samples, axis=0)
 
     assert np.max(np.abs(mean)) < 3. * np.sqrt(sigma2 / nSamples), (
@@ -88,7 +104,7 @@ def test_dense_gp_marginal_variance():
     sampler = gp.sampler
 
     samples = np.array(
-        [sampler.draw(rng).evaluate(gp.engine.grid) for _ in range(nSamples)])
+        [sampler.draw(rng).evaluate(gp.nativeGrid) for _ in range(nSamples)])
     variances = np.var(samples, axis=0)
 
     rel_err = np.max(np.abs(variances - sigma2) / sigma2)
@@ -219,7 +235,7 @@ def test_bspline_2d_gp_covariance_update_inplace():
 
 
 # ---------------------------------------------------------------------------
-# DNAFourierEngine1D (legacy sampler, now in gp.dna)
+# DNA Fourier GP
 # ---------------------------------------------------------------------------
 
 def test_dna_fourier_1d_shape():
@@ -227,8 +243,7 @@ def test_dna_fourier_1d_shape():
     rng = default_rng(1)
     cov = MaternCovariance1D(lengthScale=0.3, smoothness=1.5, marginalVariance=1.)
     gp = GaussianProcess.dna(cov, q=q, d=1)
-    sites = gp.engine.nativeGrid
-    gp.sites = sites
+    sites = gp.nativeGrid
     sample = gp.sampler.draw(rng)
     val = sample.evaluate(sites)
     assert val.shape == (32,)
@@ -242,8 +257,7 @@ def test_dna_fourier_1d_marginal_isotropy():
     rng = default_rng(99)
     cov = MaternCovariance1D(lengthScale=0.3, smoothness=1.5, marginalVariance=sigma2)
     gp = GaussianProcess.dna(cov, q=q, d=1)
-    sites = gp.engine.nativeGrid
-    gp.sites = sites
+    sites = gp.nativeGrid
     sampler = gp.sampler
 
     samples = np.array([

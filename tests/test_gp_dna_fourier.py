@@ -2,11 +2,9 @@ import numpy as np
 
 from numpy.random import default_rng
 
-from styne.gp.dna import DNAFourierExpansion, DNAFourierEngine
+from styne.gp.dna import DNAFourierExpansion
 from styne.gp.gaussianprocess import GaussianProcess, GPSampler
-from styne.parameter.function import Function
-from styne.statistics.gaussian import Gaussian
-from styne.statistics.covariance import DiagonalCovarianceMatrix
+from styne.statistics.covariance import IIDCovarianceMatrix
 from styne.statistics.stationary import MaternCovariance1D, MaternCovariance2D
 from styne.utility.grid import Grid, UniformGrid
 
@@ -107,62 +105,58 @@ class TestDNAFourierExpansion2D:
         ).shape == (8,)
 
 
-# ---- DNAFourierEngine API ----
+# ---- DNA Gaussian-process construction ----
 
-class TestDNAFourierEngine1D:
+class TestDNAGaussianProcess1D:
 
     def setup_method(self):
         self.q = 5
-        self.engine = DNAFourierEngine(self.q, d=1)
         self.covFcn = _cov1d()
+        self.gp = GaussianProcess.dna(self.covFcn, self.q, d=1)
 
     def test_build_expansion_type(self):
         assert isinstance(
-            self.engine.build_expansion(),
+            self.gp.expansion,
             DNAFourierExpansion)
 
     def test_covariance_type(self):
         assert isinstance(
-            self.engine.build_covariance(self.covFcn), DiagonalCovarianceMatrix
+            self.gp.measure.covariance, IIDCovarianceMatrix
         )
 
     def test_covariance_dimension(self):
-        assert self.engine.build_covariance(
-            self.covFcn).dimension == 2 * self.q + 1
+        assert self.gp.measure.covariance.dimension == 2 * self.q + 1
 
     def test_spectral_densities_positive(self):
-        cov = self.engine.build_covariance(self.covFcn)
-        assert np.all(cov.marginalVariance > 0.)
+        assert np.all(self.gp.expansion.spectralWeights > 0.)
 
     def test_covariance_matches_expansion_dimension(self):
-        assert (self.engine.build_covariance(self.covFcn).dimension
-                == self.engine.build_expansion().dimension)
+        assert (self.gp.measure.covariance.dimension
+                == self.gp.expansion.dimension)
 
 
-class TestDNAFourierEngine2D:
+class TestDNAGaussianProcess2D:
 
     def setup_method(self):
         self.q = 4
-        self.engine = DNAFourierEngine(self.q, d=2)
         self.covFcn = _cov2d()
+        self.gp = GaussianProcess.dna(self.covFcn, self.q, d=2)
 
     def test_build_expansion_type(self):
         assert isinstance(
-            self.engine.build_expansion(),
+            self.gp.expansion,
             DNAFourierExpansion)
 
     def test_covariance_dimension(self):
-        assert self.engine.build_covariance(
-            self.covFcn).dimension == (
+        assert self.gp.measure.covariance.dimension == (
             2 * self.q + 1) ** 2
 
     def test_spectral_densities_positive(self):
-        cov = self.engine.build_covariance(self.covFcn)
-        assert np.all(cov.marginalVariance > 0.)
+        assert np.all(self.gp.expansion.spectralWeights > 0.)
 
     def test_covariance_matches_expansion_dimension(self):
-        assert (self.engine.build_covariance(self.covFcn).dimension
-                == self.engine.build_expansion().dimension)
+        assert (self.gp.measure.covariance.dimension
+                == self.gp.expansion.dimension)
 
 
 # ---- GPSampler equivalence ----
@@ -177,14 +171,10 @@ class TestDNAFourierGPSampler:
         ))
 
     def _check_equivalence(self, q, d, covFcn, pts):
-        engine = DNAFourierEngine(q, d)
-        cov = engine.build_covariance(covFcn)
-        expansion = engine.build_expansion()
-        measure = Gaussian(cov)
-        mean = Function(
-            np.zeros(expansion.dimension), expansion
-        )
-        measure.mean = mean
+        gp = GaussianProcess.dna(covFcn, q, d)
+        cov = gp.measure.covariance
+        expansion = gp.expansion
+        measure = gp.measure
 
         sqrtVars = np.sqrt(cov.marginalVariance)
 
@@ -223,15 +213,9 @@ class TestDNASpectralStructure:
        pipeline (would indicate the covariance is not truly diagonal).
     """
 
-    def _sample_coefficients(self, engine, covFcn, nSamples, seed=7):
-        cov = engine.build_covariance(covFcn)
-        expansion = engine.build_expansion()
-        measure = Gaussian(cov)
-        mean = Function(
-            np.zeros(expansion.dimension), expansion
-        )
-        measure.mean = mean
-        sampler = GPSampler(expansion, measure)
+    def _sample_coefficients(self, gp, nSamples, seed=7):
+        cov = gp.measure.covariance
+        sampler = gp.sampler
         rng = default_rng(seed)
         return cov, np.array([sampler.draw(rng).coordinate
                               for _ in range(nSamples)])
@@ -277,16 +261,16 @@ class TestDNASpectralStructure:
         )
 
     def test_spectral_structure_1d(self):
-        engine = DNAFourierEngine(10, 1)
+        gp = GaussianProcess.dna(_cov1d(), 10, 1)
         cov, coefficients = self._sample_coefficients(
-            engine, _cov1d(), nSamples=5000)
+            gp, nSamples=5000)
         self._assert_spectral_variances(cov, coefficients)
         self._assert_independence(cov, coefficients)
 
     def test_spectral_structure_2d(self):
-        engine = DNAFourierEngine(7, 2)
+        gp = GaussianProcess.dna(_cov2d(), 7, 2)
         cov, coefficients = self._sample_coefficients(
-            engine, _cov2d(), nSamples=4000)
+            gp, nSamples=4000)
         self._assert_spectral_variances(cov, coefficients)
         self._assert_independence(cov, coefficients)
 

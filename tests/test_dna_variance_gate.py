@@ -1,6 +1,5 @@
-import pytest
 import numpy as np
-from styne.gp.dna import DNAFourierEngine
+from styne.gp.gaussianprocess import GaussianProcess
 from styne.statistics.stationary import matern_fourier
 
 
@@ -22,10 +21,9 @@ SEED = 12345
 
 
 def _center_variance(q, alpha, d):
-    eng = DNAFourierEngine(q, d, alpha)
-    eng.build_covariance(StubFourierCov(ELL))
-    expansion = eng.build_expansion()
-    n = np.asarray(eng.spectralWeights).size
+    gp = GaussianProcess.dna(StubFourierCov(ELL), q, d, alpha)
+    expansion = gp.expansion
+    n = expansion.dimension
 
     nG = tuple(qj + 2 for qj in (q if not np.isscalar(q) else (q,) * d))
     centre = tuple(g // 2 for g in nG)

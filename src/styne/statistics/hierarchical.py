@@ -1,18 +1,12 @@
 import numpy as np
-import copy
 from typing import Optional
 
 from styne.statistics.measure import ConditionalMeasure
 from styne.statistics.interface import DensityInterface, LikelihoodInterface
 from styne.parameter.parameter import Parameter
 from styne.parameter.block import BlockParameter
-from styne.parameter.function import Function
 from styne.model.sglmm import SGLMM
 from styne.gp.gaussianprocess import GaussianProcess
-from styne.statistics.stationary import MaternCovariance1D
-from styne.statistics.covariance import DenseCovarianceMatrix, IIDCovarianceMatrix
-from styne.gp.direct import DirectGPEngine
-from styne.gp.dna import DNAFourierEngine
 
 class SGLMMHyperConditionalDensity(DensityInterface):
     """
@@ -159,17 +153,17 @@ class SGLMMHyperConditionalDensity(DensityInterface):
             raise RuntimeError("Failed model evaluation due to singular covariance.")
             
         linearPredictorScore = self._likelihood.response.score(
-            self._likelihood.data.measurement, linearPredictor, self._model)
+            self._likelihood.data.measurement, linearPredictor
+        )
 
         from styne.parameter.vector import Vector
         priorGradient = self._pcPrior.evaluate_log_gradient(
             Vector([lengthScale, sigma])
         )
 
-        if hasattr(self._gp.engine, 'evaluate_hyper_gradient'):
-            hyperparameterGradients = self._gp.engine.evaluate_hyper_gradient(
-                self._latentState, linearPredictorScore,
-                self._gp.covarianceFunction
+        if self._gp.hasHyperGradient:
+            hyperparameterGradients = self._gp.evaluate_hyper_gradient(
+                self._latentState, linearPredictorScore
             )
             gradLogLengthScale = hyperparameterGradients.get('log_rho', 0.0) \
                 + priorGradient[0] * lengthScale + 1.0
@@ -177,13 +171,13 @@ class SGLMMHyperConditionalDensity(DensityInterface):
                 + priorGradient[1] * sigma + 1.0
             return np.array([gradLogLengthScale, gradLogSigma])
 
-        if not hasattr(self._gp.engine, "compute_log_length_multiplier"):
+        if not self._gp.hasLogLengthMultiplier:
             raise NotImplementedError(
                 "Hyperparameter gradients not implemented for "
-                f"{type(self._gp.engine).__name__}."
+                f"{type(self._gp.expansion).__name__}."
             )
 
-        lengthMultiplier = self._gp.engine.compute_log_length_multiplier(
+        lengthMultiplier = self._gp.compute_log_length_multiplier(
             smoothness, lengthScale
         )
 
@@ -327,7 +321,7 @@ class SGLMMLatentConditional(ConditionalMeasure, DensityInterface):
         Index of the hyperparameter block within the joint state.
     localisedDensity : object, optional
         Target with a `sync_weights` method, called with the coarse
-        engine's spectral weights when present. Untyped in source, inferred
+        expansion's spectral weights when present. Untyped in source, inferred
         from usage.
     """
 
@@ -428,7 +422,7 @@ class SGLMMLatentConditional(ConditionalMeasure, DensityInterface):
                 )
                 if self._localisedDensity is not None:
                     self._localisedDensity.sync_weights(
-                        self._coarseGP.engine.spectralWeights
+                        self._coarseGP.expansion.spectralWeights
                     )
 
             if self._finePrior is not None and self._partition is not None:

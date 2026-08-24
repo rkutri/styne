@@ -17,7 +17,6 @@ def test_partitioned_parameter_evaluation():
     
     dnaGP = GaussianProcess.dna(covFcn, q=q, d=d)
     sites = UniformGrid(0., 1., 30)
-    dnaGP.sites = sites
     
     # Setup partition
     partition = DNACoarseFinePartition(dnaGP, qC, d)
@@ -35,15 +34,15 @@ def test_partitioned_parameter_evaluation():
     mergedParam = partition._rule.merge([coarseSample.coordinate, fineSample.coordinate])
     
     # Full merged evaluation
-    evalMerged = dnaGP.at_sites(mergedParam)
+    evalMerged = dnaGP.evaluate(mergedParam, sites)
     
     # Coarse only evaluation
     coarsePadded = partition._rule.merge([coarseSample.coordinate, np.zeros_like(fineSample.coordinate)])
-    evalCoarseOnly = dnaGP.at_sites(coarsePadded)
+    evalCoarseOnly = dnaGP.evaluate(coarsePadded, sites)
     
     # Fine only evaluation
     finePadded = partition._rule.merge([np.zeros_like(coarseSample.coordinate), fineSample.coordinate])
-    evalFineOnly = dnaGP.at_sites(finePadded)
+    evalFineOnly = dnaGP.evaluate(finePadded, sites)
     
     np.testing.assert_allclose(evalMerged, evalCoarseOnly + evalFineOnly, 
                                err_msg="Merged parameter field evaluation should equal sum of zero-padded evaluations.")

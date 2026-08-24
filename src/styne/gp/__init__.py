@@ -5,19 +5,15 @@ Deep imports still work; this is the documented path.
 import importlib
 
 _SYMBOL_TO_MODULE = {
-    "GPEngine": "styne.gp.engine",
     "GaussianProcess": "styne.gp.gaussianprocess",
     "GPSampler": "styne.gp.gaussianprocess",
     "DirectExpansion": "styne.gp.direct",
-    "DirectGPEngine": "styne.gp.direct",
     "DirectGPPredictor": "styne.gp.direct",
-    "BSplineGPEngine": "styne.gp.bspline",
     "BSplineGPPredictor": "styne.gp.bspline",
     "BC": "styne.gp.dna",
     "BoundaryCondition": "styne.gp.dna",
     "DNAFourierComponentExpansion": "styne.gp.dna",
     "DNAFourierExpansion": "styne.gp.dna",
-    "DNAFourierEngine": "styne.gp.dna",
     "DNAGPPredictor": "styne.gp.dna",
     "DNACoarseFineSplit": "styne.gp.dnautility",
     "DNACoarseFinePartition": "styne.gp.dnautility",

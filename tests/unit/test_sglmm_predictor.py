@@ -1,11 +1,9 @@
 import numpy as np
-import pytest
 
 from styne.model.sglmm import SGLMM
 from styne.gp.gaussianprocess import GaussianProcess
 from styne.statistics.stationary import MaternCovariance1D
-from styne.utility.grid import UniformGrid, Grid
-from styne.parameter.vector import Vector
+from styne.utility.grid import UniformGrid
 
 def _numerical_jacobian(f, x, epsilon=1e-6):
     n = len(x)
@@ -36,16 +34,14 @@ def test_sglmm_predictor_identical_sites():
     w = np.random.randn(len(obsGrid))
     
     vParam = parameter.with_coordinate(v)
-    deriv = predictor.directional_derivative(vParam)
+    deriv = predictor.directional_derivative(parameter, vParam)
     
     assert deriv.shape == (len(obsGrid),)
     
-    adj = predictor.adjoint_directional_derivative(w)
+    adj = predictor.adjoint_derivative(parameter, w)
     assert adj.shape == (parameter.dimension,)
     
     innerFwd = np.dot(deriv, w)
     innerBwd = np.dot(v, adj)
     np.testing.assert_allclose(innerFwd, innerBwd, rtol=1e-5)
-
-
 

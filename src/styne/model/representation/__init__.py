@@ -3,6 +3,9 @@ import importlib
 
 _SYMBOL_TO_MODULE = {
     "Expansion": "styne.model.representation.expansion",
+    "LinearExpansion": "styne.model.representation.expansion",
+    "BoundExpansion": "styne.model.representation.expansion",
+    "BoundLinearExpansion": "styne.model.representation.expansion",
     "GridFunction": "styne.model.representation.expansion",
     "BSpline1D": "styne.model.representation.bspline",
     "BSpline2D": "styne.model.representation.bspline",

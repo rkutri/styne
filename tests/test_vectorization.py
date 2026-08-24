@@ -3,10 +3,7 @@ from styne.gp.dnautility import (
     cos_series, sin_series,
     adj_cos_series_1d, adj_sin_series_1d,
 )
-from styne.gp.dna import (
-    DNAFourierExpansion,
-    DNAFourierEngine
-)
+from styne.gp.dna import DNAFourierExpansion
 from styne.utility.grid import UniformGrid
 
 def test_series_1d_batch():
@@ -99,15 +96,13 @@ def test_dna_expansion_batch_1d():
     print("DNA Expansion 1D Batch PASSED")
 
 def test_adjoint_inner_product_consistency():
-    """Rigorous check: <Jv, w> == <v, J^T w> for DNA engine."""
+    """Rigorous check: <Df v, w> == <v, Df* w>."""
     q = 10
     d = 1
-    engine = DNAFourierEngine(q, d)
+    expansion = DNAFourierExpansion(q, d)
     # Use non-matching sites to test interpolation part too
     sites = UniformGrid(0.1, 0.9, 15)
-    engine.set_sites(sites)
-    
-    expansion = engine.build_expansion()
+    evaluation = expansion.bind(sites)
     nParam = expansion.dimension
     nSites = len(sites)
     
@@ -115,13 +110,9 @@ def test_adjoint_inner_product_consistency():
     v = rng.standard_normal(nParam)
     w = rng.standard_normal(nSites)
     
-    # Jv = engine.apply_jacobian(v, None)
-    # JTw = engine.apply_adjoint_jacobian(w, None)
-    # The above methods are what apply_jacobian and apply_adjoint_jacobian do.
-    
-    # We verify <Jv, w> = <v, J^T w>
-    Jv = engine.apply_jacobian(v, None)
-    JTw = engine.apply_adjoint_jacobian(w, None)
+    coefficient = np.zeros(nParam)
+    Jv = evaluation.directional_derivative(coefficient, v)
+    JTw = evaluation.adjoint_derivative(coefficient, w)
     
     lhs = np.dot(Jv, w)
     rhs = np.dot(v, JTw)
@@ -131,33 +122,31 @@ def test_adjoint_inner_product_consistency():
     assert np.isclose(lhs, rhs, rtol=1e-12, atol=1e-12)
     print("Adjoint Inner-Product Consistency PASSED")
 
-def test_engine_evaluate_batch():
-    """Verify DNAFourierEngine evaluates batched explicit coefficients."""
+def test_expansion_evaluate_batch():
+    """Verify a bound DNA expansion evaluates batched coefficients."""
     q = 10
     d = 1
-    engine = DNAFourierEngine(q, d)
+    expansion = DNAFourierExpansion(q, d)
     sites = UniformGrid(0.1, 0.9, 8)
-    engine.set_sites(sites)
-    
-    expansion = engine.build_expansion()
+    evaluation = expansion.bind(sites)
     nBatch = 4
     rng = np.random.default_rng(46)
     thetas = rng.standard_normal((nBatch, expansion.dimension))
 
-    u_batch = engine.evaluate(thetas, None)
+    u_batch = evaluation.evaluate(thetas)
     assert u_batch.shape == (nBatch, len(sites))
     
     # Loop verify
     for i in range(nBatch):
-        u_truth = engine.evaluate(thetas[i], None)
+        u_truth = evaluation.evaluate(thetas[i])
         assert np.allclose(u_batch[i], u_truth, rtol=1e-13, atol=1e-13)
     
-    print("DNA Engine at_sites Batch PASSED")
+    print("DNA expansion batch evaluation PASSED")
 
 if __name__ == "__main__":
     test_series_1d_batch()
     test_adjoint_series_1d_batch()
     test_dna_expansion_batch_1d()
     test_adjoint_inner_product_consistency()
-    test_engine_evaluate_batch()
+    test_expansion_evaluate_batch()
     print("\nALL VECTORIZATION TESTS PASSED")

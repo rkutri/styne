@@ -3,34 +3,50 @@ import scipy.interpolate as si
 
 from typing import List
 
-from styne.model.representation.expansion import Expansion
+from styne.model.representation.expansion import (
+    BoundLinearExpansion,
+    LinearExpansion,
+    backend_constant,
+)
 from styne.utility.grid import Grid
 
 
-def _validate_coefficient(coefficient):
-    coefficient = np.asarray(coefficient, dtype=float)
+def _validate_coefficient(coefficient, dimension):
     if coefficient.ndim < 1:
         raise ValueError(
             "coefficient must have shape (..., dimension)"
         )
-    return coefficient
-
-
-def _evaluate_design_matrix(designMatrix, coefficient, dimension):
-    coefficient = _validate_coefficient(coefficient)
     if coefficient.shape[-1] != dimension:
         raise ValueError(
             f"Expected {dimension} coefficients, "
             f"got {coefficient.shape[-1]}."
         )
-    return coefficient @ designMatrix.T
+    return coefficient
 
 
 def _grid_array(grid):
     return grid.to_array() if isinstance(grid, Grid) else np.asarray(grid)
 
 
-class BSpline2D(Expansion):
+class _BSplineEvaluation(BoundLinearExpansion):
+
+    def __init__(self, designMatrix):
+        self._designMatrix = np.asarray(designMatrix)
+
+    @property
+    def dimension(self):
+        return self._designMatrix.shape[1]
+
+    def evaluate(self, coefficient):
+        coefficient = _validate_coefficient(coefficient, self.dimension)
+        designMatrix = backend_constant(self._designMatrix, coefficient)
+        return coefficient @ designMatrix.T
+
+    def _adjoint_derivative(self, coefficient, cotangent):
+        return cotangent @ self._designMatrix
+
+
+class BSpline2D(LinearExpansion):
     """
     Tensor-product B-spline on a 2D rectangular domain.
 
@@ -90,22 +106,11 @@ class BSpline2D(Expansion):
         # result[k, i*ny+j] = PhiX[k,i] * PhiY[k,j]
         return (PhiX[:, :, None] * PhiY[:, None, :]).reshape(N, nx * ny)
 
-    def evaluate(self, coefficient, grid: np.ndarray) -> np.ndarray:
-        """
-        Parameters
-        ----------
-        grid : ndarray of shape (N, 2)
-
-        Returns
-        -------
-        ndarray of shape (N,)
-        """
-        return _evaluate_design_matrix(
-            self.design_matrix(grid), coefficient, self.dimension
-        )
+    def _bind(self, grid) -> BoundLinearExpansion:
+        return _BSplineEvaluation(self.design_matrix(grid))
 
 
-class BSpline1D(Expansion):
+class BSpline1D(LinearExpansion):
 
     def __init__(self,
                  nBasis: int,
@@ -167,7 +172,5 @@ class BSpline1D(Expansion):
 
         return np.concatenate((leftClamp, domain, rightClamp))
 
-    def evaluate(self, coefficient, grid: np.ndarray) -> np.ndarray:
-        return _evaluate_design_matrix(
-            self.design_matrix(grid), coefficient, self.dimension
-        )
+    def _bind(self, grid) -> BoundLinearExpansion:
+        return _BSplineEvaluation(self.design_matrix(grid))

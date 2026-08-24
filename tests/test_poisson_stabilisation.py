@@ -1,5 +1,4 @@
 import numpy as np
-import pytest
 import warnings
 
 from styne.statistics.response import PoissonResponse
@@ -33,8 +32,9 @@ class MockDifferentiableForwardMap(ForwardMap):
     def _evaluate(self, preparedState):
         return preparedState
 
-    def adjoint_directional_derivative(self, vector: np.ndarray) -> np.ndarray:
-        return vector
+    def adjoint_derivative(
+            self, parameter, cotangent: np.ndarray) -> np.ndarray:
+        return cotangent
 
 
 class MockNonFiniteGradientDensity(DensityInterface):
@@ -88,11 +88,9 @@ def test_poisson_score_limits():
     response = PoissonResponse()
     yVal = np.array([1.0, 1.0, 1.0, 1.0])
     etaExtreme = np.array([500.0, 800.0, np.inf, -np.inf])
-    modelVal = MockDifferentiableForwardMap(etaExtreme)
-
     with warnings.catch_warnings():
         warnings.simplefilter("error")
-        scoreVal = response.score(yVal, etaExtreme, modelVal)
+        scoreVal = response.score(yVal, etaExtreme)
 
     assert np.isfinite(scoreVal).all()
     # At extreme positive eta, score = y - exp(clip(eta)) which should be extremely negative.

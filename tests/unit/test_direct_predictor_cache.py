@@ -19,13 +19,13 @@ def _setup(seed=42):
 
 def test_mean_matches_explicit_computation():
     gp, queryGrid, z = _setup()
-    predictor = gp.engine.create_predictor(gp, queryGrid, z)
+    predictor = gp.create_predictor(z, queryGrid)
     pred = predictor.mean()
 
     covFcn = gp.covarianceFunction
-    kStar = covFcn.evaluate_covariance(queryGrid, gp.engine.grid)
+    kStar = covFcn.evaluate_covariance(queryGrid, gp.nativeGrid)
     kStarArr = np.asarray(kStar)
-    L = gp.engine._shapeCovariance._cholFactor
+    L = gp.expansion.shapeCovariance.to_cholesky()
     expected = kStarArr @ solve_triangular(L.T, z, lower=False)
 
     np.testing.assert_allclose(pred, expected, atol=1e-12)
@@ -33,7 +33,7 @@ def test_mean_matches_explicit_computation():
 
 def test_predictor_is_a_snapshot():
     gp, queryGrid, z = _setup()
-    predictor = gp.engine.create_predictor(gp, queryGrid, z)
+    predictor = gp.create_predictor(z, queryGrid)
     pred1 = predictor.mean()
 
     z[:] = default_rng(7).standard_normal(gp.parameterDimension)
@@ -53,25 +53,25 @@ def test_distinct_coefficients_give_distinct_predictors():
     gp, queryGrid, z = _setup()
     other = default_rng(7).standard_normal(gp.parameterDimension)
 
-    first = gp.engine.create_predictor(gp, queryGrid, z)
-    second = gp.engine.create_predictor(gp, queryGrid, other)
+    first = gp.create_predictor(z, queryGrid)
+    second = gp.create_predictor(other, queryGrid)
 
     assert not np.allclose(first.mean(), second.mean())
 
 
 def test_mean_reflects_covariance_update():
     gp, queryGrid, z = _setup()
-    pred1 = gp.engine.create_predictor(gp, queryGrid, z).mean()
+    pred1 = gp.create_predictor(z, queryGrid).mean()
 
     gp.covarianceFunction = MaternCovariance1D(0.5, 1.5, 2.0)
-    pred2 = gp.engine.create_predictor(gp, queryGrid, z).mean()
+    pred2 = gp.create_predictor(z, queryGrid).mean()
 
     assert not np.allclose(pred1, pred2)
 
 
 def test_existing_predictor_ignores_covariance_update():
     gp, queryGrid, z = _setup()
-    predictor = gp.engine.create_predictor(gp, queryGrid, z)
+    predictor = gp.create_predictor(z, queryGrid)
     expected = predictor.mean()
 
     gp.covarianceFunction = MaternCovariance1D(0.5, 1.5, 2.0)

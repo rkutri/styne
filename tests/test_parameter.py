@@ -4,7 +4,11 @@ import numpy as np
 import pytest
 
 import styne.parameter as parameterModule
-from styne.model.representation.expansion import Expansion
+from styne.model.representation.expansion import (
+    BoundLinearExpansion,
+    LinearExpansion,
+    backend_constant,
+)
 from styne.parameter import Function, Parameter, Scalar, Vector
 from styne.statistics import Data
 
@@ -26,7 +30,7 @@ class ExampleParameter(Parameter):
         return self.__class__(coordinate)
 
 
-class MatrixExpansion(Expansion):
+class MatrixEvaluation(BoundLinearExpansion):
 
     def __init__(self, matrix):
         self.matrix = matrix
@@ -35,11 +39,28 @@ class MatrixExpansion(Expansion):
     def dimension(self):
         return self.matrix.shape[1]
 
-    def evaluate(self, coefficient, grid):
-        return coefficient @ self.matrix.T
+    def evaluate(self, coefficient):
+        matrix = backend_constant(self.matrix, coefficient)
+        return coefficient @ matrix.T
+
+    def _adjoint_derivative(self, coefficient, cotangent):
+        return cotangent @ self.matrix
 
 
-class IdentityExpansion(Expansion):
+class MatrixExpansion(LinearExpansion):
+
+    def __init__(self, matrix):
+        self.matrix = matrix
+
+    @property
+    def dimension(self):
+        return self.matrix.shape[1]
+
+    def _bind(self, grid):
+        return MatrixEvaluation(self.matrix)
+
+
+class IdentityEvaluation(BoundLinearExpansion):
 
     def __init__(self, dimension):
         self._dimension = dimension
@@ -48,8 +69,24 @@ class IdentityExpansion(Expansion):
     def dimension(self):
         return self._dimension
 
-    def evaluate(self, coefficient, grid):
+    def evaluate(self, coefficient):
         return coefficient
+
+    def _adjoint_derivative(self, coefficient, cotangent):
+        return cotangent
+
+
+class IdentityExpansion(LinearExpansion):
+
+    def __init__(self, dimension):
+        self._dimension = dimension
+
+    @property
+    def dimension(self):
+        return self._dimension
+
+    def _bind(self, grid):
+        return IdentityEvaluation(self._dimension)
 
 
 def test_parameter_contract_is_immutable_without_clone():

@@ -1,7 +1,8 @@
 import itertools
 import numpy as np
 
-from styne.gp.dna import DNAFourierEngine
+from styne.gp.gaussianprocess import GaussianProcess
+from styne.statistics.stationary import MaternCovariance2D
 from styne.gp.dnautility import BC, BoundaryCondition
 
 
@@ -23,8 +24,9 @@ def _expected_multiplier(q, alpha, d, nu, ell):
 def test_multiplier_rectangular():
     q, alpha, d = (24, 10), (1.0, 1.7), 2
     nu, ell = 1.5, 0.3
-    eng = DNAFourierEngine(q, d, alpha)
-    got = np.asarray(eng.compute_log_length_multiplier(nu=nu, lengthScale=ell))
+    cov = MaternCovariance2D(ell, nu, 1.0)
+    gp = GaussianProcess.dna(cov, q, d, alpha)
+    got = np.asarray(gp.compute_log_length_multiplier(nu, ell))
     exp = _expected_multiplier(q, alpha, d, nu, ell)
     assert got.shape == exp.shape
     np.testing.assert_allclose(got, exp, rtol=1e-12, atol=1e-12)

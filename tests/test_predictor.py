@@ -11,29 +11,26 @@ from styne.utility.grid import UniformGrid
 
 
 def test_dna_predictor_equivalence():
-    grid = UniformGrid(0., 1., 100)
     covFcn = MaternCovariance1D(1.0, 1.5, 1.5)
     gp = GaussianProcess.dna(covFcn, q=10, d=1)
     
     queryGrid = UniformGrid(0., 1., 20)
     coefficient = np.random.randn(gp.parameterDimension)
-    predictor = gp._engine.create_predictor(gp, queryGrid, coefficient)
+    predictor = gp.create_predictor(coefficient, queryGrid)
 
     pred1 = predictor.mean()
-    gp.sites = queryGrid
-    pred2 = gp.at_sites(coefficient)
+    pred2 = gp.evaluate(coefficient, queryGrid)
     
     assert np.allclose(pred1, pred2)
 
 def test_dna_predictor_batching():
-    grid = UniformGrid(0., 1., 100)
     covFcn = MaternCovariance1D(1.0, 1.5, 1.5)
     gp = GaussianProcess.dna(covFcn, q=10, d=1)
     
     queryGrid = UniformGrid(0., 1., 20)
     nBatch = 5
     coefficient = np.random.randn(nBatch, gp.parameterDimension)
-    predictor = gp._engine.create_predictor(gp, queryGrid, coefficient)
+    predictor = gp.create_predictor(coefficient, queryGrid)
 
     pred_batch = predictor.mean()
     
@@ -45,8 +42,8 @@ def test_dna_predictor_is_an_immutable_snapshot():
         MaternCovariance1D(1.0, 1.5, 1.5), q=10, d=1)
     coefficient = np.random.default_rng(1).standard_normal(
         gp.parameterDimension)
-    predictor = gp.engine.create_predictor(
-        gp, UniformGrid(0., 1., 20), coefficient)
+    predictor = gp.create_predictor(
+        coefficient, UniformGrid(0., 1., 20))
     expected = predictor.mean()
 
     coefficient[:] = 0.0
@@ -61,8 +58,8 @@ def test_bspline_predictor_is_an_immutable_snapshot():
     gp = GaussianProcess.bspline(
         MaternCovariance1D(0.3, 1.5, 0.7), expansion)
     coefficient = np.random.default_rng(2).standard_normal(6)
-    predictor = gp.engine.create_predictor(
-        gp, UniformGrid(0., 1., 20), coefficient)
+    predictor = gp.create_predictor(
+        coefficient, UniformGrid(0., 1., 20))
     expected = predictor.mean()
 
     coefficient[:] = 0.0

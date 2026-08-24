@@ -20,13 +20,13 @@ def test_linear_forward_map_prepare_evaluate_and_jacobian():
 
     direction = Vector(np.array([1.0, 2.0]))
     np.testing.assert_allclose(
-        model.directional_derivative(direction).coordinate,
+        model.directional_derivative(parameter, direction).coordinate,
         features @ direction.coordinate, rtol=0.0, atol=1e-12,
     )
 
     residual = np.array([0.2, -0.1, 0.7])
     np.testing.assert_allclose(
-        model.adjoint_directional_derivative(residual),
+        model.adjoint_derivative(parameter, residual),
         features.T @ residual, rtol=0.0, atol=1e-12,
     )
 

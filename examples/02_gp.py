@@ -43,16 +43,16 @@ sites = UniformGrid(0.0, 1.0, nSites)
 
 # --- GP ENGINE DEFINITIONS ---
 
-# direct engine: covariance matrix on a fixed grid
+# direct parametrisation: covariance matrix on a fixed grid
 directGP = GaussianProcess.direct(
     UniformGrid(0.0, 1.0, resolution), covariance1D
 )
 
-# B-spline engine: coefficient vector in a spline expansion
+# B-spline parametrisation: coefficient vector in a spline expansion
 bsplineExpansion = BSpline1D(resolution, degree=3, boundary=[0.0, 1.0])
 bsplineGP = GaussianProcess.bspline(covariance1D, bsplineExpansion)
 
-# DNA engine: Fourier-based white-noise parametrisation
+# DNA parametrisation: Fourier-based white-noise coordinates
 dnaGP = GaussianProcess.dna(covariance1D, q=resolution, d=1)
 
 engines = {
@@ -62,7 +62,6 @@ engines = {
 }
 
 for name, gp in engines.items():
-    gp.sites = sites
     print(f"{name:8s}: parameter dim = {gp.parameterDimension}")
 
 
@@ -91,7 +90,7 @@ for name, gp in engines.items():
 
 # --- STATELESS EVALUATION ---
 
-print(f"\nevaluating {nSamples} parameter states per engine via gp.at_sites(z) ...")
+print(f"\nevaluating {nSamples} parameter states via gp.evaluate(z, sites) ...")
 
 atSitesVar = {}
 for name, gp in engines.items():
@@ -100,7 +99,7 @@ for name, gp in engines.items():
 
     for k in range(nSamples):
         realisation = gp.sampler.generate_realisation(rng=rng)
-        samples[k] = gp.at_sites(realisation.coordinate)
+        samples[k] = gp.evaluate(realisation.coordinate, sites)
 
     atSitesVar[name] = samples.var(axis=0)
     band = atSitesVar[name][interior]
@@ -135,12 +134,12 @@ if hasMatplotlib:
         for _ in range(nPaths):
             realisation = gp.sampler.generate_realisation(rng=rng)
             axes[1, col].plot(
-                sites.axis, gp.at_sites(realisation.coordinate),
+                sites.axis, gp.evaluate(realisation.coordinate, sites),
                 lw=0.7, alpha=0.7)
 
         axes[1, col].plot(sites.axis, atSitesVar[name],
                           "k--", lw=1.5, label="marginal var")
-        axes[1, col].set_title(f"{name} — gp.at_sites(z)")
+        axes[1, col].set_title(f"{name} — gp.evaluate(z, sites)")
         axes[1, col].set_xlabel("x")
         axes[1, col].legend(fontsize=8)
 
@@ -150,7 +149,7 @@ if hasMatplotlib:
     axes[0, 0].set_ylabel("field value")
     axes[1, 0].set_ylabel("field value")
 
-    fig.suptitle("Gaussian-process engines: prior draws and stateful evaluation")
+    fig.suptitle("Gaussian-process parametrisations: draws and evaluation")
     plt.subplots_adjust(top=0.9, hspace=0.3, wspace=0.25)
     plt.savefig("gp_sampling.png", dpi=150)
     plt.close()

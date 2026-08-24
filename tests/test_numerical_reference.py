@@ -2,7 +2,7 @@ import numpy as np
 from scipy.sparse.linalg import spsolve
 
 from styne.gp import GaussianProcess
-from styne.gp.dna import DNAFourierEngine, DNAFourierExpansion
+from styne.gp.dna import DNAFourierExpansion
 from styne.mcmc.diagnostics import AcceptanceRateDiagnostics
 from styne.mcmc.method.mala import (
     MALAProposal,
@@ -83,16 +83,36 @@ def test_dense_covariance_operator_reference_values():
     assert np.isclose(
         covariance.dual_quadratic_form(coordinate), 1.267867298578199,
     )
+    factor = covariance.to_cholesky()
+    np.testing.assert_allclose(
+        factor @ factor.T,
+        covariance.scaling * covariance.to_dense(),
+        rtol=0.0,
+        atol=1e-12,
+    )
+
+
+def test_diagonal_covariance_cholesky_respects_scaling():
+    covariance = DiagonalCovarianceMatrix(np.array([1.5, 0.6]))
+    covariance.scaling = 1.25
+
+    factor = covariance.to_cholesky()
+
+    np.testing.assert_allclose(
+        factor @ factor.T,
+        np.diag(covariance.scaling * covariance.marginalVariance),
+        rtol=0.0,
+        atol=1e-12,
+    )
 
 
 def test_direct_and_dna_gp_reference_evaluations():
     directCovariance = MaternCovariance1D(0.35, 1.5, 1.7)
     directGrid = UniformGrid(0.0, 1.0, 5)
     direct = GaussianProcess.direct(directGrid, directCovariance)
-    direct.sites = directGrid
     directCoefficient = np.array([0.5, -1.0, 0.25, 0.75, -0.4])
     np.testing.assert_allclose(
-        direct.at_sites(directCoefficient),
+        direct.evaluate(directCoefficient, directGrid),
         [
             0.6519202405202649,
             -0.5684390912084771,
@@ -106,10 +126,10 @@ def test_direct_and_dna_gp_reference_evaluations():
     dna = GaussianProcess.dna(
         MaternCovariance1D(0.3, 1.5, 0.8), q=3, d=1,
     )
-    dna.sites = UniformGrid(0.0, 1.0, 5)
+    dnaSites = UniformGrid(0.0, 1.0, 5)
     dnaCoefficient = np.linspace(-0.75, 0.9, dna.parameterDimension)
     np.testing.assert_allclose(
-        dna.at_sites(dnaCoefficient),
+        dna.evaluate(dnaCoefficient, dnaSites),
         [
             -0.7205954985785141,
             -0.11406982021787518,
@@ -142,12 +162,14 @@ def test_dna_transform_and_adjoint_closed_form_oracle():
 def test_log_length_multiplier_closed_form_oracle():
     q = (3, 2)
     alpha = (1.0, 1.4)
-    engine = DNAFourierEngine(q, d=2, alpha=alpha)
+    gp = GaussianProcess.dna(
+        MaternCovariance2D(0.3, 1.5, 1.0), q, d=2, alpha=alpha
+    )
     expected = compute_log_length_multiplier(
         q, alpha, d=2, nu=1.5, lengthScale=0.3,
     )
     np.testing.assert_allclose(
-        engine.compute_log_length_multiplier(1.5, 0.3), expected,
+        gp.compute_log_length_multiplier(1.5, 0.3), expected,
         rtol=0.0, atol=1e-12,
     )
 

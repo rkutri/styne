@@ -12,13 +12,12 @@ class MockCov(CovarianceFunctionInterface):
 def audit_evaluation(q=50, steps=100):
     gp = GaussianProcess.dna(MockCov(), q, d=1)
     sites = UniformGrid(0.0, 1.0, 100)
-    gp.sites = sites
     
     rng = np.random.default_rng(42)
     thetas = rng.standard_normal((steps, gp.parameterDimension))
     
     # Warmup
-    _ = gp.at_sites(thetas[0])
+    _ = gp.evaluate(thetas[0], sites)
     
     tracemalloc.start()
     start_time = time.perf_counter()
@@ -27,7 +26,7 @@ def audit_evaluation(q=50, steps=100):
     snapshot1 = tracemalloc.take_snapshot()
     
     for i in range(steps):
-        _ = gp.at_sites(thetas[i])
+        _ = gp.evaluate(thetas[i], sites)
         
     duration = time.perf_counter() - start_time
     snapshot2 = tracemalloc.take_snapshot()

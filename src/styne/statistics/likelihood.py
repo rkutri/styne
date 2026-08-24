@@ -116,8 +116,12 @@ class RegressionLikelihood(LikelihoodInterface):
 
         evaluation = self._forwardMap(parameter)
 
-        result = self._response.score(
-            self._data.measurement, evaluation, self._forwardMap)
+        cotangent = self._response.score(
+            self._data.measurement, evaluation
+        )
+        result = self._forwardMap.adjoint_derivative(
+            parameter, cotangent
+        )
         self._gradientCache.add(parameter, result)
         return result
 
@@ -238,8 +242,12 @@ class SGLMMLikelihood(LikelihoodInterface):
 
         evaluation = self._predictor(parameter)
 
-        result = self._response.score(
-            self._data.measurement, evaluation, self._predictor)
+        cotangent = self._response.score(
+            self._data.measurement, evaluation
+        )
+        result = self._predictor.adjoint_derivative(
+            parameter, cotangent
+        )
         self._gradientCache.add(parameter, result)
         return result
 

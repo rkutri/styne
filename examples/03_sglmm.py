@@ -51,8 +51,7 @@ obsSites = Grid(rng.uniform(0.0, 1.0, (nObs, spatialDim)))
 model = SGLMM(gp, obsSites)
 
 # synthetic data generation
-truthGP.sites = obsSites
-counts = rng.poisson(np.exp(truthGP.at_sites(zTrue.coordinate)))
+counts = rng.poisson(np.exp(truthGP.evaluate(zTrue.coordinate, obsSites)))
 
 data = Data(dimension=1, design=obsSites.to_array())
 data.measurement = counts[:, None]
@@ -101,11 +100,9 @@ print(f"acceptance rate={acceptanceRate:.3f}")
 gridRes = 40
 dense = UniformGrid((0.0, 1.0, gridRes), (0.0, 1.0, gridRes))
 
-truthGP.sites = dense
-fieldTrue = truthGP.at_sites(zTrue.coordinate)
+fieldTrue = truthGP.evaluate(zTrue.coordinate, dense)
 
-gp.sites = dense
-fieldRecovered = gp.at_sites(zMean)
+fieldRecovered = gp.evaluate(zMean, dense)
 
 correlation = np.corrcoef(fieldTrue, fieldRecovered)[0, 1]
 print(f"posterior mean vs truth: field correlation = {correlation:.3f}")

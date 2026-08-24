@@ -31,6 +31,11 @@ class CovarianceMatrix(CovarianceOperatorInterface):
         pass
 
     @abstractmethod
+    def to_cholesky(self) -> np.ndarray:
+        """Return a dense lower factor of the scaled covariance."""
+        pass
+
+    @abstractmethod
     def quadratic_form(self, x: np.ndarray) -> float:
         """Evaluate the quadratic form x^T C x."""
         pass
@@ -122,6 +127,9 @@ class DiagonalCovarianceMatrix(CovarianceMatrix):
     def apply_chol_factor_transpose(self, x: np.ndarray) -> np.ndarray:
         return sqrt(self.scaling) * self._sqrtMV * x
 
+    def to_cholesky(self) -> np.ndarray:
+        return np.diag(sqrt(self.scaling) * self._sqrtMV)
+
     def log_determinant(self) -> float:
         base = float(np.sum(np.log(np.square(self._sqrtMV))))
         return base + self.dimension * np.log(self.scaling)
@@ -211,6 +219,9 @@ class DenseCovarianceMatrix(CovarianceMatrix):
 
     def apply_chol_factor_transpose(self, x: np.ndarray) -> np.ndarray:
         return sqrt(self.scaling) * (self._cholFactor.T @ x)
+
+    def to_cholesky(self) -> np.ndarray:
+        return sqrt(self.scaling) * self._cholFactor.copy()
 
     def log_determinant(self) -> float:
         base = float(2. * np.sum(np.log(np.diag(self._cholFactor))))

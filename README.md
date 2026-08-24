@@ -167,11 +167,11 @@ the deterministic computation, while the response family owns the observation
 law.
 
 The Gaussian-process layer follows a similar convention. A `GaussianProcess`
-combines a covariance function with a parametrisation engine. The engine maps
-white-noise coordinates to coefficients and chooses an `Expansion`, while
-`gp.measure` supplies the corresponding Gaussian reference measure. Dense
-Cholesky, B-spline and DNA are therefore different parametrisations of the
-prior, not different model classes.
+combines a covariance function, a Gaussian coordinate measure and a linear
+`Expansion`. Dense Cholesky, B-spline and DNA are different parametrisations
+of the prior, not different model classes. Their construction details are
+private; evaluation is exposed uniformly by `gp.evaluate(coefficient, grid)`
+and `gp.bind(grid)`.
 
 ### Functions and expansions
 
@@ -180,17 +180,26 @@ coordinate vector $\theta$ to an `Expansion` $E$, with
 
 $$u_\theta(x) = E(\theta, x).$$
 
-The coordinate belongs to the `Function`; the `Expansion` contains only the
-static evaluation strategy and representation data, such as a Fourier basis,
-B-spline knots or explicit sites. Expansions are therefore reusable and do not
-change when a function is evaluated. Coordinates consistently use a trailing
-feature axis, `(..., dimension)`, and evaluation preserves every leading batch
-dimension. The same convention applies to GP Jacobian and adjoint operations,
-matching JAX and PyTorch batching without transposes at the public boundary.
+The coordinate belongs to the `Function`; the `Expansion` encapsulates how
+coordinates become field values, including static representation data such as
+a Fourier basis, B-spline knots or explicit sites. Binding an expansion to a
+grid creates and caches the corresponding evaluator. Coordinates consistently
+use a trailing feature axis, `(..., dimension)`, and evaluation preserves every
+leading batch dimension.
+
+No linearity is assumed by `Expansion`, so nonlinear representations may use
+the same interface. `LinearExpansion` records the additional structure needed
+by the current Gaussian-process parametrisations. Derivative actions use the
+mathematical names `directional_derivative(coefficient, direction)` and
+`adjoint_derivative(coefficient, cotangent)`. JAX and PyTorch obtain both from
+their native automatic differentiation; NumPy linear expansions provide an
+analytical fallback.
 
 ```python
 field = Function(coordinate, expansion)
 values = field.evaluate(grid)
+variation = field.directional_derivative(direction, grid)
+pullback = field.adjoint_derivative(cotangent, grid)
 
 updated = field.with_coordinate(new_coordinate)
 assert updated.expansion is field.expansion
@@ -203,7 +212,8 @@ The refactored API replaces the previous mutable-realisation interface:
 | `function.function` | `function.expansion` |
 | `function.function.evaluate(grid)` | `function.evaluate(grid)` |
 | assign `expansion.coefficient` or call `project(...)` | `expansion.evaluate(coefficient, grid)` |
-| `engine.build_realisation()` | `engine.build_expansion()` |
+| mutable `GPEngine.sites` and `gp.at_sites(...)` | `gp.evaluate(coefficient, grid)` or `expansion.bind(grid)` |
+| `apply_jacobian(...)` / `apply_adjoint_jacobian(...)` | `directional_derivative(...)` / `adjoint_derivative(...)` |
 | representation-specific `*Realisation` classes | stateless `*Expansion` classes |
 
 ## Citation
