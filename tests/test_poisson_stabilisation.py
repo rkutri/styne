@@ -78,7 +78,6 @@ def test_poisson_log_likelihood_preserves_unclipped_target():
     assert np.isneginf(likelihoodExtreme)
 
 
-
 def test_poisson_score_preserves_unclipped_target():
     """The score remains the derivative of the unclipped log likelihood."""
     response = PoissonResponse()
@@ -91,7 +90,6 @@ def test_poisson_score_preserves_unclipped_target():
     assert np.isneginf(scoreVal[1])
     assert np.isneginf(scoreVal[2])
     assert scoreVal[3] == 1.0
-
 
 
 def test_pmala_drift_preserves_non_finite_gradient():

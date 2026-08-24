@@ -5,6 +5,7 @@ from styne.parameter.vector import Vector
 from styne.statistics.gaussian import Gaussian
 from styne.statistics.measure import ProbabilityMeasure
 
+
 class ResponseFamily(ProbabilityMeasure):
     """Backend-native, stateless observation response family."""
 
