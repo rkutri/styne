@@ -20,7 +20,7 @@ jobs:
       - name: Install dependencies
         run: |
           python3 -m pip install --upgrade pip
-          pip install .
+          pip install '.[plotting]'
           pip install pytest flake8 flake8-print
           if [ "${{ matrix.backend }}" = "jax" ]; then pip install 'jax[cpu]'; fi
           if [ "${{ matrix.backend }}" = "pytorch" ]; then pip install torch; fi
@@ -29,7 +29,14 @@ jobs:
       - name: Run supported tests
         run: python3 -m pytest tests -m 'not slow'
       - name: Run benchmark smoke test
-        run: python3 benchmarks/backend_smoke.py
+        run: |
+          python3 benchmarks/backend_smoke.py
+          python3 benchmarks/dartlogistic.py \
+            --backend "${{ matrix.backend }}" \
+            --output-dir "${{ runner.temp }}/dartlogistic"
+          python3 benchmarks/dartlocalisation.py \
+            --backend "${{ matrix.backend }}" \
+            --output-dir "${{ runner.temp }}/dartlocalisation"
       - name: Run maintained example smoke tests
         run: |
           python3 examples/01_quickstart.py --smoke --backend "${{ matrix.backend }}"

@@ -9,10 +9,14 @@ __pycache__/
 
 # other files
 *.csv
+!/benchmarks/results/dartlogistic_production_*.csv
+!/benchmarks/results/dartlocalisation_production_*.csv
 *.pdf
 
 # temporary
 localData/
+*.checkpoint.json
+*.checkpoint.json.*.tmp
 
 # vim .swp files
 *.swp
@@ -184,5 +188,3 @@ joblib_caches/
 
 # reproducibility figures
 reproducibility/figures/
-
-
