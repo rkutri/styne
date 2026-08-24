@@ -1,46 +1,20 @@
 import numpy as np
 
-from styne.model.sglmm import SGLMM
 from styne.gp.gaussianprocess import GaussianProcess
+from styne.model.sglmm import SGLMM
+from styne.parameter.vector import Vector
 from styne.statistics.stationary import MaternCovariance1D
 from styne.utility.grid import UniformGrid
 
-def numerical_jacobian(f, x, epsilon=1e-6):
-    n = len(x)
-    m = len(f(x))
-    J = np.zeros((m, n))
-    for i in range(n):
-        xPlus = x.copy()
-        xPlus[i] += epsilon
-        xMinus = x.copy()
-        xMinus[i] -= epsilon
-        J[:, i] = (f(xPlus) - f(xMinus)) / (2 * epsilon)
-    return J
 
-def test_sglmm_predictor_identical_sites():
-    """Test SGLMM derivatives when GP sites match observation sites."""
+def test_sglmm_evaluates_explicit_latent_coordinates():
     obsGrid = UniformGrid(0.0, 1.0, 10)
-    cov = MaternCovariance1D(0.2, 1.5, 1.0)
-    gp = GaussianProcess.dna(cov, q=10, d=1)
-    predictor = SGLMM(gp, obsGrid)
-    
-
-    
-    parameter = gp.parameter.with_coordinate(
-        np.random.randn(gp.parameter.dimension)
+    gp = GaussianProcess.dna(
+        MaternCovariance1D(0.2, 1.5, 1.0), q=10, d=1
     )
-    
-    v = np.random.randn(parameter.dimension)
-    w = np.random.randn(len(obsGrid))
-    
-    vParam = parameter.with_coordinate(v)
-    deriv = predictor.directional_derivative(parameter, vParam)
-    
-    assert deriv.shape == (len(obsGrid),)
-    
-    adj = predictor.adjoint_derivative(parameter, w)
-    assert adj.shape == (parameter.dimension,)
-    
-    innerFwd = np.dot(deriv, w)
-    innerBwd = np.dot(v, adj)
-    np.testing.assert_allclose(innerFwd, innerBwd, rtol=1e-5)
+    model = SGLMM(gp, obsGrid)
+    coordinate = np.linspace(-0.4, 0.3, gp.parameterDimension)
+
+    evaluation = model(Vector(coordinate))
+
+    np.testing.assert_allclose(evaluation, gp.evaluate(coordinate, obsGrid))

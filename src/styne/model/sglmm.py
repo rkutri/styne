@@ -1,12 +1,9 @@
-import numpy as np
-
 from typing import Optional
 
 from styne.model.forwardmap import ForwardMap
 from styne.model.trend import Trend
-from styne.parameter.parameter import Parameter
+from styne.parameter.parameter import as_coordinate
 from styne.parameter.vector import Vector
-from styne.parameter.function import Function
 from styne.parameter.block import BlockParameter
 from styne.model.representation.expansion import backend_constant
 from styne.gp.gaussianprocess import GaussianProcess
@@ -39,8 +36,6 @@ class SGLMM(ForwardMap):
     A GLMM with uncorrelated (i.i.d.) random effects and no spatial structure
     is currently not supported.
     """
-
-
     def __init__(
         self,
         gp: GaussianProcess,
@@ -65,7 +60,7 @@ class SGLMM(ForwardMap):
         if features is None:
             self._features = None
         else:
-            featureArray = np.asarray(features)
+            featureArray = as_coordinate(features)
             if featureArray.ndim == 1:
                 featureArray = featureArray[:, None]
 
@@ -79,15 +74,12 @@ class SGLMM(ForwardMap):
         if self._trend is not None:
             self._trendValues = self._trend.evaluate(self._obsSites)
 
-
-
     @property
     def pType(self):
-        return BlockParameter if self._features is not None else (Vector, Function)
+        return BlockParameter if self._features is not None else Vector
 
     @property
     def pDim(self) -> int:
-
         latentDim = self._gp.parameterDimension
 
         if self._features is not None:
@@ -95,11 +87,24 @@ class SGLMM(ForwardMap):
 
         return latentDim
 
-
     def _prepare(self, parameter):
         if self._features is not None:
-            return parameter.block(0).coordinate, parameter.block(1).coordinate
+            if parameter.nBlocks != 2:
+                raise ValueError(
+                    "SGLMM fixed effects require latent and fixed blocks."
+                )
+            latent, fixedEffect = parameter.block(0), parameter.block(1)
+            if not isinstance(latent, Vector) or not isinstance(
+                    fixedEffect, Vector):
+                raise TypeError("SGLMM blocks must be Vector parameters.")
+            if latent.dimension != self._gp.parameterDimension:
+                raise ValueError("Latent block has the wrong dimension.")
+            if fixedEffect.dimension != self._features.shape[1]:
+                raise ValueError("Fixed-effect block has the wrong dimension.")
+            return latent.coordinate, fixedEffect.coordinate
 
+        if parameter.dimension != self._gp.parameterDimension:
+            raise ValueError("Latent parameter has the wrong dimension.")
         return parameter.coordinate, None
 
     def _evaluate(self, preparedState):
@@ -113,81 +118,11 @@ class SGLMM(ForwardMap):
             evaluation = evaluation + fixedEffect @ features.T
 
         if self._trendValues is not None:
-            evaluation = evaluation + self._trendValues
+            evaluation = evaluation + backend_constant(
+                self._trendValues, evaluation
+            )
 
         return evaluation
-
-    def directional_derivative(
-            self, parameter: Parameter,
-            direction: Parameter) -> np.ndarray:
-        """
-        Apply the model's Jacobian to a parameter direction.
-
-        Routes the latent-field block through the GP's own
-        `directional_derivative` and, when `features` is set, adds the
-        fixed-effect block's contribution via the design matrix directly.
-
-        Parameters
-        ----------
-        parameter : Parameter
-            Point in parameter space.
-        direction : Parameter
-            Direction in parameter space, `Vector` or `BlockParameter`
-            depending on whether `features` was set at construction.
-
-        Returns
-        -------
-        np.ndarray
-        """
-        latentCoordinate, _ = self._prepare(parameter)
-        directionCoordinate, _ = self._prepare(direction)
-        deriv = self._gp.directional_derivative(
-            latentCoordinate, directionCoordinate, self._obsSites
-        )
-
-        if self._features is not None:
-            fixedDirection = direction.block(1).coordinate
-            features = backend_constant(self._features, fixedDirection)
-            deriv = deriv + fixedDirection @ features.T
-        return deriv
-
-    def adjoint_derivative(
-            self, parameter: Parameter,
-            cotangent: np.ndarray) -> np.ndarray:
-        """
-        Apply the adjoint of the model's Jacobian to a cotangent.
-
-        Splits the same way as `directional_derivative`, adjoint GP action for
-        the latent block, concatenated with `features.T @ w` for the
-        fixed-effect block when present.
-
-        Parameters
-        ----------
-        parameter : Parameter
-            Point in parameter space.
-        cotangent : np.ndarray
-            Cotangent in observation space.
-
-        Returns
-        -------
-        np.ndarray
-            `Vector`-shaped if no fixed effects, otherwise concatenated with
-            the fixed-effect block's adjoint contribution.
-        """
-        latentCoordinate, _ = self._prepare(parameter)
-        gpAdj = self._gp.adjoint_derivative(
-            latentCoordinate, cotangent, self._obsSites
-        )
-
-        if self._features is None:
-            return gpAdj
-
-        features = backend_constant(self._features, cotangent)
-        fixedAdjoint = cotangent @ features
-        backend = parameter.backend
-        return backend.namespace.concatenate(
-            (gpAdj, fixedAdjoint), axis=-1
-        )
 
     def predict(self, preparedState, queryGrid: Grid, features=None):
         """
@@ -199,7 +134,7 @@ class SGLMM(ForwardMap):
             State returned by 'prepare' for the parameter to predict.
         queryGrid : Grid
             Sites to predict at.
-        features : np.ndarray, optional
+        features : array-like, optional
             Design matrix at the query sites, required if the model was
             constructed with fixed effects.
 
@@ -221,12 +156,14 @@ class SGLMM(ForwardMap):
                 raise ValueError(
                     "Out-of-sample features required for prediction."
                 )
-            featureArray = np.asarray(features)
+            featureArray = as_coordinate(features)
             if featureArray.ndim == 1:
                 featureArray = featureArray[:, None]
-            if len(featureArray) != len(queryGrid):
+            if (
+                    len(featureArray) != len(queryGrid)
+                    or featureArray.shape[1] != self._features.shape[1]):
                 raise ValueError(
-                    "features must have shape (len(queryGrid), p)"
+                    "features must have shape (len(queryGrid), p)."
                 )
             featureArray = backend_constant(featureArray, fixedEffect)
             mean = mean + fixedEffect @ featureArray.T

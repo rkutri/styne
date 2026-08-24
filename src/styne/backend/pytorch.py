@@ -50,7 +50,11 @@ class PyTorchNamespace(ArrayNamespace):
         return torch.log(array)
 
     def logaddexp(self, first, second):
-        return torch.logaddexp(first, self._as_like(second, first))
+        reference = first if isinstance(first, torch.Tensor) else second
+        return torch.logaddexp(
+            self._as_like(first, reference),
+            self._as_like(second, reference),
+        )
 
     def maximum(self, first, second):
         return torch.maximum(first, self._as_like(second, first))
