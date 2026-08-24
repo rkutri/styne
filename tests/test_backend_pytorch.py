@@ -252,12 +252,25 @@ def test_pytorch_capabilities_are_explicit():
     assert capabilities.spectralTransforms
     assert not capabilities.transformedLoops
 
-    with pytest.raises(BackendCapabilityError, match="transformed loops"):
-        backend.scan(
-            lambda state, value: (state + value, state),
-            torch.tensor(0.0),
-            torch.arange(3.0),
-        )
+
+def test_pytorch_scan_compiles_with_static_length():
+    backend = get_backend("pytorch")
+
+    def accumulate(carry, _):
+        nextCarry = carry + 1.0
+        return nextCarry, nextCarry
+
+    compiled = backend.compile(
+        lambda value: backend.scan(
+            accumulate, value, None, length=3
+        ),
+        backend="eager",
+        fullgraph=True,
+    )
+    carry, values = compiled(torch.tensor(0.0))
+
+    torch.testing.assert_close(carry, torch.tensor(3.0))
+    torch.testing.assert_close(values, torch.tensor([1.0, 2.0, 3.0]))
 
 
 def test_pytorch_compiles_at_the_parameter_coordinate_boundary():

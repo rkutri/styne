@@ -6,6 +6,7 @@ from tqdm.contrib.logging import logging_redirect_tqdm
 
 from styne.utility.progress import make_reporter
 
+from styne.backend import infer_backend
 from styne.parameter.parameter import Parameter
 from styne.mcmc.chain import Chain
 from styne.mcmc.diagnostics import DummyDiagnostics
@@ -104,6 +105,40 @@ class MCMCSampler(ABC):
         if self._storeChain:
             parameter = self._parameter_from_state(nextState)
             self.chain.append(parameter.coordinate)
+
+    def transformed_trajectory(self, nSteps, initialState, rng=None):
+        """Run pure transitions as one backend-native computation."""
+        self._validate_initial(initialState)
+        if nSteps < 1:
+            raise ValueError("Transformed trajectories require positive nSteps.")
+        if not self._uses_pure_step():
+            raise RuntimeError(
+                "Transformed trajectories require a sampler with step()."
+            )
+
+        backend = infer_backend(initialState.coordinate)
+        if not backend.capabilities.transformedLoops:
+            raise RuntimeError(
+                f"Backend {backend.name!r} does not support transformed loops."
+            )
+        randomState = self._rng if rng is None else rng
+
+        def advance(carry, _):
+            state, currentRng = carry
+            nextState, _, nextRng = self.step(state, currentRng)
+            return (nextState, nextRng), self._parameter_from_state(
+                nextState
+            ).coordinate
+
+        def execute(parameter, currentRng):
+            state = self.initial_state(parameter)
+            return backend.scan(
+                advance, (state, currentRng), None, length=nSteps
+            )
+
+        compiled = backend.compile(execute)
+        (finalState, nextRng), coordinates = compiled(initialState, randomState)
+        return self._parameter_from_state(finalState), coordinates, nextRng
 
     def _drive(self, nSteps, progress, description):
         samplerName = getattr(self, "name", self.__class__.__name__)

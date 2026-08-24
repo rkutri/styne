@@ -132,3 +132,33 @@ def test_runner_preserves_pytorch_chain_arrays():
 
     assert backend.is_array(sampler.lastState.coordinate)
     assert backend.is_array(sampler.chain.trajectory[-1])
+
+
+def test_transformed_trajectory_compiles_with_jax():
+    jax = pytest.importorskip("jax")
+    jnp = pytest.importorskip("jax.numpy")
+
+    sampler = SymmetricMetropolisHastings(
+        GraphQuadraticDensity(), FixedOffsetProposal(), DummyDiagnostics(),
+    )
+    finalState, coordinates, _ = sampler.transformed_trajectory(
+        2, Vector(jnp.array([0.])), jax.random.key(9)
+    )
+
+    np.testing.assert_allclose(coordinates, [[0.], [0.]])
+    np.testing.assert_allclose(finalState.coordinate, [0.])
+
+
+def test_transformed_trajectory_rejects_pytorch_generator_compilation():
+    torch = pytest.importorskip("torch")
+    from styne.backend import get_backend
+
+    backend = get_backend("pytorch")
+    sampler = SymmetricMetropolisHastings(
+        GraphQuadraticDensity(), FixedOffsetProposal(), DummyDiagnostics(),
+    )
+
+    with pytest.raises(RuntimeError, match="transformed loops"):
+        sampler.transformed_trajectory(
+            2, Vector(torch.tensor([0.])), backend.random_state(9)
+        )

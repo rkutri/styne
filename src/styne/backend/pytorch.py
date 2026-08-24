@@ -139,6 +139,8 @@ class PyTorchBackend(Backend):
         vectorisation=True,
         controlFlow=True,
         spectralTransforms=True,
+        # Dynamo cannot represent explicit torch.Generator state in one graph.
+        transformedLoops=False,
     )
     _parameterContainersRegistered = False
 
@@ -362,6 +364,30 @@ class PyTorchBackend(Backend):
         return torch.cond(
             predicate, trueFunction, falseFunction, (operand,)
         )
+
+    def scan(self, function, initialValue, inputs, *, length=None):
+        if inputs is not None:
+            raise NotImplementedError(
+                "PyTorch scan requires inputs=None and a static length."
+            )
+        if length is None or length < 1:
+            raise ValueError("PyTorch scan requires a positive static length.")
+
+        value = initialValue
+        outputs = []
+        for _ in range(length):
+            value, output = function(value, None)
+            outputs.append(output)
+
+        flattened, structure = _pytree.tree_flatten(outputs[0])
+        flattenedOutputs = [
+            _pytree.tree_flatten(output)[0] for output in outputs
+        ]
+        stacked = [
+            torch.stack([output[index] for output in flattenedOutputs])
+            for index in range(len(flattened))
+        ]
+        return value, _pytree.tree_unflatten(stacked, structure)
 
     def cholesky(self, matrix):
         return torch.linalg.cholesky(matrix)
