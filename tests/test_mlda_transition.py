@@ -57,3 +57,27 @@ def test_mlda_transformed_trajectory_compiles_with_jax():
     assert finalState.coordinate.shape == (1,)
     assert trajectory.shape == (2, 1)
     assert isinstance(nextRng, jax.Array)
+
+
+def test_surrogate_trajectory_preserves_jax_arrays():
+    jax = pytest.importorskip("jax")
+    jnp = pytest.importorskip("jax.numpy")
+
+    density = GaussianDensity(
+        IIDCovarianceMatrix(1, jnp.array(1.)), Vector(jnp.zeros(1))
+    )
+    measure = SurrogateTransitionMeasure(
+        MetropolisedRandomWalk(
+            density,
+            IIDCovarianceMatrix(1, jnp.array(0.5)),
+            DummyDiagnostics(),
+        ),
+        2,
+    )
+
+    _, trajectory, _ = measure.transition_trajectory(
+        Vector(jnp.zeros(1)), jax.random.key(3)
+    )
+
+    assert isinstance(trajectory, jax.Array)
+    assert trajectory.shape == (3, 1)

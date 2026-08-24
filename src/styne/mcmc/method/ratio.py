@@ -1,19 +1,17 @@
-from numpy import ndarray, asarray, log
-from typing import Optional, List
-from scipy.special import logsumexp
+import numpy as np
+
+from styne.backend import infer_backend
 from styne.parameter.parameter import Parameter
 
 
-def log_dot_product_weights(
-    gamma: float, samples: ndarray, x: ndarray, z: ndarray,
-    spectralWeights: ndarray = None
-) -> ndarray:
+def log_dot_product_weights(gamma, samples, x, z, spectralWeights=None):
     """Raw IS log-weights for the regularisation ratio."""
+    backend = infer_backend(samples)
     mid = 0.5 * (x + z)
     diff = x - z
     if spectralWeights is not None:
         diff = spectralWeights**2 * diff
-    return gamma * ((samples - mid) @ diff)
+    return gamma * backend.namespace.sum((samples - mid) * diff, axis=-1)
 
 
 class RatioEstimator:
@@ -56,9 +54,14 @@ class RatioEstimator:
         self._thinning = thinning
         self._type = type
 
+    @property
+    def requires_proposal_trajectory(self):
+        return self._type == 'bridge'
+
     def log_ratio_estimate(
-        self, state: Parameter, proposal: Parameter, trajectory=None
-    ) -> float:
+        self, state: Parameter, proposal: Parameter, trajectory=None,
+        proposalTrajectory=None,
+    ):
         """
         Estimate log(N_z / N_x) from the surrogate chain trajectory.
 
@@ -71,72 +74,94 @@ class RatioEstimator:
 
         Returns
         -------
-        float
-            Estimated log(N_z / N_x).
+        Backend-native scalar estimate of log(N_z / N_x).
         """
-        traj = (
+        trajectory = (
             self._surrogateMeasure.chain.trajectory
             if trajectory is None else trajectory
         )
         # Exclude the accepted proposal ψ_n from the ratio estimate. Its weight
         # is deterministic given z = ψ_n, introducing a conditional bias that
         # correlates with the proposal distance ‖z - x‖.
-        trimmed = traj[:-1] if len(traj) > 1 else traj
-        sub = trimmed[self._burnin::self._thinning]
+        backend = infer_backend(state.coordinate)
+        metadata = backend.metadata(state.coordinate)
+        if isinstance(trajectory, list):
+            trajectory = backend.asarray(
+                np.stack(trajectory),
+                dtype=metadata.dtype, device=metadata.device,
+            )
+        trimmed = trajectory[:-1]
+        samples = trimmed[self._burnin::self._thinning]
 
-        if not sub:
-            return 0.
+        if samples.shape[0] == 0:
+            return backend.asarray(0., dtype=metadata.dtype, device=metadata.device)
 
         sw = self._surrogateMeasure.density.spectralWeights
-        samplesX = asarray(sub)
         w = log_dot_product_weights(
-            self._surrogateMeasure.regularisation, samplesX,
+            self._surrogateMeasure.regularisation, samples,
             state.coordinate, proposal.coordinate, sw
+        )
+        nSamples = w.shape[0]
+        logSamples = backend.namespace.log(
+            backend.asarray(nSamples, dtype=metadata.dtype, device=metadata.device)
         )
 
         if self._type == 'is':
-            return float(logsumexp(-w) - log(len(w)))
+            return backend.namespace.logsumexp(-w) - logSamples
 
         if self._type == 'cumulant':
-            if len(w) == 1:
-                return float(-w.mean())
-            return float(-w.mean() + 0.5 * w.var(ddof=1))
+            mean = backend.namespace.mean(w)
+            if nSamples == 1:
+                return -mean
+            variance = backend.namespace.sum((w - mean) ** 2) / (nSamples - 1)
+            return -mean + 0.5 * variance
 
         # --- Geometric bridge ---
 
         # The auxiliary Π_z chain reuses the surrogate measure's configured
         # subchain length. To use a different length for the bridge, configure
         # the measure accordingly before constructing the estimator.
-        logEstX = float(logsumexp(-0.5 * w) - log(len(w)))
+        logEstX = backend.namespace.logsumexp(-0.5 * w) - logSamples
 
-        xLocation = self._surrogateMeasure.location
-        self._surrogateMeasure.location = proposal
-        self._surrogateMeasure.generate_realisation()
-
-        trajZ = self._surrogateMeasure.chain.trajectory
+        if proposalTrajectory is None:
+            xLocation = self._surrogateMeasure.location
+            self._surrogateMeasure.location = proposal
+            self._surrogateMeasure.generate_realisation()
+            trajectoryZ = self._surrogateMeasure.chain.trajectory
+        else:
+            trajectoryZ = proposalTrajectory
         # Same trimming as for the Π_x trajectory: exclude the terminal state.
-        trimmedZ = trajZ[:-1] if len(trajZ) > 1 else trajZ
-        subZ = trimmedZ[self._burnin::self._thinning]
+        if isinstance(trajectoryZ, list):
+            trajectoryZ = backend.asarray(
+                np.stack(trajectoryZ),
+                dtype=metadata.dtype, device=metadata.device,
+            )
+        samplesZ = trajectoryZ[:-1][self._burnin::self._thinning]
 
-        if not subZ:
+        if samplesZ.shape[0] == 0:
             # Safe to restore location without explicitly saving/restoring chain state.
             # The surrogate measure's generate_realisation() internally calls run()
             # with a fresh initial state derived from the new location, ensuring safe
             # re-initialisation.
-            self._surrogateMeasure.location = xLocation
+            if proposalTrajectory is None:
+                self._surrogateMeasure.location = xLocation
             return logEstX
 
-        samplesZ = asarray(subZ)
         wZ = log_dot_product_weights(
             self._surrogateMeasure.regularisation, samplesZ,
             state.coordinate, proposal.coordinate, sw
         )
-        logEstZ = float(logsumexp(0.5 * wZ) - log(len(wZ)))
+        logEstZ = backend.namespace.logsumexp(0.5 * wZ) - backend.namespace.log(
+            backend.asarray(
+                wZ.shape[0], dtype=metadata.dtype, device=metadata.device,
+            )
+        )
 
         # Safe to restore location without explicitly saving/restoring chain state.
         # The surrogate measure's generate_realisation() internally calls run()
         # with a fresh initial state derived from the new location, ensuring safe
         # re-initialisation.
-        self._surrogateMeasure.location = xLocation
+        if proposalTrajectory is None:
+            self._surrogateMeasure.location = xLocation
 
         return logEstX - logEstZ

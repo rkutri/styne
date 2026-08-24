@@ -7,6 +7,7 @@ from styne.statistics.measure import (
 from styne.statistics.dirac import DiracMeasure
 from styne.parameter.parameter import Parameter
 from styne.mcmc.metropolishastings import MetropolisHastings
+from styne.backend import infer_backend
 
 
 class SurrogateTransitionMeasure(AbsolutelyContinuousProbabilityMeasure):
@@ -88,7 +89,12 @@ class SurrogateTransitionMeasure(AbsolutelyContinuousProbabilityMeasure):
         for _ in range(self._nChain):
             state, _, randomState = self._mcmc.step(state, randomState)
             trajectory.append(self._mcmc._parameter_from_state(state).coordinate)
-        return self._mcmc._parameter_from_state(state), trajectory, randomState
+        backend = infer_backend(initialState.coordinate)
+        return (
+            self._mcmc._parameter_from_state(state),
+            backend.namespace.stack(trajectory),
+            randomState,
+        )
 
     def sample(self, randomState) -> tuple[Parameter, object]:
         """

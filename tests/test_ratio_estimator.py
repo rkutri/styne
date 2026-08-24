@@ -56,6 +56,28 @@ class StubMeasure:
         self.regularisation = gamma
 
 
+def test_cumulant_ratio_preserves_jax_scalar():
+    jnp = pytest.importorskip("jax.numpy")
+
+    trajectory = jnp.array([[0.], [1.], [1.]])
+    estimate = RatioEstimator(
+        StubMeasure(trajectory, 1.), 0, 1, 'cumulant'
+    ).log_ratio_estimate(Vector(jnp.array([0.])), Vector(jnp.array([1.])))
+
+    assert isinstance(estimate, type(jnp.array(0.)))
+
+
+def test_cumulant_ratio_preserves_pytorch_scalar():
+    torch = pytest.importorskip("torch")
+
+    trajectory = torch.tensor([[0.], [1.], [1.]])
+    estimate = RatioEstimator(
+        StubMeasure(trajectory, 1.), 0, 1, 'cumulant'
+    ).log_ratio_estimate(Vector(torch.tensor([0.])), Vector(torch.tensor([1.])))
+
+    assert isinstance(estimate, torch.Tensor)
+
+
 # ---------------------------------------------------------------------------
 # Analytical reference
 # ---------------------------------------------------------------------------
@@ -102,6 +124,23 @@ def make_surrogate(gamma, samplesX=None, samplesZ=None):
             measure.chain.trajectory = list(samplesZ) + [samplesZ[-1]]
         measure.generate_realisation.side_effect = realise
     return measure
+
+
+def test_bridge_uses_explicit_proposal_trajectory_without_mutating_measure():
+    samplesX = np.array([[0.], [1.]])
+    samplesZ = np.array([[1.], [2.]])
+    measure = make_surrogate(1., samplesX=samplesX)
+    estimator = RatioEstimator(measure, 0, 1, 'bridge')
+
+    result = estimator.log_ratio_estimate(
+        Vector(np.array([0.])),
+        Vector(np.array([1.])),
+        list(samplesX) + [samplesX[-1]],
+        list(samplesZ) + [samplesZ[-1]],
+    )
+
+    assert np.isfinite(result)
+    measure.generate_realisation.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
