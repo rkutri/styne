@@ -19,11 +19,17 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+jax = [
+    "jax",
+]
 plotting = [
     "matplotlib>=3.7.0",
 ]
 reproducibility = [
     "joblib>=1.4.2",
+]
+torch = [
+    "torch",
 ]
 
 [dependency-groups]
