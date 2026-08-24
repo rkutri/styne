@@ -159,6 +159,11 @@ class DARTFactory(MHFactory):
     When a partition and fine prior are set, the root chain operates on
     the coarse subspace only; fine modes are proposed from the prior.
     Without partition, all behaviour is identical to the original.
+
+    Configure the selected root chain through ``root``. The proposal parameter
+    is ``root.proposalCovariance`` for ``"mrw"``, ``root.beta`` for ``"pcn"``
+    and ``"pmala"``, and ``root.stepSize`` for ``"mala"``. If it is not set,
+    DART tunes the corresponding parameter automatically during ``create()``.
     """
 
     def __init__(self, root: str = "pcn"):

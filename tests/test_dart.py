@@ -7,6 +7,25 @@ from styne.mcmc.method.dart import DARTFactory, DART
 from styne.mcmc.method.mrw import MRWFactory
 from styne.mcmc.diagnostics import DummyDiagnostics
 
+
+@pytest.mark.parametrize(
+    ("root", "invalid_setting", "valid_setting"),
+    [
+        ("pcn", "proposalCovariance", "beta"),
+        ("mrw", "beta", "proposalCovariance"),
+        ("mala", "beta", "stepSize"),
+        ("pmala", "proposalCovariance", "beta"),
+    ],
+)
+def test_dart_root_rejects_unsupported_settings(
+        root, invalid_setting, valid_setting):
+    """Root factories must not silently accept settings for other methods."""
+    factory = DARTFactory(root=root)
+
+    with pytest.raises(AttributeError, match=valid_setting):
+        setattr(factory.root, invalid_setting, 1.0)
+
+
 def test_dart_factory_minimal():
     """Verify that DARTFactory builds a valid 1-level sampler."""
     dim = 2
@@ -168,5 +187,3 @@ def test_partitioned_dart_pcn_fine_edge_case():
     draw = finePrior.generate_realisation(rng=rngPrior)
 
     np.testing.assert_array_equal(prop.coordinate, draw.coordinate)
-
-
