@@ -41,7 +41,6 @@ class DirectDARTProposal(ProposalMethod):
 
     def __init__(self, tempering: float, gamma: float, surrogate: Gaussian,
                  proposalCovariance: DenseCovarianceMatrix):
-        super().__init__()
         self._tempering = tempering
         self._gamma = gamma
         self._surrogate = surrogate
@@ -52,21 +51,21 @@ class DirectDARTProposal(ProposalMethod):
         
         self._proposalMeasure = Gaussian(proposalCovariance)
 
-    def generate_proposal(self, rng: Generator) -> TransitionData:
-        if self._state is None:
-            raise ValueError("Trying to generate proposal with undefined state")
-
-        x = self._state.coordinate
+    def propose(self, state: Parameter, rng):
+        x = state.coordinate
         bx = self._tempering * self._aTimesXhat + self._gamma * x
         
         # Apply P^{-1} to get mu_x
         mux = self._proposalMeasure.covariance.apply(bx)
         
-        propMean = self._state.with_coordinate(mux)
-        proposal = self._proposalMeasure.with_mean(propMean).generate_realisation(rng=rng)
+        propMean = state.with_coordinate(mux)
+        proposal, nextRng = self._proposalMeasure.with_mean(propMean).sample(
+            rng
+        )
         
-        return TransitionData(
-            self._state, proposal, auxiliary={'bx': bx, 'mux': mux}
+        return (
+            TransitionData(state, proposal, auxiliary={'bx': bx, 'mux': mux}),
+            nextRng,
         )
 
 
@@ -114,15 +113,14 @@ class DirectDART(MetropolisHastings):
         proposalMethod = DirectDARTProposal(tempering, gamma, surrogate, proposalCovariance)
         super().__init__(targetDensity, proposalMethod, diagnostics, acceptance=acceptance, rng=rng)
 
-    def _log_mh_ratio(self, transition: TransitionData) -> float:
+    def _log_mh_ratio(self, transition: TransitionData):
         
         x = transition.state.coordinate
         z = transition.proposal.coordinate
 
         # 1. Target density difference
-        logTargetDiff = float(
-            self._tgtDensity.evaluate_log(transition.proposal)
-            - self._tgtDensity.evaluate_log(transition.state)
+        logTargetDiff = (
+            transition.proposed.logDensity - transition.current.logDensity
         )
         if logTargetDiff == -np.inf:
             return -np.inf

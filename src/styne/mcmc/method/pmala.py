@@ -45,7 +45,6 @@ class PMALAProposal(ProposalMethod):
 
     def __init__(self, target: RadonNikodym, beta: float):
 
-        super().__init__()
         validate_pmala_target(target)
         validate_beta(beta)
 
@@ -81,16 +80,12 @@ class PMALAProposal(ProposalMethod):
         return pcnDrift + 0.5 * self._beta**2 * refCov.apply(gradLogPsi)
 
 
-    def generate_proposal(self, rng: Generator) -> TransitionData:
-        if self._state is None:
-            raise ValueError(
-                "Trying to generate proposal with undefined state")
-
+    def propose(self, state: Parameter, rng):
         # Drift must be computed before scaling is changed: _drift calls
         # refCov.apply, which uses the current scaling. Setting scaling = β²
         # first would double-count the factor in the drift term.
-        driftVector = self._drift(self._state)
-        drift = self._state.with_coordinate(
+        driftVector = self._drift(state)
+        drift = state.with_coordinate(
             np.asarray(driftVector, dtype=np.float64)
         )
         refCov = self._target.reference.covariance
@@ -98,10 +93,11 @@ class PMALAProposal(ProposalMethod):
         proposalMeasure = self._proposalMeasure.with_mean(drift).with_covariance(
             proposalCovariance
         )
-        proposal = proposalMeasure.generate_realisation(rng=rng)
+        proposal, nextRng = proposalMeasure.sample(rng)
 
-        return TransitionData(
-            self._state, proposal, auxiliary={'drift': driftVector}
+        return (
+            TransitionData(state, proposal, auxiliary={'drift': driftVector}),
+            nextRng,
         )
 
 
@@ -136,7 +132,7 @@ class PreconditionedMALA(MetropolisHastings):
         super().__init__(target, proposalMethod, diagnostics,
                          acceptance=acceptance, rng=rng)
 
-    def _log_mh_ratio(self, transition: TransitionData) -> float:
+    def _log_mh_ratio(self, transition: TransitionData):
 
         beta2 = self._proposalMethod.beta**2
         refCov = self._proposalMethod.referenceMeasure.covariance
@@ -144,15 +140,14 @@ class PreconditionedMALA(MetropolisHastings):
         x = transition.state.coordinate
         z = transition.proposal.coordinate
 
-        logTarget = float(
-            self._tgtDensity.evaluate_log(transition.proposal)
-            - self._tgtDensity.evaluate_log(transition.state)
+        logTarget = (
+            transition.proposed.logDensity - transition.current.logDensity
         )
 
         if logTarget == -np.inf:
             return -np.inf
 
-        # drift at state was pre-computed during generate_proposal
+        # Drift at state was pre-computed during propose.
         meanZgivenX = transition.auxiliary['drift']
         meanXgivenZ = self._proposalMethod._drift(transition.proposal)
 

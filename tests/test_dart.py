@@ -6,6 +6,7 @@ from styne.statistics.covariance import IIDCovarianceMatrix
 from styne.mcmc.method.dart import DARTFactory, DART
 from styne.mcmc.method.mrw import MRWFactory
 from styne.mcmc.diagnostics import DummyDiagnostics
+from styne.mcmc.transition import TransitionData
 
 
 @pytest.mark.parametrize(
@@ -135,9 +136,8 @@ def test_partitioned_dart_acceptance_invariant():
 
     sampler = factory.create()
     rng = np.random.default_rng(42)
-    state = gp.parameter
-    sampler._proposalMethod.state = state
-    trans = sampler._proposalMethod.generate_proposal(rng)
+    state = gp.measure.generate_realisation(seed=42)
+    trans, _ = sampler._proposalMethod.propose(state, rng)
 
     rule = partition.rule
     stateC = Vector(rule.extract(0, trans.state.coordinate))
@@ -161,7 +161,12 @@ def test_partitioned_dart_acceptance_invariant():
     logDiffTarget = (target.evaluate_log(trans.proposal)
                      - target.evaluate_log(trans.state))
     expected = logDiffTarget + coarseCorrection + fineCorrection
-    assert np.isclose(sampler._log_mh_ratio(trans), expected)
+    evaluatedTransition = TransitionData(
+        current=sampler.evaluate_state(trans.state),
+        proposed=sampler.evaluate_state(trans.proposal),
+        auxiliary=trans.auxiliary,
+    )
+    assert np.isclose(sampler._log_mh_ratio(evaluatedTransition), expected)
 
 
 def test_partitioned_dart_pcn_fine_edge_case():
@@ -178,12 +183,12 @@ def test_partitioned_dart_pcn_fine_edge_case():
     assert np.all(finePrior.mean.coordinate == 0.0)
 
     kernel = PCNProposal(finePrior, 1.0)
-    kernel.state = finePrior.generate_realisation(seed=1)
+    kernelState = finePrior.generate_realisation(seed=1)
 
     rngKernel = np.random.default_rng(42)
     rngPrior = np.random.default_rng(42)
 
-    prop = kernel.generate_proposal(rngKernel).proposal
+    prop = kernel.propose(kernelState, rngKernel)[0].proposal
     draw = finePrior.generate_realisation(rng=rngPrior)
 
     np.testing.assert_array_equal(prop.coordinate, draw.coordinate)

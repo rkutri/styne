@@ -26,7 +26,6 @@ class MRWProposal(ProposalMethod):
     """
 
     def __init__(self, proposalCov: CovarianceMatrix):
-        super().__init__()
         self._proposalMeasure = Gaussian(proposalCov)
 
     @property
@@ -39,20 +38,11 @@ class MRWProposal(ProposalMethod):
         """Replace the proposal covariance."""
         self._proposalMeasure = self._proposalMeasure.with_covariance(cov)
 
-    @ProposalMethod.state.setter
-    def state(self, state: Parameter):
-        ProposalMethod.state.fset(self, state)
-        self._proposalMeasure = self._proposalMeasure.with_mean(state)
-
-    def generate_proposal(self, rng: Generator):
-        # Guard against use outside the MH loop, where state may not be set.
-        if self._state is None:
-            raise ValueError(
-                "Trying to generate proposal with undefined state")
-
-        return TransitionData(
-            self._state, self._proposalMeasure.generate_realisation(rng=rng)
+    def propose(self, state: Parameter, rng):
+        proposal, nextRng = self._proposalMeasure.with_mean(state).sample(
+            rng
         )
+        return TransitionData(state, proposal), nextRng
 
 
 class MetropolisedRandomWalk(MetropolisHastings):
@@ -96,10 +86,9 @@ class MetropolisedRandomWalk(MetropolisHastings):
         self._proposalMethod.covariance = cov
 
     def _log_mh_ratio(
-            self, transition: TransitionData) -> float:
+            self, transition: TransitionData):
 
-        return self._tgtDensity.evaluate_log(transition.proposal) \
-            - self._tgtDensity.evaluate_log(transition.state)
+        return transition.proposed.logDensity - transition.current.logDensity
 
 
 class MRWFactory(MHFactory):
@@ -185,8 +174,8 @@ class RobbinsMonroMRW(MetropolisedRandomWalk):
         self._logVariance = np.log(proposalCov.marginalVariance[0])
         self._initialLogVariance = self._logVariance
 
-    def _process_transition(self, transitionData):
-        nextState = super()._process_transition(transitionData)
+    def _record_transition(self, transitionData, nextState):
+        super()._record_transition(transitionData, nextState)
         
         alpha = 1.0 if transitionData.outcome == TransitionData.ACCEPTED else 0.0
         
@@ -199,8 +188,6 @@ class RobbinsMonroMRW(MetropolisedRandomWalk):
         self.proposalCovariance = IIDCovarianceMatrix(
             dimension, np.exp(self._logVariance))
         
-        return nextState
-
     def clear(self) -> None:
         """
         Reset the chain and revert the proposal covariance to its initial

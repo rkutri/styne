@@ -28,10 +28,8 @@ def test_directdart_proposal():
 
     x = np.array([0.5, 0.5])
     state = Vector(x)
-    proposal_method.state = state
-
     rng = np.random.default_rng(0)
-    transition = proposal_method.generate_proposal(rng)
+    transition, _ = proposal_method.propose(state, rng)
     
     # Hand-calculate expected values
     bx_expected = tempering * (A @ x_hat.coordinate) + gamma * x
@@ -69,7 +67,11 @@ def test_directdart_mh_ratio():
     # Mock the transition
     bx = tempering * (A @ x_hat.coordinate) + gamma * x
     mux = P_inv @ bx
-    transition = TransitionData(state, prop, auxiliary={'bx': bx, 'mux': mux})
+    transition = TransitionData(
+        current=sampler.evaluate_state(state),
+        proposed=sampler.evaluate_state(prop),
+        auxiliary={'bx': bx, 'mux': mux},
+    )
 
     # Call _log_mh_ratio
     log_mh_ratio = sampler._log_mh_ratio(transition)

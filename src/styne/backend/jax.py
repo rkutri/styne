@@ -48,6 +48,33 @@ def register_parameter_containers():
             list(children), dict(names)
         ),
     )
+    from styne.mcmc.transition import EvaluatedState, TransitionData
+
+    jax.tree_util.register_pytree_node(
+        EvaluatedState,
+        lambda state: ((state.parameter, state.logDensity), None),
+        lambda metadata, children: EvaluatedState(*children),
+    )
+    jax.tree_util.register_pytree_node(
+        TransitionData,
+        lambda transition: (
+            (
+                transition.current,
+                transition.proposed,
+                transition.outcome,
+                transition.logAcceptanceProbability,
+                transition.auxiliary,
+            ),
+            None,
+        ),
+        lambda metadata, children: TransitionData(
+            current=children[0],
+            proposed=children[1],
+            outcome=children[2],
+            logAcceptanceProbability=children[3],
+            auxiliary=children[4],
+        ),
+    )
 
 
 class JAXNamespace(ArrayNamespace):

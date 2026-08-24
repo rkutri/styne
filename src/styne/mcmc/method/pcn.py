@@ -43,8 +43,6 @@ class PCNProposal(ProposalMethod):
 
     def __init__(self, referenceMeasure: ProbabilityMeasure, beta: float):
 
-        super().__init__()
-
         if not isinstance(referenceMeasure, Gaussian):
             raise NotImplementedError(
                 "Currently, only Gaussian reference measures are supported"
@@ -63,15 +61,10 @@ class PCNProposal(ProposalMethod):
     def beta(self) -> float:
         return self._beta
 
-    def generate_proposal(self, rng: Generator) -> Parameter:
-        # Guard against use outside the MH loop, where state may not be set.
-        if self._state is None:
-            raise ValueError(
-                "Trying to generate proposal with undefined state"
-            )
-
-        x = self._state.coordinate
-        xi = self._refMeasure.generate_realisation(rng=rng).coordinate
+    def propose(self, state: Parameter, rng):
+        x = state.coordinate
+        xi, nextRng = self._refMeasure.sample(rng)
+        xi = xi.coordinate
         m = self._refMeasure.mean.coordinate
 
         xCentred = x - m
@@ -80,9 +73,9 @@ class PCNProposal(ProposalMethod):
         zCentred = sqrt(1. - self._beta**2) * xCentred \
             + self._beta * xiCentred
 
-        proposal = self._state.with_coordinate(m + zCentred)
+        proposal = state.with_coordinate(m + zCentred)
 
-        return TransitionData(self._state, proposal)
+        return TransitionData(state, proposal), nextRng
 
 
 class PreconditionedCrankNicolson(MetropolisHastings):
@@ -118,10 +111,11 @@ class PreconditionedCrankNicolson(MetropolisHastings):
         super().__init__(target, proposalMethod, diagnostics,
                          acceptance=acceptance, rng=rng)
 
-    def _log_mh_ratio(self, transition: TransitionData) -> float:
+    def _evaluate_log_density(self, parameter: Parameter):
+        return self._tgtDensity.derivative.evaluate_log(parameter)
 
-        return self._tgtDensity.derivative.evaluate_log(transition.proposal) \
-            - self._tgtDensity.derivative.evaluate_log(transition.state)
+    def _log_mh_ratio(self, transition: TransitionData):
+        return transition.proposed.logDensity - transition.current.logDensity
 
 
 class PCNFactory(MHFactory):

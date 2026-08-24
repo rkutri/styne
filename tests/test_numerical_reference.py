@@ -218,6 +218,11 @@ def test_deterministic_proposal_reference_calculations():
         Vector(np.array([0.95, -0.2])),
         auxiliary={"drift": expectedDrift},
     )
+    transition = TransitionData(
+        current=mala.evaluate_state(transition.state),
+        proposed=mala.evaluate_state(transition.proposal),
+        auxiliary=transition.auxiliary,
+    )
     assert np.isclose(mala._log_mh_ratio(transition), 0.004726111092448165)
 
     reference = Gaussian(
@@ -225,11 +230,11 @@ def test_deterministic_proposal_reference_calculations():
         Vector(np.array([0.2, -0.1])),
     )
     pcn = PCNProposal(reference, 0.4)
-    pcn.state = Vector(np.array([0.8, -0.5]))
+    pcnState = Vector(np.array([0.8, -0.5]))
     fixedReferenceInput = Vector(np.array([1.1, 0.3]))
     reference.generate_realisation = lambda rng: fixedReferenceInput
     np.testing.assert_allclose(
-        pcn.generate_proposal(None).proposal.coordinate,
+        pcn.propose(pcnState, None)[0].proposal.coordinate,
         [1.109909083394701, -0.30660605559646714],
         rtol=0.0, atol=1e-12,
     )

@@ -49,7 +49,6 @@ class LocalisedSurrogateTransition(ProposalMethod):
                 "LocalisedSurrogateTransitionMeasure instance."
             )
 
-        ProposalMethod.__init__(self)
         self._surrogateMeasure = surrogateMeasure
         self._burnin = burnin
         self._thinning = thinning
@@ -74,14 +73,13 @@ class LocalisedSurrogateTransition(ProposalMethod):
     def correction(self) -> RatioEstimator:
         return self._correction
 
-    @ProposalMethod.state.setter
-    def state(self, state: Parameter):
-        ProposalMethod.state.fset(self, state)
+    def propose(self, state: Parameter, rng):
         self._surrogateMeasure.location = state
 
-    def generate_proposal(self, rng: Generator) -> TransitionData:
-        coarseProposal = self._surrogateMeasure.generate_realisation(rng=rng)
-        return TransitionData(self._state, coarseProposal)
+        coarseProposal, nextRng = self._surrogateMeasure.sample(
+            rng
+        )
+        return TransitionData(state, coarseProposal), nextRng
 
     def log_acceptance_correction(self, state, proposal):
         density = self._surrogateMeasure.density
@@ -137,11 +135,11 @@ class DART(MetropolisHastings):
         super().__init__(target, proposal, diagnostics,
                          acceptance=acceptance, rng=rng)
 
-    def _log_mh_ratio(self, transition: TransitionData) -> float:
+    def _log_mh_ratio(self, transition: TransitionData):
         """MH ratio with generic acceptance correction."""
-        target = self._tgtDensity
-        logDiffTarget = (target.evaluate_log(transition.proposal)
-                         - target.evaluate_log(transition.state))
+        logDiffTarget = (
+            transition.proposed.logDensity - transition.current.logDensity
+        )
         correction = self._proposalMethod.log_acceptance_correction(
             transition.state, transition.proposal)
         return logDiffTarget + correction

@@ -168,18 +168,16 @@ class TestPMALAProposalStep:
 
     def test_proposal_mean_matches_drift(self):
         rng = np.random.default_rng(7)
-        self.proposal.state = self.state
         proposals = np.array([
-            self.proposal.generate_proposal(rng).proposal.coordinate
+            self.proposal.propose(self.state, rng)[0].proposal.coordinate
             for _ in range(5000)
         ])
         assert np.allclose(proposals.mean(axis=0), self.expectedDrift, atol=0.05)
 
     def test_proposal_covariance_is_beta2_times_C(self):
         rng = np.random.default_rng(8)
-        self.proposal.state = self.state
         proposals = np.array([
-            self.proposal.generate_proposal(rng).proposal.coordinate
+            self.proposal.propose(self.state, rng)[0].proposal.coordinate
             for _ in range(5000)
         ])
         sampleCov = np.cov(proposals, rowvar=False)

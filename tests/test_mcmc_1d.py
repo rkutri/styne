@@ -9,7 +9,6 @@ from numpy.random import default_rng
 from tests.testSetup import GaussianTargetDensity
 from styne.statistics.covariance import IIDCovarianceMatrix
 from styne.mcmc.method.mrw import MetropolisedRandomWalk
-from styne.mcmc.transition import TransitionData
 from styne.mcmc.diagnostics import *
 from styne.parameter.scalar import Scalar
 
@@ -37,7 +36,7 @@ def test_metropolishastings_initialisation(Diagnostics):
 @pytest.mark.parametrize("Diagnostics",
                          [DummyDiagnostics, AcceptanceRateDiagnostics,
                           FullDiagnostics])
-def test_accept_reject(Diagnostics):
+def test_step(Diagnostics):
 
     tgtMean = Scalar(0.)
     tgtVar = 1.
@@ -51,11 +50,13 @@ def test_accept_reject(Diagnostics):
     mc = MetropolisedRandomWalk(tgtDensity, proposalCov, diagnostics)
 
     state = Scalar(2.)
-    proposal = Scalar(2.5)
+    nextState, transition, _ = mc.step(mc.evaluate_state(state), mc._rng)
 
-    transitionOutcome = mc._accept_reject(TransitionData(state, proposal))
-
-    assert transitionOutcome.state in [state, proposal]
+    assert transition.current.parameter is state
+    selected = transition.proposal if transition.outcome else transition.state
+    np.testing.assert_allclose(
+        nextState.parameter.coordinate, selected.coordinate
+    )
 
 
 @pytest.mark.parametrize("Diagnostics",

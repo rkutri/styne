@@ -1,4 +1,5 @@
 import torch
+from torch.utils import _pytree
 
 from styne.backend.interface import (
     ArrayNamespace,
@@ -139,6 +140,78 @@ class PyTorchBackend(Backend):
         controlFlow=True,
         spectralTransforms=True,
     )
+    _parameterContainersRegistered = False
+
+    def __init__(self):
+        if not type(self)._parameterContainersRegistered:
+            self._register_parameter_containers()
+            type(self)._parameterContainersRegistered = True
+
+    @staticmethod
+    def _register_parameter_containers():
+        from styne.mcmc.transition import EvaluatedState, TransitionData
+        from styne.parameter.block import BlockParameter
+        from styne.parameter.function import Function
+        from styne.parameter.scalar import Scalar
+        from styne.parameter.vector import Vector
+
+        _pytree.register_pytree_node(
+            Vector,
+            lambda parameter: ((parameter.coordinate,), None),
+            lambda children, metadata: Vector(children[0]),
+        )
+        _pytree.register_pytree_node(
+            Scalar,
+            lambda parameter: ((parameter.coordinate,), None),
+            lambda children, metadata: Scalar(children[0]),
+        )
+        _pytree.register_pytree_node(
+            Function,
+            lambda parameter: (
+                (parameter.coordinate,), parameter.expansion
+            ),
+            lambda children, expansion: Function(
+                children[0], expansion
+            ),
+        )
+        _pytree.register_pytree_node(
+            BlockParameter,
+            lambda parameter: (
+                tuple(
+                    parameter.block(index)
+                    for index in range(parameter.nBlocks)
+                ),
+                tuple(parameter.names.items()),
+            ),
+            lambda children, names: BlockParameter(
+                list(children), dict(names)
+            ),
+        )
+        _pytree.register_pytree_node(
+            EvaluatedState,
+            lambda state: ((state.parameter, state.logDensity), None),
+            lambda children, metadata: EvaluatedState(*children),
+        )
+        _pytree.register_pytree_node(
+            TransitionData,
+            lambda transition: (
+                (
+                    transition.current,
+                    transition.proposed,
+                    transition.outcome,
+                    transition.logAcceptanceProbability,
+                    transition.auxiliary,
+                ),
+                None,
+            ),
+            lambda children, metadata: TransitionData(
+                current=children[0],
+                proposed=children[1],
+                outcome=children[2],
+                logAcceptanceProbability=children[3],
+                auxiliary=children[4],
+            ),
+        )
 
     @property
     def name(self):

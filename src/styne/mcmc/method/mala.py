@@ -34,8 +34,6 @@ class MALAProposal(ProposalMethod):
 
     def __init__(self, dim, stepSize, logGradientCallable):
 
-        super().__init__()
-
         if not callable(logGradientCallable):
             raise ValueError("gradient must be callable")
 
@@ -54,21 +52,18 @@ class MALAProposal(ProposalMethod):
         """Compute the deterministic drift: x + (h^2 / 2) * grad log pi(x)."""
         return state.coordinate + 0.5 * self._h2 * self._logGradient(state)
 
-    def generate_proposal(self, rng: Generator) -> TransitionData:
-        # Guard against use outside the MH loop, where state may not be set.
-        if self._state is None:
-            raise ValueError(
-                "Trying to generate proposal with undefined state"
-            )
-
-        driftVector = self._drift(self._state)
-        propMean = self._state.with_coordinate(
+    def propose(self, state: Parameter, rng):
+        driftVector = self._drift(state)
+        propMean = state.with_coordinate(
             np.asarray(driftVector, dtype=np.float64)
         )
 
-        proposal = self._proposalMeasure.with_mean(propMean).generate_realisation(rng=rng)
-        return TransitionData(
-            self._state, proposal, auxiliary={'drift': driftVector}
+        proposal, nextRng = self._proposalMeasure.with_mean(propMean).sample(
+            rng
+        )
+        return (
+            TransitionData(state, proposal, auxiliary={'drift': driftVector}),
+            nextRng,
         )
 
 
@@ -110,7 +105,7 @@ class MetropolisAdjustedLangevinAlgorithm(MetropolisHastings):
         super().__init__(targetDensity, proposalMethod, diagnostics,
                          acceptance=acceptance, rng=rng)
 
-    def _log_mh_ratio(self, transition: TransitionData) -> float:
+    def _log_mh_ratio(self, transition: TransitionData):
         """
         Log MH ratio for the Langevin proposal.
 
@@ -122,15 +117,14 @@ class MetropolisAdjustedLangevinAlgorithm(MetropolisHastings):
         x = transition.state.coordinate
         z = transition.proposal.coordinate
 
-        logTarget = float(
-            self._tgtDensity.evaluate_log(transition.proposal)
-            - self._tgtDensity.evaluate_log(transition.state)
+        logTarget = (
+            transition.proposed.logDensity - transition.current.logDensity
         )
 
         if logTarget == -np.inf:
             return -np.inf
 
-        # drift at state was pre-computed during generate_proposal
+        # Drift at state was pre-computed during propose.
         meanZgivenX = transition.auxiliary['drift']
         meanXgivenZ = self._proposalMethod._drift(transition.proposal)
 

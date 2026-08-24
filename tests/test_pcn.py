@@ -84,13 +84,16 @@ class TestPCNSetup:
         with pytest.raises(TypeError):
             PreconditionedCrankNicolson(density, 0.5, AcceptanceRateDiagnostics())
 
-    def test_proposal_raises_without_state(self):
+    def test_proposal_requires_explicit_state(self):
         refCov = IIDCovarianceMatrix(2, 1.0)
         prior = Gaussian(refCov, Vector(np.zeros(2)))
         proposal = PCNProposal(prior, 0.5)
         rng = np.random.default_rng(42)
-        with pytest.raises(ValueError):
-            proposal.generate_proposal(rng)
+        transition, nextRng = proposal.propose(
+            Vector(np.zeros(2)), rng
+        )
+        assert transition.state.dimension == 2
+        assert nextRng is rng
 
     def test_name_attribute(self):
         assert PreconditionedCrankNicolson.name == "pCN"
@@ -163,9 +166,8 @@ class TestPCNProposalStep:
 
     def test_proposal_mean_matches_analytical_drift(self):
         rng = np.random.default_rng(7)
-        self.proposal.state = self.state
         proposals = np.array([
-            self.proposal.generate_proposal(rng).proposal.coordinate
+            self.proposal.propose(self.state, rng)[0].proposal.coordinate
             for _ in range(5000)
         ])
         assert np.allclose(
@@ -174,9 +176,8 @@ class TestPCNProposalStep:
 
     def test_proposal_covariance_is_beta_squared_times_c(self):
         rng = np.random.default_rng(8)
-        self.proposal.state = self.state
         proposals = np.array([
-            self.proposal.generate_proposal(rng).proposal.coordinate
+            self.proposal.propose(self.state, rng)[0].proposal.coordinate
             for _ in range(5000)
         ])
         sampleCov = np.cov(proposals, rowvar=False)
@@ -199,7 +200,10 @@ class TestPCNLogMHRatio:
             - target.derivative.evaluate_log(state)
         )
 
-        transition = TransitionData(state, proposal)
+        transition = TransitionData(
+            current=sampler.evaluate_state(state),
+            proposed=sampler.evaluate_state(proposal),
+        )
         assert np.isclose(sampler._log_mh_ratio(transition), expected)
 
 

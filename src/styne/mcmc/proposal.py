@@ -50,33 +50,28 @@ class ProposalMethod(ABC):
 
     Notes
     -----
-    Subclasses implement `generate_proposal`. `state` is a plain settable
-    property, the current point the next proposal is generated from.
+    Subclasses implement :meth:`propose`. Every numerical input is explicit;
+    proposal instances retain only static configuration.
     """
 
-    def __init__(self):
-        self._state = None
-
-    @property
-    def state(self):
-        return self._state
-
-    @state.setter
-    def state(self, state):
-        self._state = state
-
     @abstractmethod
-    def generate_proposal(self, rng: Generator) -> TransitionData:
+    def propose(
+            self, state: Parameter, rng: Generator
+    ) -> tuple[TransitionData, object]:
         """
-        Generate a proposal from the current `state`.
+        Generate a proposal from ``state`` using ``rng``.
 
         Parameters
         ----------
-        rng : Generator
+        state : Parameter
+            Current chain state.
+        rng : object
+            Backend-native random state.
 
         Returns
         -------
-        TransitionData
+        (TransitionData, object)
+            Proposal record and propagated random state.
         """
         ...
 
@@ -100,7 +95,6 @@ class BlockProposal(ProposalMethod):
             One proposal method per partition component, in the same order
             as the partition rule.
         """
-        super().__init__()
         self._partition = partition
         self._pMethods = proposalMethods
 
@@ -109,15 +103,7 @@ class BlockProposal(ProposalMethod):
         """The constituent proposal methods for each partition component."""
         return list(self._pMethods)
 
-    @ProposalMethod.state.setter
-    def state(self, state: Parameter):
-
-        ProposalMethod.state.fset(self, state)
-
-        for idx, method in enumerate(self._pMethods):
-            method.state = Vector(self._partition.component(idx, state))
-
-    def generate_proposal(self, rng: Generator) -> TransitionData:
+    def propose(self, state: Parameter, rng: Generator):
         """
         Generate a proposal by drawing independently from each component
         proposal method and merging the results via the partition.
@@ -132,14 +118,18 @@ class BlockProposal(ProposalMethod):
         """
 
         components = [
-            m.generate_proposal(rng).proposal.coordinate for m in self._pMethods
+            method.propose(
+                Vector(self._partition.component(index, state)), rng
+            )
+            for index, method in enumerate(self._pMethods)
         ]
-
-        result = self._state.with_coordinate(
-            self._partition.merge(components)
+        transitions, nextRngs = zip(*components)
+        result = state.with_coordinate(
+            self._partition.merge([
+                transition.proposal.coordinate for transition in transitions
+            ])
         )
-
-        return TransitionData(self._state, result)
+        return TransitionData(state, result), nextRngs[-1]
 
 
 class FixedProposal(ProposalMethod):
@@ -156,17 +146,9 @@ class FixedProposal(ProposalMethod):
 
         self._proposal = proposalMeasure
 
-    @property
-    def state(self):
-        raise RuntimeError("FixedProposal has no state.")
-
-    # state setter is a no-op
-    @ProposalMethod.state.setter
-    def state(self, state):
-        pass
-
-    def generate_proposal(self, rng: Generator) -> TransitionData:
-        return TransitionData(None, self._proposal.generate_realisation(rng=rng))
+    def propose(self, state, rng):
+        proposal, nextRng = self._proposal.sample(rng)
+        return TransitionData(state, proposal), nextRng
 
 
 class PartitionedSurrogateProposal(PartitionedProposalMixin, ProposalMethod):
@@ -176,7 +158,6 @@ class PartitionedSurrogateProposal(PartitionedProposalMixin, ProposalMethod):
     """
 
     def __init__(self, partition, coarseProposal, fineKernel, finePrior):
-        ProposalMethod.__init__(self)
         self._init_partition(partition, finePrior)
         self._coarseProposal = coarseProposal
         self._fineKernel = fineKernel
@@ -189,18 +170,19 @@ class PartitionedSurrogateProposal(PartitionedProposalMixin, ProposalMethod):
     def density(self):
         return self._coarseProposal.density
 
-    @ProposalMethod.state.setter
-    def state(self, state):
-        ProposalMethod.state.fset(self, state)
-        self._coarseProposal.state = self._coarse_from(state)
-        self._fineKernel.state = self._fine_from(state)
-
-    def generate_proposal(self, rng):
-        coarseProposal = self._coarseProposal.generate_proposal(rng).proposal
-        fineProposal = self._fineKernel.generate_proposal(rng).proposal
+    def propose(self, state, rng):
+        coarseTransition, rng = self._coarseProposal.propose(
+            self._coarse_from(state), rng
+        )
+        fineTransition, nextRng = self._fineKernel.propose(
+            self._fine_from(state), rng
+        )
         fullProposal = self._merge(
-            coarseProposal.coordinate, fineProposal.coordinate, self._state)
-        return TransitionData(self._state, fullProposal)
+            coarseTransition.proposal.coordinate,
+            fineTransition.proposal.coordinate,
+            state,
+        )
+        return TransitionData(state, fullProposal), nextRng
 
     def log_acceptance_correction(self, state, proposal):
         coarseState = self._coarse_from(state)
