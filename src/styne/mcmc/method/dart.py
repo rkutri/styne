@@ -74,18 +74,22 @@ class LocalisedSurrogateTransition(ProposalMethod):
         return self._correction
 
     def propose(self, state: Parameter, rng):
-        self._surrogateMeasure.location = state
-
-        coarseProposal, nextRng = self._surrogateMeasure.sample(
-            rng
+        coarseProposal, trajectory, nextRng = (
+            self._surrogateMeasure.transition_trajectory(state, rng)
         )
-        return TransitionData(state, coarseProposal), nextRng
+        return TransitionData(
+            state,
+            coarseProposal,
+            auxiliary={"surrogateTrajectory": trajectory},
+        ), nextRng
 
-    def log_acceptance_correction(self, state, proposal):
+    def log_acceptance_correction(self, state, proposal, trajectory):
         density = self._surrogateMeasure.density
         logDiffSurrogate = (density.evaluate_log_surrogate(proposal)
                             - density.evaluate_log_surrogate(state))
-        logRatioEstimate = self._correction.log_ratio_estimate(state, proposal)
+        logRatioEstimate = self._correction.log_ratio_estimate(
+            state, proposal, trajectory
+        )
         return -logDiffSurrogate - logRatioEstimate
 
 
@@ -141,7 +145,10 @@ class DART(MetropolisHastings):
             transition.proposed.logDensity - transition.current.logDensity
         )
         correction = self._proposalMethod.log_acceptance_correction(
-            transition.state, transition.proposal)
+            transition.state,
+            transition.proposal,
+            transition.auxiliary["surrogateTrajectory"],
+        )
         return logDiffTarget + correction
 
 

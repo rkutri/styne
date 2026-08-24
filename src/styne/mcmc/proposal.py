@@ -182,7 +182,9 @@ class PartitionedSurrogateProposal(PartitionedProposalMixin, ProposalMethod):
             fineTransition.proposal.coordinate,
             state,
         )
-        return TransitionData(state, fullProposal), nextRng
+        return TransitionData(
+            state, fullProposal, auxiliary=coarseTransition.auxiliary
+        ), nextRng
 
     def log_acceptance_correction(self, state, proposal):
         coarseState = self._coarse_from(state)

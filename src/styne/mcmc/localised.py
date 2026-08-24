@@ -1,3 +1,5 @@
+import copy
+
 from styne.statistics.measure import ProbabilityMeasure
 from typing import Optional
 import numpy as np
@@ -129,6 +131,12 @@ class LocalisedSurrogateDensity(RadonNikodym):
     def location(self, location: Parameter):
         self._regGaussian = self._regGaussian.with_mean(location)
 
+    def with_location(self, location: Parameter):
+        """Return this density localised at ``location``."""
+        result = copy.copy(self)
+        result._regGaussian = self._regGaussian.with_mean(location)
+        return result
+
     @property
     def regularisation(self) -> float:
         return self._reg
@@ -193,8 +201,29 @@ class LocalisedSurrogateTransitionMeasure(SurrogateTransitionMeasure):
 
     @location.setter
     def location(self, location: Parameter):
-        self._initialMeasure.location = location
+        self._initialMeasure = self._localise_initial_measure(location)
         self._mcmc.target.location = location
+
+    def _localise_initial_measure(self, location: Parameter):
+        if hasattr(self._initialMeasure, "with_location"):
+            return self._initialMeasure.with_location(location)
+        if hasattr(self._initialMeasure, "with_mean"):
+            return self._initialMeasure.with_mean(location)
+
+        initialMeasure = copy.copy(self._initialMeasure)
+        initialMeasure.location = location
+        return initialMeasure
+
+    def transition_trajectory(self, initialState: Parameter, randomState):
+        """Run an isolated surrogate trajectory localised at ``initialState``."""
+        measure = copy.copy(self)
+        measure._mcmc = copy.copy(self._mcmc)
+        measure._mcmc._tgtDensity = self.density.with_location(initialState)
+        measure._initialMeasure = self._localise_initial_measure(initialState)
+        trajectoryStart, randomState = measure._initialMeasure.sample(randomState)
+        return super(
+            LocalisedSurrogateTransitionMeasure, measure
+        ).transition_trajectory(trajectoryStart, randomState)
 
     @property
     def regularisation(self) -> float:

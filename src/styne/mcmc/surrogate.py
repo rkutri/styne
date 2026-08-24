@@ -65,6 +65,12 @@ class SurrogateTransitionMeasure(AbsolutelyContinuousProbabilityMeasure):
         return self._initialMeasure
 
     def transition(self, initialState: Parameter, randomState):
+        proposal, _, nextState = self.transition_trajectory(
+            initialState, randomState
+        )
+        return proposal, nextState
+
+    def transition_trajectory(self, initialState: Parameter, randomState):
         """Run the surrogate transition from an explicit initial state.
 
         This is the numerical path used by delayed-acceptance proposals. It
@@ -78,9 +84,11 @@ class SurrogateTransitionMeasure(AbsolutelyContinuousProbabilityMeasure):
             )
 
         state = self._mcmc.initial_state(initialState)
+        trajectory = [self._mcmc._parameter_from_state(state).coordinate]
         for _ in range(self._nChain):
             state, _, randomState = self._mcmc.step(state, randomState)
-        return self._mcmc._parameter_from_state(state), randomState
+            trajectory.append(self._mcmc._parameter_from_state(state).coordinate)
+        return self._mcmc._parameter_from_state(state), trajectory, randomState
 
     def sample(self, randomState) -> tuple[Parameter, object]:
         """

@@ -57,7 +57,7 @@ class RatioEstimator:
         self._type = type
 
     def log_ratio_estimate(
-        self, state: Parameter, proposal: Parameter
+        self, state: Parameter, proposal: Parameter, trajectory=None
     ) -> float:
         """
         Estimate log(N_z / N_x) from the surrogate chain trajectory.
@@ -74,7 +74,10 @@ class RatioEstimator:
         float
             Estimated log(N_z / N_x).
         """
-        traj = self._surrogateMeasure.chain.trajectory
+        traj = (
+            self._surrogateMeasure.chain.trajectory
+            if trajectory is None else trajectory
+        )
         # Exclude the accepted proposal ψ_n from the ratio estimate. Its weight
         # is deterministic given z = ψ_n, introducing a conditional bias that
         # correlates with the proposal distance ‖z - x‖.
