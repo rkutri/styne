@@ -162,19 +162,19 @@ class PyTorchBackend(Backend):
         _pytree.register_pytree_node(
             Vector,
             lambda parameter: ((parameter.coordinate,), None),
-            lambda children, metadata: Vector(children[0]),
+            lambda children, metadata: Vector._restore(children[0]),
         )
         _pytree.register_pytree_node(
             Scalar,
             lambda parameter: ((parameter.coordinate,), None),
-            lambda children, metadata: Scalar(children[0]),
+            lambda children, metadata: Scalar._restore(children[0]),
         )
         _pytree.register_pytree_node(
             Function,
             lambda parameter: (
                 (parameter.coordinate,), parameter.expansion
             ),
-            lambda children, expansion: Function(
+            lambda children, expansion: Function._restore(
                 children[0], expansion
             ),
         )
@@ -185,10 +185,14 @@ class PyTorchBackend(Backend):
                     parameter.block(index)
                     for index in range(parameter.nBlocks)
                 ),
-                tuple(parameter.names.items()),
+                (
+                    tuple(parameter.names.items()),
+                    parameter._dimensions,
+                    parameter._backend,
+                ),
             ),
-            lambda children, names: BlockParameter(
-                list(children), dict(names)
+            lambda children, metadata: BlockParameter._restore(
+                children, *metadata
             ),
         )
         _pytree.register_pytree_node(
@@ -199,7 +203,12 @@ class PyTorchBackend(Backend):
         _pytree.register_pytree_node(
             RobbinsMonroState,
             lambda state: (
-                (state.evaluatedState, state.logVariance, state.stepCount), None
+                (
+                    state.evaluatedState,
+                    state.logVariance,
+                    state.stepCount,
+                ),
+                None,
             ),
             lambda children, metadata: RobbinsMonroState(*children),
         )

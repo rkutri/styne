@@ -300,3 +300,27 @@ def test_jax_parameter_containers_transform_as_pytrees():
     )
     assert compiled["function"].expansion is expansion
     assert vectorised.names == parameter.names
+
+
+def test_jax_parameter_pytrees_accept_structural_placeholders():
+    expansion = StaticExpansion()
+    parameter = BlockParameter(
+        [
+            Vector(jnp.array([1.0, 2.0])),
+            Scalar(jnp.array([3.0])),
+            Function(jnp.array([4.0, 5.0]), expansion),
+        ],
+        {"vector": 0, "scalar": 1, "function": 2},
+    )
+    leaves, structure = jax.tree_util.tree_flatten(parameter)
+    placeholders = [object() for leaf in leaves]
+
+    reconstructed = jax.tree_util.tree_unflatten(structure, placeholders)
+
+    assert reconstructed.names == parameter.names
+    assert reconstructed.dimension == parameter.dimension
+    assert reconstructed["function"].expansion is expansion
+    assert all(
+        reconstructed.block(index).coordinate is placeholder
+        for index, placeholder in enumerate(placeholders)
+    )

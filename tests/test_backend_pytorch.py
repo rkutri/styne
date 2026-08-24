@@ -2,6 +2,7 @@ import pytest
 
 
 torch = pytest.importorskip("torch", reason="PyTorch is an optional backend")
+from torch.utils import _pytree  # noqa: E402
 
 from styne.backend import (  # noqa: E402
     BackendCapabilityError,
@@ -12,7 +13,23 @@ from styne.backend.pytorch import (  # noqa: E402
     PyTorchBackend,
     PyTorchNamespace,
 )
-from styne.parameter import Vector  # noqa: E402
+from styne.model.representation.expansion import Expansion  # noqa: E402
+from styne.parameter import (  # noqa: E402
+    BlockParameter,
+    Function,
+    Scalar,
+    Vector,
+)
+
+
+class StaticExpansion(Expansion):
+
+    @property
+    def dimension(self):
+        return 2
+
+    def _bind(self, grid):
+        raise NotImplementedError
 
 
 def test_pytorch_backend_is_registered_for_tensors():
@@ -291,4 +308,67 @@ def test_pytorch_compiles_at_the_parameter_coordinate_boundary():
     torch.testing.assert_close(result, torch.tensor(5.0, dtype=torch.float64))
     torch.testing.assert_close(
         gradient, torch.tensor([2.0, 4.0], dtype=torch.float64)
+    )
+
+
+def test_pytorch_parameter_containers_transform_as_pytrees():
+    expansion = StaticExpansion()
+    parameter = BlockParameter(
+        [
+            Vector(torch.tensor([
+                [1.0, 2.0],
+                [3.0, 4.0],
+            ])),
+            Scalar(torch.tensor([[5.0], [6.0]])),
+            Function(torch.tensor([
+                [7.0, 8.0],
+                [9.0, 10.0],
+            ]), expansion),
+        ],
+        {"vector": 0, "scalar": 1, "function": 2},
+    )
+    leaves, structure = _pytree.tree_flatten(parameter)
+    reconstructed = _pytree.tree_unflatten(leaves, structure)
+
+    vectorised = torch.vmap(
+        lambda state: state.with_coordinate(state.coordinate + 1.0)
+    )(parameter)
+    gradient = torch.func.grad(
+        lambda state: torch.sum(state.coordinate ** 2)
+    )(parameter)
+
+    assert len(leaves) == 3
+    assert all(isinstance(leaf, torch.Tensor) for leaf in leaves)
+    assert reconstructed.names == parameter.names
+    assert reconstructed["function"].expansion is expansion
+    torch.testing.assert_close(
+        vectorised.coordinate, parameter.coordinate + 1.0
+    )
+    torch.testing.assert_close(
+        gradient.coordinate, 2.0 * parameter.coordinate
+    )
+    assert vectorised.names == parameter.names
+
+
+def test_pytorch_parameter_pytrees_accept_structural_placeholders():
+    expansion = StaticExpansion()
+    parameter = BlockParameter(
+        [
+            Vector(torch.tensor([1.0, 2.0])),
+            Scalar(torch.tensor([3.0])),
+            Function(torch.tensor([4.0, 5.0]), expansion),
+        ],
+        {"vector": 0, "scalar": 1, "function": 2},
+    )
+    leaves, structure = _pytree.tree_flatten(parameter)
+    placeholders = [object() for leaf in leaves]
+
+    reconstructed = _pytree.tree_unflatten(placeholders, structure)
+
+    assert reconstructed.names == parameter.names
+    assert reconstructed.dimension == parameter.dimension
+    assert reconstructed["function"].expansion is expansion
+    assert all(
+        reconstructed.block(index).coordinate is placeholder
+        for index, placeholder in enumerate(placeholders)
     )

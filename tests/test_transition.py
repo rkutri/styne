@@ -53,6 +53,14 @@ def test_jax_transition_records_flatten_reconstruct_and_compile():
     )
     leaves, structure = jax.tree_util.tree_flatten(transition)
     reconstructed = jax.tree_util.tree_unflatten(structure, leaves)
+    placeholders = [object() for leaf in leaves]
+    structural = jax.tree_util.tree_unflatten(structure, placeholders)
+    structuralLeaves = jax.tree_util.tree_leaves(structural)
+
+    assert all(
+        actual is expected
+        for actual, expected in zip(structuralLeaves, placeholders)
+    )
 
     @jax.jit
     def update_log_densities(record):
@@ -93,6 +101,14 @@ def test_pytorch_transition_records_flatten_reconstruct_and_transform():
     )
     leaves, structure = _pytree.tree_flatten(transition)
     reconstructed = _pytree.tree_unflatten(leaves, structure)
+    placeholders = [object() for leaf in leaves]
+    structural = _pytree.tree_unflatten(placeholders, structure)
+    structuralLeaves = _pytree.tree_leaves(structural)
+
+    assert all(
+        actual is expected
+        for actual, expected in zip(structuralLeaves, placeholders)
+    )
 
     gradient = torch.func.grad(
         lambda record: torch.sum(record.current.parameter.coordinate ** 2)

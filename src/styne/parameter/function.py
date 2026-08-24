@@ -65,3 +65,9 @@ class Function(Parameter):
 
     def with_coordinate(self, coordinate) -> Function:
         return self.__class__(coordinate, self._expansion)
+
+    @classmethod
+    def _restore(cls, coordinate, expansion):
+        parameter = super()._restore(coordinate)
+        parameter._expansion = expansion
+        return parameter

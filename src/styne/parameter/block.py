@@ -110,3 +110,13 @@ class BlockParameter(Parameter):
                 "Block coordinates must share dtype and device."
             )
         return backend
+
+    @classmethod
+    def _restore(cls, blocks, names, dimensions, backend):
+        """Restore transformed state without inspecting structural values."""
+        parameter = object.__new__(cls)
+        parameter._blocks = tuple(blocks)
+        parameter._dimensions = dimensions
+        parameter._names = dict(names)
+        parameter._backend = backend
+        return parameter

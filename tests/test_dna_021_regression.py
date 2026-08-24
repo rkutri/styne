@@ -1,3 +1,5 @@
+from contextlib import contextmanager
+
 import numpy as np
 import pytest
 
@@ -15,6 +17,17 @@ from tests.reference_oracles import (
 
 def boundary(*conditions):
     return BoundaryCondition(list(conditions))
+
+
+@contextmanager
+def jax_x64(jax, enabled):
+    """Temporarily select JAX precision across supported JAX releases."""
+    previous = jax.config.read("jax_enable_x64")
+    jax.config.update("jax_enable_x64", enabled)
+    try:
+        yield
+    finally:
+        jax.config.update("jax_enable_x64", previous)
 
 
 @pytest.mark.parametrize("q", [1, 3, 6])
@@ -110,7 +123,7 @@ def test_full_batched_synthesis_matches_retained_021_matrix(q, d, dtype):
 def test_jax_batched_values_match_021_for_both_dtypes(q, d, dtypeName):
     jax = pytest.importorskip("jax", reason="JAX is an optional backend")
     jnp = pytest.importorskip("jax.numpy")
-    with jax.enable_x64(dtypeName == "float64"):
+    with jax_x64(jax, dtypeName == "float64"):
         dtype = getattr(jnp, dtypeName)
         matrix = jnp.asarray(dna_synthesis_matrix(q, d), dtype=dtype)
         dimension = matrix.shape[1]

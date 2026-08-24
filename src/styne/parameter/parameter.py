@@ -63,3 +63,10 @@ class Parameter(ABC):
     def backendMetadata(self):
         """Dtype and device metadata computed from the coordinate array."""
         return self.backend.metadata(self.coordinate)
+
+    @classmethod
+    def _restore(cls, coordinate):
+        """Restore transformed state without validating structural values."""
+        parameter = object.__new__(cls)
+        parameter._coordinate = coordinate
+        return parameter

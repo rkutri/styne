@@ -21,19 +21,21 @@ def register_parameter_containers():
     jax.tree_util.register_pytree_node(
         Vector,
         lambda parameter: ((parameter.coordinate,), None),
-        lambda metadata, children: Vector(children[0]),
+        lambda metadata, children: Vector._restore(children[0]),
     )
     jax.tree_util.register_pytree_node(
         Scalar,
         lambda parameter: ((parameter.coordinate,), None),
-        lambda metadata, children: Scalar(children[0]),
+        lambda metadata, children: Scalar._restore(children[0]),
     )
     jax.tree_util.register_pytree_node(
         Function,
         lambda parameter: (
             (parameter.coordinate,), parameter.expansion
         ),
-        lambda expansion, children: Function(children[0], expansion),
+        lambda expansion, children: Function._restore(
+            children[0], expansion
+        ),
     )
     jax.tree_util.register_pytree_node(
         BlockParameter,
@@ -42,10 +44,14 @@ def register_parameter_containers():
                 parameter.block(index)
                 for index in range(parameter.nBlocks)
             ),
-            tuple(parameter.names.items()),
+            (
+                tuple(parameter.names.items()),
+                parameter._dimensions,
+                parameter._backend,
+            ),
         ),
-        lambda names, children: BlockParameter(
-            list(children), dict(names)
+        lambda metadata, children: BlockParameter._restore(
+            children, *metadata
         ),
     )
     from styne.mcmc.transition import (
