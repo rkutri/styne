@@ -36,10 +36,10 @@ version with others is always appreciated.
 
 ## Explicitly welcomed contributions
 
-- **New samplers, models, or GP engines** that fit the existing
-  interfaces (`MetropolisHastings`, `ForwardMap`, `GPEngine`, etc.). Please
-  open an
-  issue before writing code if you are unsure about structural compatibility.
+- **New samplers, forward maps, or GP representations** that fit the existing
+  interfaces (`MetropolisHastings`, `ForwardMap`, `GaussianProcess`, etc.).
+  Please open an issue before writing code if you are unsure about structural
+  compatibility.
 - **Interface extensions.** If existing interfaces do not support specific
   surrogate classes, your model or likelihood, open an issue detailing the
   structural gap. Modifying interfaces to robustly accommodate new computational
@@ -92,7 +92,7 @@ requests failing to adhere to these rules will not be merged.
 2. Set up the development environment.
 
    ```bash
-   pip install -e ".[plotting]"
+   uv sync --extra plotting --group dev
    ```
 
 3. Branch from `main`.
@@ -107,7 +107,7 @@ requests failing to adhere to these rules will not be merged.
 5. Run the specific tests for your changes followed by the full test suite.
 
    ```bash
-   python -m pytest tests/
+   uv run --extra plotting pytest tests/
    ```
 
 6. Open a pull request against `main`. Describe the changes, the reasoning and
