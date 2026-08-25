@@ -215,9 +215,11 @@ class TestBlockGibbsInvariantMeasure:
     SEED = 42
 
     def setup_method(self):
-        np.random.seed(self.SEED)
         model = make_model(rho=self.RHO)
-        sampler = BlockGibbs(model)
+        sampler = BlockGibbs(
+            model,
+            rng=np.random.default_rng(self.SEED),
+        )
         sampler.run(self.N_STEPS, make_init())
 
         traj0 = np.array(sampler.chain.block(0).trajectory)[self.BURNIN:, 0]
