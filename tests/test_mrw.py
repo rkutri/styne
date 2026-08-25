@@ -17,11 +17,14 @@ from styne.utility.postprocessing import integrated_autocorrelation
 
 
 
-RTOL = 0.25
-ATOL = 0.2
+relativeTolerance = 0.25
+
+# After IAT thinning, two estimated marginal standard errors approximate a 95%
+# marginal CLT scale. With fixed seeds, this is a deterministic regression margin,
+# not a per-run flake probability.
+meanStandardErrors = 2.0
 
 
-@pytest.mark.slow
 @pytest.mark.parametrize("dim", [1, 4])
 @pytest.mark.parametrize("kappa", [1., 5.])
 def test_mrw_moments(dim, kappa):
@@ -67,18 +70,19 @@ def test_mrw_moments(dim, kappa):
 
         # check pointwise error of estimated mean
         meanEst = np.mean(samples, axis=0)
-        assert np.allclose(
-            meanEst, tgtMean[i].coordinate, atol=ATOL, rtol=RTOL)
+        sampleStd = np.std(samples, axis=0, ddof=1)
+        meanSE = sampleStd / np.sqrt(len(samples))
+        meanError = np.abs(meanEst - tgtMean[i].coordinate)
+        assert np.all(meanError < meanStandardErrors * meanSE)
 
         # check frobenius error of estimated covariance
         covEst = np.cov(samples, rowvar=False)
         relCovError = np.linalg.norm(covEst - tgtCov[i], ord='fro') \
             / np.linalg.norm(tgtCov[i], ord='fro')
 
-        assert relCovError < RTOL
+        assert relCovError < relativeTolerance
 
 
-@pytest.mark.slow
 @pytest.mark.parametrize("dim", [1, 2])
 @pytest.mark.parametrize("kappa", [1, 5])
 @pytest.mark.parametrize("progress", [False, True])
@@ -110,7 +114,9 @@ def test_mrw_density(dim, kappa, progress, capsys):
     if progress:
         assert len(captured.err) > 0, "Expected progress bar output in stderr"
     else:
-        assert len(captured.err) == 0, "Expected no progress bar output when progress=False"
+        assert len(captured.err) == 0, (
+            "Expected no progress bar output when progress=False"
+        )
 
     states = np.array(mcmc.chain.trajectory)
 
@@ -124,6 +130,8 @@ def test_mrw_density(dim, kappa, progress, capsys):
     axes = [np.linspace(-3., 3., nGridPerDim) for _ in range(dim)]
     mesh = np.meshgrid(*axes, indexing='ij')
     mesh = np.vstack([m.ravel() for m in mesh])
+    gridSpacing = axes[0][1] - axes[0][0]
+    volumeElement = gridSpacing ** dim
 
     # Kernel Density Estimation
     kde = gaussian_kde(samples.T)
@@ -138,9 +146,9 @@ def test_mrw_density(dim, kappa, progress, capsys):
     )
 
     # normalize both densities
-    densityEst /= np.sum(densityEst) * (10. / nGridPerDim)**dim
-    targetDensity /= np.sum(targetDensity) * (10. / nGridPerDim)**dim
+    densityEst /= np.sum(densityEst) * volumeElement
+    targetDensity /= np.sum(targetDensity) * volumeElement
 
     # compute relative error
     error = norm(densityEst - targetDensity) / norm(targetDensity)
-    assert error < RTOL
+    assert error < relativeTolerance
