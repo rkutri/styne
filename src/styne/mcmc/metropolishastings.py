@@ -162,7 +162,7 @@ class MetropolisHastings(MCMCSampler):
     def _iterate(self) -> Parameter:
         """Perform a single Metropolis-Hastings transition."""
 
-        self._proposalMethod.state = self._lastState.clone()
+        self._proposalMethod.state = self._lastState
         transition = self._proposalMethod.generate_proposal(self._rng)
 
         transitionOutcome = self._accept_reject(transition)
