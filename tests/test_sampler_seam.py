@@ -117,6 +117,7 @@ def test_subsampler_reset():
     factory.target = targetDensity
     factory.surrogate = [surrogateDensity1, surrogateDensity2]
     factory.nChain = [2, 2]
+    factory.burnin = 0
     factory.regularisation = [0.1, 0.1]
     factory.subDiagnostics = PersistentAcceptanceRateDiagnostics
     factory.root.proposalCovariance = IIDCovarianceMatrix(2, 1.0)
@@ -198,6 +199,7 @@ def test_manuscript_pattern_smoke_test():
     latentFactory.target = targetDensity
     latentFactory.surrogate = [surrogateDensity]
     latentFactory.nChain = [2]
+    latentFactory.burnin = 0
     latentFactory.regularisation = [0.1]
     latentFactory.subDiagnostics = PersistentAcceptanceRateDiagnostics
     latentFactory.root.proposalCovariance = IIDCovarianceMatrix(dimension, 1.0)
@@ -250,6 +252,7 @@ def test_default_path_regression():
     factory.target = targetDensity
     factory.surrogate = [surrogateDensity]
     factory.nChain = [2]
+    factory.burnin = 0
     factory.regularisation = [0.1]
     factory.root.proposalCovariance = IIDCovarianceMatrix(2, 1.0)
     

@@ -56,6 +56,213 @@ class StubMeasure:
         self.regularisation = gamma
 
 
+def trajectory_with_terminal(samples):
+    samples = np.asarray(samples)
+    return np.concatenate([samples, samples[-1:]], axis=0)
+
+
+@pytest.mark.parametrize('estimatorType', ('is', 'bridge', 'cumulant'))
+def test_coincident_states_are_an_explicit_exact_identity(estimatorType):
+    estimator = RatioEstimator(
+        StubMeasure([], 1.0), 5, 2, estimatorType
+    )
+    state = Vector(np.array([1.5]))
+
+    result = estimator.log_ratio_estimate(
+        state, state, trajectory=np.empty((0, 1))
+    )
+
+    assert result.shape == ()
+    assert result == 0.0
+
+
+@pytest.mark.parametrize('estimatorType', ('is', 'bridge', 'cumulant'))
+def test_distinct_states_reject_empty_state_trajectory(estimatorType):
+    estimator = RatioEstimator(
+        StubMeasure([], 1.0), 0, 1, estimatorType
+    )
+
+    with pytest.raises(ValueError, match="state trajectory"):
+        estimator.log_ratio_estimate(
+            Vector(np.array([0.0])),
+            Vector(np.array([1.0])),
+            trajectory=np.empty((0, 1)),
+        )
+
+
+def test_is_accepts_one_retained_state_but_cumulant_rejects_it():
+    trajectory = trajectory_with_terminal([[0.25]])
+    state = Vector(np.array([0.0]))
+    proposal = Vector(np.array([1.0]))
+
+    estimate = RatioEstimator(
+        StubMeasure(trajectory, 1.0), 0, 1, 'is'
+    ).log_ratio_estimate(state, proposal, trajectory=trajectory)
+
+    assert np.isfinite(estimate)
+    with pytest.raises(ValueError, match="at least 2 retained"):
+        RatioEstimator(
+            StubMeasure(trajectory, 1.0), 0, 1, 'cumulant'
+        ).log_ratio_estimate(state, proposal, trajectory=trajectory)
+
+
+def test_bridge_accepts_one_retained_state_in_each_trajectory():
+    stateTrajectory = trajectory_with_terminal([[0.25]])
+    proposalTrajectory = trajectory_with_terminal([[0.75]])
+    estimator = RatioEstimator(
+        StubMeasure(stateTrajectory, 1.0), 0, 1, 'bridge'
+    )
+
+    estimate = estimator.log_ratio_estimate(
+        Vector(np.array([0.0])),
+        Vector(np.array([1.0])),
+        proposalTrajectory=proposalTrajectory,
+    )
+
+    assert np.isfinite(estimate)
+
+
+@pytest.mark.parametrize('burnin', (3, 4))
+def test_burnin_at_or_beyond_trajectory_length_is_rejected(burnin):
+    trajectory = trajectory_with_terminal([[0.0], [0.5], [1.0]])
+    estimator = RatioEstimator(
+        StubMeasure(trajectory, 1.0), burnin, 1, 'is'
+    )
+
+    with pytest.raises(ValueError, match="got 0"):
+        estimator.log_ratio_estimate(
+            Vector(np.array([0.0])),
+            Vector(np.array([1.0])),
+            trajectory=trajectory,
+        )
+
+
+def test_thinning_uses_only_the_retained_states():
+    trajectory = trajectory_with_terminal(
+        [[-1.0], [-0.5], [0.0], [0.5], [1.0], [1.5]]
+    )
+    state = Vector(np.array([0.0]))
+    proposal = Vector(np.array([2.0]))
+    retained = trajectory[:-1][1::2]
+    weights = 1.0 * (retained[:, 0] - 1.0) * -2.0
+    expected = np.log(np.mean(np.exp(-weights)))
+
+    result = RatioEstimator(
+        StubMeasure(trajectory, 1.0), 1, 2, 'is'
+    ).log_ratio_estimate(state, proposal, trajectory=trajectory)
+
+    np.testing.assert_allclose(result, expected)
+
+
+def test_bridge_validates_each_trajectory_independently():
+    sufficient = trajectory_with_terminal([[0.0], [0.5]])
+    empty = np.empty((0, 1))
+    estimator = RatioEstimator(
+        StubMeasure(sufficient, 1.0), 0, 1, 'bridge'
+    )
+    state = Vector(np.array([0.0]))
+    proposal = Vector(np.array([1.0]))
+
+    with pytest.raises(ValueError, match="state trajectory"):
+        estimator.log_ratio_estimate(
+            state,
+            proposal,
+            trajectory=empty,
+            proposalTrajectory=sufficient,
+        )
+    with pytest.raises(ValueError, match="proposal trajectory"):
+        estimator.log_ratio_estimate(
+            state,
+            proposal,
+            trajectory=sufficient,
+            proposalTrajectory=empty,
+        )
+    with pytest.raises(ValueError, match="explicit proposal trajectory"):
+        estimator.log_ratio_estimate(
+            state, proposal, trajectory=sufficient
+        )
+
+
+def test_deterministic_estimator_algebra():
+    state = Vector(np.array([0.0]))
+    proposal = Vector(np.array([2.0]))
+    stateSamples = np.array([[0.0], [1.0], [2.0]])
+    proposalSamples = np.array([[1.0], [2.0], [3.0]])
+    stateTrajectory = trajectory_with_terminal(stateSamples)
+    proposalTrajectory = trajectory_with_terminal(proposalSamples)
+    measure = StubMeasure(stateTrajectory, 1.0)
+    stateWeights = -2.0 * (stateSamples[:, 0] - 1.0)
+    proposalWeights = -2.0 * (proposalSamples[:, 0] - 1.0)
+
+    isEstimate = RatioEstimator(
+        measure, 0, 1, 'is'
+    ).log_ratio_estimate(state, proposal)
+    cumulantEstimate = RatioEstimator(
+        measure, 0, 1, 'cumulant'
+    ).log_ratio_estimate(state, proposal)
+    bridgeEstimate = RatioEstimator(
+        measure, 0, 1, 'bridge'
+    ).log_ratio_estimate(
+        state, proposal, proposalTrajectory=proposalTrajectory
+    )
+
+    np.testing.assert_allclose(
+        isEstimate, np.log(np.mean(np.exp(-stateWeights)))
+    )
+    np.testing.assert_allclose(
+        cumulantEstimate,
+        -np.mean(stateWeights) + 0.5 * np.var(stateWeights, ddof=1),
+    )
+    np.testing.assert_allclose(
+        bridgeEstimate,
+        np.log(np.mean(np.exp(-0.5 * stateWeights)))
+        - np.log(np.mean(np.exp(0.5 * proposalWeights))),
+    )
+
+
+def test_cumulant_ratio_compiles_with_jax():
+    jax = pytest.importorskip("jax")
+    jnp = pytest.importorskip("jax.numpy")
+    estimator = RatioEstimator(
+        StubMeasure(jnp.zeros((3, 1)), 1.0), 0, 1, 'cumulant'
+    )
+
+    compiled = jax.jit(lambda state, proposal, trajectory:
+        estimator.log_ratio_estimate(
+            Vector(state), Vector(proposal), trajectory=trajectory
+        )
+    )
+    result = compiled(
+        jnp.array([0.0]),
+        jnp.array([1.0]),
+        jnp.array([[0.0], [0.5], [1.0]]),
+    )
+
+    assert isinstance(result, jax.Array)
+    assert result.shape == ()
+
+
+@pytest.mark.parametrize(
+    ('estimatorType', 'minimum', 'invalidLength', 'invalidBurnin'),
+    (
+        ('is', 1, 1, 1),
+        ('bridge', 1, 1, 1),
+        ('cumulant', 2, 1, 0),
+    ),
+)
+def test_configured_trajectory_requirements(
+        estimatorType, minimum, invalidLength, invalidBurnin):
+    measure = StubMeasure([], 1.0)
+    measure.subchainLength = minimum
+
+    estimator = RatioEstimator(measure, 0, 1, estimatorType)
+
+    assert estimator.minimumSamples == minimum
+    measure.subchainLength = invalidLength
+    with pytest.raises(ValueError, match="configuration retains"):
+        RatioEstimator(measure, invalidBurnin, 1, estimatorType)
+
+
 def test_cumulant_ratio_preserves_jax_scalar():
     jnp = pytest.importorskip("jax.numpy")
 
@@ -211,7 +418,12 @@ class TestGeometricBridgeCorrectionAccuracy:
 
         est = RatioEstimator(surrogate, burnin=0,
                              thinning=1, type='bridge')
-        result = est.log_ratio_estimate(Vector(x), Vector(z))
+        proposalTrajectory = np.concatenate(
+            [samplesZ, samplesZ[-1:]], axis=0
+        )
+        result = est.log_ratio_estimate(
+            Vector(x), Vector(z), proposalTrajectory=proposalTrajectory
+        )
         truth = analytical_log_ratio(x, z, mu, self.GAMMA, self.THETA)
         return result, truth
 
@@ -264,7 +476,14 @@ class TestGeometricBridgeVarianceReduction:
                 self.GAMMA, samplesX=samplesX, samplesZ=samplesZ)
             estBr = RatioEstimator(surrogateBr, burnin=0,
                                    thinning=1, type='bridge')
-            bridgeEsts.append(estBr.log_ratio_estimate(stateParam, propParam))
+            proposalTrajectory = np.concatenate(
+                [samplesZ, samplesZ[-1:]], axis=0
+            )
+            bridgeEsts.append(estBr.log_ratio_estimate(
+                stateParam,
+                propParam,
+                proposalTrajectory=proposalTrajectory,
+            ))
 
         return float(np.std(isEsts)), float(np.std(bridgeEsts))
 
@@ -340,7 +559,7 @@ class TestCumulantCorrectionAccuracy:
         
         assert abs(res_is - res_cum) < 1e-12
 
-    def test_singleton_no_nan(self):
+    def test_singleton_is_rejected(self):
         d = 3
         rng = np.random.default_rng(SEED)
         x = np.zeros(d)
@@ -353,8 +572,8 @@ class TestCumulantCorrectionAccuracy:
         surrogate = make_surrogate(self.GAMMA, samplesX=samplesX)
         
         est = RatioEstimator(surrogate, burnin=0, thinning=1, type='cumulant')
-        result = est.log_ratio_estimate(Vector(x), Vector(z))
-        assert np.isfinite(result)
+        with pytest.raises(ValueError, match="at least 2 retained"):
+            est.log_ratio_estimate(Vector(x), Vector(z))
 
     def test_variance_regime_check(self):
         # Regime check, NOT an invariant. Cumulant and IS share their

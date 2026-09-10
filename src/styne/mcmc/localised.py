@@ -221,6 +221,12 @@ class LocalisedSurrogateTransitionMeasure(SurrogateTransitionMeasure):
         if not isinstance(surrogateChain.target, LocalisedSurrogateDensity):
             raise TypeError("surrogateChain target must be a "
                             "LocalisedSurrogateDensity instance.")
+        if nChain == 0 and initialMeasure is not None and not isinstance(
+                initialMeasure, (DiracMeasure, Gaussian)):
+            raise TypeError(
+                "Zero-subchain DART requires a Dirac or Gaussian initial "
+                "measure."
+            )
 
         super().__init__(surrogateChain, nChain, initialMeasure)
 

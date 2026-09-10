@@ -19,23 +19,21 @@ class RatioEstimator:
     """
     Normalising constant ratio estimator for DART.
 
-    Estimates log(N_z / N_x) from the samples of a localised surrogate chain using
-    either one-sided importance sampling ('is'), a geometric bridge ('bridge'),
-    or a second-order cumulant approximation ('cumulant').
+    Estimates log(N_z / N_x) from retained states of localised surrogate
+    trajectories. Importance sampling and geometric bridge estimation require
+    at least one state. The second-order cumulant approximation requires two
+    states because it estimates a sample variance.
 
     Parameters
     ----------
     surrogateMeasure : LocalisedSurrogateTransitionMeasure
-        Surrogate measure whose chain trajectories are used in estimation.
+        Surrogate measure whose trajectories are used in estimation.
     burnin : int
-        Number of leading trajectory samples to discard.
+        Number of leading non-terminal trajectory states to discard.
     thinning : int
-        Keep every thinning-th sample after burnin.
+        Keep every thinning-th state after burnin.
     type : str
         One of 'is', 'bridge', or 'cumulant'. Defaults to 'cumulant'.
-        'cumulant' is a one-sided second-order CGF approximation;
-        same cost as 'is', estimates the log-ratio directly, robust under large
-        weight spread, but carries a bias that does not vanish with sample size.
     """
 
     def __init__(
@@ -49,126 +47,186 @@ class RatioEstimator:
             raise ValueError(
                 f"type must be 'is', 'bridge', or 'cumulant', got '{type}'."
             )
+        if not isinstance(burnin, int) or burnin < 0:
+            raise ValueError(
+                f"burnin must be a non-negative integer. Got {burnin}."
+            )
+        if not isinstance(thinning, int) or thinning < 1:
+            raise ValueError(
+                f"thinning must be a positive integer. Got {thinning}."
+            )
 
         self._surrogateMeasure = surrogateMeasure
         self._burnin = burnin
         self._thinning = thinning
         self._type = type
+        self._validate_configured_trajectory()
+
+    @staticmethod
+    def minimum_samples(estimatorType):
+        """Return the retained-state requirement for an estimator."""
+        return 2 if estimatorType == 'cumulant' else 1
+
+    @staticmethod
+    def retained_sample_count(availableStates, burnin, thinning):
+        """Count states retained after burn-in and thinning."""
+        remaining = max(0, availableStates - burnin)
+        return (remaining + thinning - 1) // thinning
+
+    @property
+    def estimatorType(self):
+        return self._type
+
+    @property
+    def minimumSamples(self):
+        return self.minimum_samples(self._type)
 
     @property
     def requires_proposal_trajectory(self):
         return self._type == 'bridge'
 
+    def _validate_configured_trajectory(self):
+        subchainLength = getattr(
+            self._surrogateMeasure, "subchainLength", None
+        )
+        if not isinstance(subchainLength, int) or subchainLength == 0:
+            return
+        retained = self.retained_sample_count(
+            subchainLength, self._burnin, self._thinning
+        )
+        if retained < self.minimumSamples:
+            raise ValueError(
+                f"{self._type} ratio estimation requires at least "
+                f"{self.minimumSamples} retained state(s); configuration "
+                f"retains {retained}."
+            )
+
     def with_surrogate_measure(self, surrogateMeasure):
         """Return the estimator bound to ``surrogateMeasure``."""
         result = copy.copy(self)
         result._surrogateMeasure = surrogateMeasure
+        result._validate_configured_trajectory()
         return result
+
+    def _as_trajectory(self, trajectory, backend, metadata, dimension):
+        if isinstance(trajectory, list):
+            if not trajectory:
+                return backend.zeros(
+                    (0, dimension),
+                    dtype=metadata.dtype,
+                    device=metadata.device,
+                )
+            return backend.asarray(
+                np.stack(trajectory),
+                dtype=metadata.dtype,
+                device=metadata.device,
+            )
+        return trajectory
+
+    def _retained_samples(
+            self, trajectory, backend, metadata, dimension, label):
+        trajectory = self._as_trajectory(
+            trajectory, backend, metadata, dimension
+        )
+        samples = trajectory[:-1][self._burnin::self._thinning]
+        if samples.shape[0] < self.minimumSamples:
+            raise ValueError(
+                f"{self._type} ratio estimation requires at least "
+                f"{self.minimumSamples} retained state(s) in {label}; got "
+                f"{samples.shape[0]}."
+            )
+        return samples
+
+    @staticmethod
+    def _concrete_truth(predicate):
+        try:
+            return bool(np.asarray(predicate))
+        except Exception:
+            return None
 
     def log_ratio_estimate(
         self, state: Parameter, proposal: Parameter, trajectory=None,
         proposalTrajectory=None,
     ):
-        """
-        Estimate log(N_z / N_x) from the surrogate chain trajectory.
+        """Estimate log(N_z / N_x) from explicit retained trajectories."""
+        backend = infer_backend(state.coordinate)
+        metadata = backend.metadata(state.coordinate)
+        zero = backend.asarray(
+            0., dtype=metadata.dtype, device=metadata.device
+        )
+        coincident = backend.namespace.all(
+            state.coordinate == proposal.coordinate
+        )
+        if self._concrete_truth(coincident):
+            return zero
 
-        Parameters
-        ----------
-        state : Parameter
-            Current fine-level state x.
-        proposal : Parameter
-            Proposed fine-level state z.
-
-        Returns
-        -------
-        Backend-native scalar estimate of log(N_z / N_x).
-        """
         trajectory = (
             self._surrogateMeasure.chain.trajectory
             if trajectory is None else trajectory
         )
-        # Exclude the accepted proposal ψ_n from the ratio estimate. Its weight
-        # is deterministic given z = ψ_n, introducing a conditional bias that
-        # correlates with the proposal distance ‖z - x‖.
-        backend = infer_backend(state.coordinate)
-        metadata = backend.metadata(state.coordinate)
-        if isinstance(trajectory, list):
-            trajectory = backend.asarray(
-                np.stack(trajectory),
-                dtype=metadata.dtype, device=metadata.device,
-            )
-        trimmed = trajectory[:-1]
-        samples = trimmed[self._burnin::self._thinning]
-
-        if samples.shape[0] == 0:
-            return backend.asarray(0., dtype=metadata.dtype, device=metadata.device)
-
-        sw = self._surrogateMeasure.density.spectralWeights
-        w = log_dot_product_weights(
-            self._surrogateMeasure.regularisation, samples,
-            state.coordinate, proposal.coordinate, sw
+        samples = self._retained_samples(
+            trajectory,
+            backend,
+            metadata,
+            state.coordinate.shape[-1],
+            "the state trajectory",
         )
-        nSamples = w.shape[0]
-        logSamples = backend.namespace.log(
-            backend.asarray(nSamples, dtype=metadata.dtype, device=metadata.device)
+
+        spectralWeights = self._surrogateMeasure.density.spectralWeights
+        weights = log_dot_product_weights(
+            self._surrogateMeasure.regularisation,
+            samples,
+            state.coordinate,
+            proposal.coordinate,
+            spectralWeights,
         )
+        nSamples = weights.shape[0]
+        logSamples = backend.namespace.log(backend.asarray(
+            nSamples, dtype=metadata.dtype, device=metadata.device
+        ))
 
         if self._type == 'is':
-            return backend.namespace.logsumexp(-w) - logSamples
+            estimate = backend.namespace.logsumexp(-weights) - logSamples
+            return backend.namespace.where(coincident, zero, estimate)
 
         if self._type == 'cumulant':
-            mean = backend.namespace.mean(w)
-            if nSamples == 1:
-                return -mean
-            variance = backend.namespace.sum((w - mean) ** 2) / (nSamples - 1)
-            return -mean + 0.5 * variance
-
-        # --- Geometric bridge ---
-
-        # The auxiliary Π_z chain reuses the surrogate measure's configured
-        # subchain length. To use a different length for the bridge, configure
-        # the measure accordingly before constructing the estimator.
-        logEstX = backend.namespace.logsumexp(-0.5 * w) - logSamples
+            mean = backend.namespace.mean(weights)
+            variance = backend.namespace.sum(
+                (weights - mean) ** 2
+            ) / (nSamples - 1)
+            estimate = -mean + 0.5 * variance
+            return backend.namespace.where(coincident, zero, estimate)
 
         if proposalTrajectory is None:
-            xLocation = self._surrogateMeasure.location
-            self._surrogateMeasure.location = proposal
-            self._surrogateMeasure.generate_realisation()
-            trajectoryZ = self._surrogateMeasure.chain.trajectory
-        else:
-            trajectoryZ = proposalTrajectory
-        # Same trimming as for the Π_x trajectory: exclude the terminal state.
-        if isinstance(trajectoryZ, list):
-            trajectoryZ = backend.asarray(
-                np.stack(trajectoryZ),
-                dtype=metadata.dtype, device=metadata.device,
+            raise ValueError(
+                "bridge ratio estimation requires an explicit proposal "
+                "trajectory."
             )
-        samplesZ = trajectoryZ[:-1][self._burnin::self._thinning]
-
-        if samplesZ.shape[0] == 0:
-            # Safe to restore location without explicitly saving/restoring chain state.
-            # The surrogate measure's generate_realisation() internally calls run()
-            # with a fresh initial state derived from the new location, ensuring safe
-            # re-initialisation.
-            if proposalTrajectory is None:
-                self._surrogateMeasure.location = xLocation
-            return logEstX
-
-        wZ = log_dot_product_weights(
-            self._surrogateMeasure.regularisation, samplesZ,
-            state.coordinate, proposal.coordinate, sw
+        proposalSamples = self._retained_samples(
+            proposalTrajectory,
+            backend,
+            metadata,
+            proposal.coordinate.shape[-1],
+            "the proposal trajectory",
         )
-        logEstZ = backend.namespace.logsumexp(0.5 * wZ) - backend.namespace.log(
-            backend.asarray(
-                wZ.shape[0], dtype=metadata.dtype, device=metadata.device,
-            )
+        proposalWeights = log_dot_product_weights(
+            self._surrogateMeasure.regularisation,
+            proposalSamples,
+            state.coordinate,
+            proposal.coordinate,
+            spectralWeights,
         )
-
-        # Safe to restore location without explicitly saving/restoring chain state.
-        # The surrogate measure's generate_realisation() internally calls run()
-        # with a fresh initial state derived from the new location, ensuring safe
-        # re-initialisation.
-        if proposalTrajectory is None:
-            self._surrogateMeasure.location = xLocation
-
-        return logEstX - logEstZ
+        logStateEstimate = (
+            backend.namespace.logsumexp(-0.5 * weights) - logSamples
+        )
+        logProposalSamples = backend.namespace.log(backend.asarray(
+            proposalWeights.shape[0],
+            dtype=metadata.dtype,
+            device=metadata.device,
+        ))
+        logProposalEstimate = (
+            backend.namespace.logsumexp(0.5 * proposalWeights)
+            - logProposalSamples
+        )
+        estimate = logStateEstimate - logProposalEstimate
+        return backend.namespace.where(coincident, zero, estimate)

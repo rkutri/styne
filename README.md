@@ -24,6 +24,12 @@ simulation of high-dimensional Gaussian fields.
 [dart-paper]: https://arxiv.org/abs/2606.27564
 [dna-paper]: https://doi.org/10.1137/24M1715854
 
+DART ratio estimation excludes the terminal proposal before burn-in and
+thinning. IS and bridge corrections require at least one retained state;
+second-order cumulant corrections require at least two. Bridge evaluation uses
+two explicit trajectories. A configured zero-length subchain is handled as its
+own symmetric proposal case and does not invoke a ratio estimator.
+
 <p align="center">
   <img src="docs/assets/dart-proposal-family.png"
        alt="Eight panels in two rows. Across four columns the tempering

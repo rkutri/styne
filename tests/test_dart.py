@@ -109,6 +109,79 @@ def test_dart_factory_inconsistent_lengths():
         factory.create()
 
 
+@pytest.mark.parametrize(
+    ('estimatorType', 'nChain', 'burnin', 'thinning'),
+    (
+        ('cumulant', 1, 0, 1),
+        ('cumulant', 4, 4, 1),
+        ('cumulant', 3, 0, 3),
+        ('is', 3, 3, 1),
+        ('bridge', 3, 3, 1),
+    ),
+)
+def test_dart_factory_rejects_insufficient_retained_samples(
+        estimatorType, nChain, burnin, thinning):
+    target = GaussianDensity(
+        IIDCovarianceMatrix(1, 1.0), Vector([0.0])
+    )
+    factory = DARTFactory(root='mrw')
+    factory.target = target
+    factory.surrogate = [target]
+    factory.regularisation = [1.0]
+    factory.nChain = [nChain]
+    factory.burnin = burnin
+    factory.thinning = thinning
+    factory.correctionType = estimatorType
+    factory.root.proposalCovariance = IIDCovarianceMatrix(1, 0.1)
+
+    with pytest.raises(ValueError, match="retains"):
+        factory.create()
+
+
+@pytest.mark.parametrize('estimatorType', ('is', 'bridge', 'cumulant'))
+def test_dart_factory_supports_explicit_zero_subchain(estimatorType):
+    target = GaussianDensity(
+        IIDCovarianceMatrix(1, 1.0), Vector([0.0])
+    )
+    factory = DARTFactory(root='mrw')
+    factory.target = target
+    factory.surrogate = [target]
+    factory.regularisation = [1.0]
+    factory.nChain = [0]
+    factory.correctionType = estimatorType
+    factory.root.proposalCovariance = IIDCovarianceMatrix(1, 0.1)
+
+    sampler = factory.create()
+    current = sampler.initial_state(Vector([0.4]))
+    nextState, transition, _ = sampler.step(
+        current, np.random.default_rng(8)
+    )
+
+    np.testing.assert_array_equal(
+        transition.proposed.parameter.coordinate, current.parameter.coordinate
+    )
+    np.testing.assert_array_equal(
+        nextState.parameter.coordinate, current.parameter.coordinate
+    )
+
+
+def test_multilevel_factory_validates_inner_cumulant_trajectory():
+    target = GaussianDensity(
+        IIDCovarianceMatrix(1, 1.0), Vector([0.0])
+    )
+    factory = DARTFactory(root='mrw')
+    factory.target = target
+    factory.surrogate = [target, target]
+    factory.regularisation = [1.0, 1.0]
+    factory.nChain = [1, 5]
+    factory.burnin = 0
+    factory.correctionType = 'is'
+    factory.root.proposalCovariance = IIDCovarianceMatrix(1, 0.1)
+
+    with pytest.raises(ValueError, match="level 0"):
+        factory.create()
+
+
 def test_partitioned_dart_acceptance_invariant():
     """Assert partitioned DART _log_mh_ratio equals target + correction invariant."""
     from styne.gp.gaussianprocess import GaussianProcess

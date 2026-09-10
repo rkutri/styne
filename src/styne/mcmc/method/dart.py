@@ -4,6 +4,7 @@ from typing import List, Optional
 from logging import getLogger
 from numpy.random import Generator
 
+from styne.backend import infer_backend
 from styne.mcmc.metropolishastings import MetropolisHastings
 from styne.mcmc.factory import MHFactory
 from styne.mcmc.acceptance import AcceptanceProbability
@@ -79,7 +80,8 @@ class LocalisedSurrogateTransition(ProposalMethod):
             self._surrogateMeasure.transition_trajectory(state, rng)
         )
         proposalTrajectory = None
-        if self._correction.requires_proposal_trajectory:
+        if self._correction.requires_proposal_trajectory \
+                and self._surrogateMeasure.subchainLength > 0:
             _, proposalTrajectory, nextRng = (
                 self._surrogateMeasure.transition_trajectory(
                     coarseProposal, nextRng
@@ -96,6 +98,12 @@ class LocalisedSurrogateTransition(ProposalMethod):
 
     def log_acceptance_correction(
             self, state, proposal, trajectory, proposalTrajectory):
+        if self._surrogateMeasure.subchainLength == 0:
+            backend = infer_backend(state.coordinate)
+            metadata = backend.metadata(state.coordinate)
+            return backend.asarray(
+                0., dtype=metadata.dtype, device=metadata.device
+            )
         density = self._surrogateMeasure.density
         logDiffSurrogate = (density.evaluate_log_surrogate(proposal)
                             - density.evaluate_log_surrogate(state))
@@ -480,6 +488,26 @@ class DARTFactory(MHFactory):
         if any(n < 0 for n in self._nChain):
             raise ValueError(
                 "All nChain values must be non-negative integers.")
+
+        estimatorTypes = ['cumulant'] * (self._nSurrogate - 1)
+        estimatorTypes.append(
+            self._correction.estimatorType
+            if self._correction is not None
+            else self._correctionType or 'cumulant'
+        )
+        for level, (nChain, estimatorType) in enumerate(zip(
+                self._nChain, estimatorTypes)):
+            if nChain == 0:
+                continue
+            retained = RatioEstimator.retained_sample_count(
+                nChain, self._burnin, self._thinning
+            )
+            required = RatioEstimator.minimum_samples(estimatorType)
+            if retained < required:
+                raise ValueError(
+                    f"DART level {level} retains {retained} ratio sample(s); "
+                    f"{estimatorType} requires at least {required}."
+                )
 
         if any(n == 0 for n in self._nChain):
             self._logger.warning(

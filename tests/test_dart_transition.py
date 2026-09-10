@@ -57,5 +57,12 @@ def test_zero_subchain_uses_localised_initial_measure():
         transition.auxiliary["surrogateTrajectory"],
         mrwTransition.proposal.coordinate[None, :],
     )
+    correction = proposal.log_acceptance_correction(
+        state,
+        transition.proposal,
+        transition.auxiliary["surrogateTrajectory"],
+        transition.auxiliary["proposalTrajectory"],
+    )
+    assert correction == 0.0
     with pytest.raises(RuntimeError, match="Mean not set"):
         initialMeasure.mean
