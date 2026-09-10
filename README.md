@@ -70,6 +70,7 @@ The backend-neutral examples cover the main workflows:
 - `examples/01_quickstart.py`: Bayesian linear regression.
 - `examples/02_gp.py`: Gaussian-process representations.
 - `examples/03_sglmm.py`: a spatial Poisson GLMM.
+- `examples/04_hierarchical.py`: a named two-block Gibbs hierarchy.
 
 Run a fast check with:
 
@@ -89,6 +90,23 @@ The NumPy/SciPy PDE example is in
 
 State is immutable and backend-native. Sampling methods accept and return
 explicit random states, and parameter updates use `with_*` methods.
+
+`HierarchicalBayes` keeps the factors used to evaluate the joint density
+separate from the invariant updates used by `BlockGibbs`. Add each non-root
+factor with `add_conditional`, then add one full conditional or invariant
+Metropolis-within-Gibbs update for every block with `add_update`, including
+the root. Block names follow non-root order and then the root.
+
+```python
+hierarchy = (
+    HierarchicalBayesModelBuilder()
+    .set_root(rootMeasure, name="hyperparameters")
+    .add_conditional(latentFactor, name="latent")
+    .add_update(latentUpdate)
+    .add_update(hyperparameterUpdate)
+    .build()
+)
+```
 
 ```text
 Parameter -> ForwardMap -> Likelihood / Density -> Sampler

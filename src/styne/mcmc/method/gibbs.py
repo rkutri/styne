@@ -50,6 +50,7 @@ class GibbsSampler(MCMCSampler):
 
     def step(self, currentState: BlockParameter, rng):
         """Return one immutable Gibbs sweep and its propagated random state."""
+        self._validate_initial(currentState)
         state = currentState
         for i in range(self._nBlocks):
             newBlock, rng = self._sample_block(i, state, rng)
@@ -94,8 +95,23 @@ class BlockGibbs(GibbsSampler):
     name = "BlockGibbs"
 
     def __init__(self, model, rng: Optional[Generator] = None):
+        if not getattr(model, "hasCompleteUpdates", True):
+            raise ValueError(
+                "BlockGibbs requires one invariant update for every block."
+            )
         super().__init__(model.nBlocks, rng=rng)
         self._model = model
+
+    def _validate_initial(self, initialState):
+        super()._validate_initial(initialState)
+        validate = getattr(self._model, "validate_state", None)
+        if callable(validate):
+            validate(initialState)
+        elif initialState.nBlocks != self._nBlocks:
+            raise ValueError(
+                f"Expected {self._nBlocks} state blocks, got "
+                f"{initialState.nBlocks}."
+            )
 
     def _sample_block(self, idx: int, state: BlockParameter, rng):
         """Sample an independently conditioned block measure."""

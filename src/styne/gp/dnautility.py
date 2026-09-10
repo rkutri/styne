@@ -1,3 +1,4 @@
+import copy
 import itertools
 from enum import Enum
 
@@ -153,6 +154,18 @@ class DNACoarseFinePartition(Partition):
 
     def fine_measure(self):
         return self._component_measure(1)
+
+    def with_process(self, dnaGP, parameter=None):
+        """Return an isolated partition bound to ``dnaGP``."""
+        if dnaGP.parameterDimension != self.rule.total_dimension():
+            raise ValueError("Replacement GP has an incompatible dimension.")
+        result = copy.copy(self)
+        result._measure = dnaGP.measure
+        result.parameter = (
+            dnaGP.function(dnaGP.measure.mean.coordinate)
+            if parameter is None else parameter
+        )
+        return result
 
     def _component_measure(self, idx: int):
 

@@ -1,3 +1,4 @@
+import copy
 import numpy as np
 
 from styne.backend import infer_backend
@@ -57,6 +58,12 @@ class RatioEstimator:
     @property
     def requires_proposal_trajectory(self):
         return self._type == 'bridge'
+
+    def with_surrogate_measure(self, surrogateMeasure):
+        """Return the estimator bound to ``surrogateMeasure``."""
+        result = copy.copy(self)
+        result._surrogateMeasure = surrogateMeasure
+        return result
 
     def log_ratio_estimate(
         self, state: Parameter, proposal: Parameter, trajectory=None,

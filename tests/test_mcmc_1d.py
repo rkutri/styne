@@ -146,7 +146,6 @@ def test_metropolis_within_gibbs():
     from styne.utility.tuning import PCNTuner
     from styne.statistics.conditional import MetropolisWithinGibbsConditional
     from styne.mcmc.method.gibbs import GibbsBuilder
-    from styne.statistics.bayes import HierarchicalBayes
     from styne.utility.grid import Grid
     from styne.statistics.radonnikodym import RadonNikodym
     from styne.parameter.block import BlockParameter
@@ -178,7 +177,15 @@ def test_metropolis_within_gibbs():
     
     # Simple block conditional
     cond = MetropolisWithinGibbsConditional(mcmc, blockIdx=0, nSteps=2)
-    joint = HierarchicalBayes(conditionals=[cond], root=gp.measure)
+    class OneBlockModel:
+        nBlocks = 1
+
+        @staticmethod
+        def conditional(index, state):
+            assert index == 0
+            return cond.condition(state)
+
+    joint = OneBlockModel()
     
     builder = GibbsBuilder()
     builder.model = joint
@@ -204,7 +211,6 @@ def test_metropolis_within_gibbs_does_not_mutate_template_sampler():
     from styne.mcmc.method.pcn import PCNFactory
     from styne.statistics.conditional import MetropolisWithinGibbsConditional
     from styne.mcmc.method.gibbs import GibbsBuilder
-    from styne.statistics.bayes import HierarchicalBayes
     from styne.utility.grid import Grid
     from styne.statistics.radonnikodym import RadonNikodym
     from styne.parameter.block import BlockParameter
@@ -232,7 +238,15 @@ def test_metropolis_within_gibbs_does_not_mutate_template_sampler():
         mcmc, blockIdx=0, nSteps=nStepsPerSweep
     )
     mcmc.storeChain = True
-    joint = HierarchicalBayes(conditionals=[cond], root=gp.measure)
+    class OneBlockModel:
+        nBlocks = 1
+
+        @staticmethod
+        def conditional(index, state):
+            assert index == 0
+            return cond.condition(state)
+
+    joint = OneBlockModel()
 
     builder = GibbsBuilder()
     builder.model = joint

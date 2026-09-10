@@ -16,6 +16,7 @@ from styne.statistics.data import Data
 from styne.statistics.gaussian import Gaussian, GaussianDensity
 from styne.statistics.radonnikodym import RadonNikodym
 from styne.statistics.likelihood import RegressionLikelihood
+from styne.statistics.hierarchical import SGLMMLatentConditional
 from styne.statistics.response import GaussianResponse
 from styne.statistics.stationary import MaternCovariance1D
 from styne.utility.grid import UniformGrid
@@ -176,3 +177,34 @@ def test_pcn_retarget_preserves_backend_and_uses_new_reference(backend):
     np.testing.assert_allclose(
         transition.proposed.parameter.coordinate, expected.coordinate
     )
+
+
+def test_spatial_conditioning_preserves_backend_composition(backend):
+    dtype = 'float32'
+    sites = UniformGrid(0.1, 0.9, 3)
+    gp = process('dna', backend)
+    data = Data(1, sites.to_array())
+    data.measurement = backend.zeros((3, 1), dtype=dtype)
+    likelihood = RegressionLikelihood(
+        data,
+        SGLMM(gp, sites),
+        GaussianResponse(IIDCovarianceMatrix(
+            3, backend.asarray(0.5, dtype=dtype)
+        )),
+    )
+    target = UnnormalisedPosterior(gp.measure, likelihood)
+    conditional = SGLMMLatentConditional(target, gp)
+    latent = Vector(backend.zeros(gp.parameterDimension, dtype=dtype))
+    hyperparameters = Vector(backend.asarray(
+        [-0.7, 0.2], dtype=dtype
+    ))
+
+    conditioned = conditional.condition(
+        BlockParameter([latent, hyperparameters])
+    )
+    value = conditioned.evaluate_log(latent)
+
+    assert infer_backend(value) is backend
+    assert conditioned.reference is conditioned.gp.measure
+    assert conditioned.derivative.model._gp is conditioned.gp
+    assert conditional.gp is gp

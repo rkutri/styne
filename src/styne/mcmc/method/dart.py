@@ -1,3 +1,4 @@
+import copy
 import numpy as np
 from typing import List, Optional
 from logging import getLogger
@@ -149,6 +150,38 @@ class DART(MetropolisHastings):
 
         super().__init__(target, proposal, diagnostics,
                          acceptance=acceptance, rng=rng)
+
+    @staticmethod
+    def _with_localised_density(proposal, density):
+        measure = proposal.measure.with_density(density)
+        correction = proposal.correction.with_surrogate_measure(measure)
+        return LocalisedSurrogateTransition(
+            measure, proposal._burnin, proposal._thinning, correction
+        )
+
+    def _proposal_for_target(self, targetDensity):
+        density = getattr(targetDensity, "localisedDensity", None)
+        if density is None:
+            return copy.copy(self.proposal)
+
+        proposal = self.proposal
+        if isinstance(proposal, PartitionedSurrogateProposal):
+            coarseProposal = self._with_localised_density(
+                proposal._coarseProposal, density
+            )
+            finePrior = targetDensity.finePrior
+            fineKernel = PCNProposal(finePrior, proposal._fineKernel.beta)
+            return PartitionedSurrogateProposal(
+                targetDensity.partition,
+                coarseProposal,
+                fineKernel,
+                finePrior,
+            )
+
+        if isinstance(proposal, LocalisedSurrogateTransition):
+            return self._with_localised_density(proposal, density)
+
+        return copy.copy(proposal)
 
     def _log_mh_ratio(self, transition: TransitionData):
         """MH ratio with generic acceptance correction."""

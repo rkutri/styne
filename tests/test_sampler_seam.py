@@ -220,7 +220,9 @@ def test_manuscript_pattern_smoke_test():
     )
     
     hierarchicalBayes = HierarchicalBayes(
-        [latentTransition, hyperTransition], root=targetDensity.reference
+        [latentTransition],
+        root=hyperMeasure,
+        updates=[latentTransition, hyperTransition],
     )
     
     builder = GibbsBuilder()

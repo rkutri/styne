@@ -35,6 +35,10 @@ class RegressionLikelihood(LikelihoodInterface):
     def response(self) -> ResponseFamily:
         return self._response
 
+    def with_model(self, model: ForwardMap):
+        """Return the likelihood attached to ``model``."""
+        return type(self)(self._data, model, self._response)
+
     def evaluate_log(self, parameter: Parameter):
         evaluation = self._forwardMap(parameter)
         return self._response.log_likelihood(self._data.measurement, evaluation)

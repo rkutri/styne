@@ -139,6 +139,22 @@ class LocalisedSurrogateDensity(RadonNikodym):
         result.location = location
         return result
 
+    def with_surrogate_density(self, surrogateDensity, spectralWeights=None):
+        """Rebuild the localised density around a replacement surrogate."""
+        result = type(self)(
+            self._reg,
+            self._tempering,
+            surrogateDensity,
+            spectralWeights=spectralWeights,
+            temperFullDensity=self._temperFullDensity,
+        )
+        result.location = self.location
+        return result
+
+    @property
+    def surrogateDensity(self):
+        return self._surrogateDensity
+
     @property
     def regularisation(self) -> float:
         return self._reg
@@ -226,6 +242,18 @@ class LocalisedSurrogateTransitionMeasure(SurrogateTransitionMeasure):
         initialMeasure = copy.copy(self._initialMeasure)
         initialMeasure.location = location
         return initialMeasure
+
+    def with_density(self, density: LocalisedSurrogateDensity):
+        """Return an isolated transition measure targeting ``density``."""
+        if not isinstance(density, LocalisedSurrogateDensity):
+            raise TypeError("density must be a LocalisedSurrogateDensity.")
+        result = copy.copy(self)
+        result._mcmc = copy.copy(self._mcmc)
+        result._mcmc._chain = copy.copy(self._mcmc._chain)
+        result._mcmc._diagnostics = copy.deepcopy(self._mcmc.diagnostics)
+        result._mcmc.target = density
+        result._initialMeasure = copy.copy(self._initialMeasure)
+        return result
 
     def transition_trajectory(self, initialState: Parameter, randomState):
         """Run an isolated surrogate trajectory localised at ``initialState``."""

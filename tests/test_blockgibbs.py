@@ -93,17 +93,23 @@ class BackendConditional(ConditionalMeasure):
 def make_model(rho: float) -> HierarchicalBayes:
     """Build a HierarchicalBayes for a 2D correlated Gaussian with correlation rho."""
     root = Gaussian(IIDCovarianceMatrix(1, 1.0), Vector(np.zeros(1)))
+    firstUpdate = CorrelatedGaussianConditional(0, rho)
+    rootUpdate = CorrelatedGaussianConditional(1, rho)
     return (
         HierarchicalBayesModelBuilder()
-        .set_root(root)
-        .add_conditional(CorrelatedGaussianConditional(0, rho))
-        .add_conditional(CorrelatedGaussianConditional(1, rho))
+        .set_root(root, name="root")
+        .add_conditional(firstUpdate, name="latent")
+        .add_update(firstUpdate)
+        .add_update(rootUpdate)
         .build()
     )
 
 
 def make_init() -> BlockParameter:
-    return BlockParameter([Vector(np.zeros(1)), Vector(np.zeros(1))])
+    return BlockParameter(
+        [Vector(np.zeros(1)), Vector(np.zeros(1))],
+        names={"latent": 0, "root": 1},
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -132,6 +138,16 @@ class TestBlockGibbsStructure:
         self.sampler.run(10, make_init())
         assert isinstance(self.sampler.lastState, BlockParameter)
         assert self.sampler.lastState.nBlocks == 2
+        assert self.sampler.lastState.names == {"latent": 0, "root": 1}
+        assert tuple(
+            self.sampler.lastState.block(index).dimension
+            for index in range(2)
+        ) == (1, 1)
+
+    def test_public_model_counts_root_block(self):
+        assert self.model.nBlocks == 2
+        assert self.model.blockDimensions == (1, 1)
+        assert self.model.blockNames == ("latent", "root")
 
     def test_builder(self):
         builder = GibbsBuilder()
@@ -201,6 +217,47 @@ class TestBlockGibbsStructure:
 
         assert isinstance(nextState.block(0).coordinate, torch.Tensor)
         assert isinstance(nextState.block(1).coordinate, torch.Tensor)
+
+    def test_builder_rejects_sampling_without_root_update(self):
+        model = (
+            HierarchicalBayesModelBuilder()
+            .set_root(Gaussian(
+                IIDCovarianceMatrix(1, 1.0), Vector(np.zeros(1))
+            ))
+            .add_conditional(CorrelatedGaussianConditional(0, 0.5))
+            .build()
+        )
+
+        assert model.nBlocks == 2
+        with pytest.raises(ValueError, match="one invariant update"):
+            BlockGibbs(model)
+
+
+def test_three_block_joint_factorisation_excludes_update_densities():
+    firstFactor = CorrelatedGaussianConditional(0, 0.25)
+    secondFactor = CorrelatedGaussianConditional(1, -0.4)
+    root = Gaussian(IIDCovarianceMatrix(1, 2.0), Vector([0.0]))
+    updates = [
+        CorrelatedGaussianConditional(0, -0.8),
+        CorrelatedGaussianConditional(1, 0.7),
+        CorrelatedGaussianConditional(1, -0.2),
+    ]
+    model = HierarchicalBayes(
+        [firstFactor, secondFactor], root, updates=updates
+    )
+    state = BlockParameter([
+        Vector([0.3]), Vector([-0.6]), Vector([1.2])
+    ])
+    expected = root.density.evaluate_log(state.block(2))
+    expected += firstFactor.condition(state).density.evaluate_log(
+        state.block(0)
+    )
+    expected += secondFactor.condition(state).density.evaluate_log(
+        state.block(1)
+    )
+
+    assert model.nBlocks == 3
+    np.testing.assert_allclose(model.evaluate_log(state), expected)
 
 
 # ---------------------------------------------------------------------------

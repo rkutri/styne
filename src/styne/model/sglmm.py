@@ -74,6 +74,12 @@ class SGLMM(ForwardMap):
         if self._trend is not None:
             self._trendValues = self._trend.evaluate(self._obsSites)
 
+    def with_gp(self, gp: GaussianProcess):
+        """Return the same model composition with a replacement GP."""
+        return type(self)(
+            gp, self._obsSites, features=self._features, trend=self._trend
+        )
+
     @property
     def pType(self):
         return BlockParameter if self._features is not None else Vector

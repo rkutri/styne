@@ -42,6 +42,7 @@ jobs:
           python3 examples/01_quickstart.py --smoke --backend "${{ matrix.backend }}"
           python3 examples/02_gp.py --smoke --backend "${{ matrix.backend }}"
           python3 examples/03_sglmm.py --smoke --backend "${{ matrix.backend }}"
+          python3 examples/04_hierarchical.py --smoke --backend "${{ matrix.backend }}"
       - name: Run NumPy PDE example smoke test
         if: ${{ matrix.python-version == '3.12' && matrix.backend == 'numpy' }}
         run: python3 examples_numpy/04_pde_inverse_problem.py --smoke
