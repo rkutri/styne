@@ -8,7 +8,7 @@ from styne.mcmc.method.pcn import (
 )
 from styne.mcmc.transition import TransitionData
 from styne.mcmc.diagnostics import AcceptanceRateDiagnostics
-from styne.mcmc.acceptance import BarkerAcceptance
+from styne.mcmc.acceptance import AcceptanceProbability, BarkerAcceptance
 from styne.statistics.radonnikodym import RadonNikodym
 from styne.statistics.gaussian import Gaussian, GaussianDensity
 from styne.statistics.covariance import IIDCovarianceMatrix
@@ -27,6 +27,29 @@ def make_valid_target(dim=2):
     likMean = Vector(np.ones(dim))
     derivative = GaussianDensity(likCov, likMean)
     return RadonNikodym(prior, derivative)
+
+
+class ConstantDensity(DensityInterface):
+
+    def __init__(self, dimension):
+        self._dimension = dimension
+
+    @property
+    def domainType(self):
+        return Vector
+
+    @property
+    def domainDimension(self):
+        return self._dimension
+
+    def evaluate_log(self, parameter):
+        return np.sum(parameter.coordinate * 0.0, axis=-1)
+
+
+class RejectAllAcceptance(AcceptanceProbability):
+
+    def log_probability(self, logMHRatio):
+        return np.asarray(float("-inf"))
 
 
 class NonGaussianMeasure(AbsolutelyContinuousProbabilityMeasure):
@@ -222,6 +245,68 @@ class TestPCNLogMHRatio:
             proposed=sampler.evaluate_state(proposal),
         )
         assert np.isclose(sampler._log_mh_ratio(transition), expected)
+
+    def test_retarget_rebuilds_proposal_from_new_reference(self):
+        oldReference = Gaussian(
+            IIDCovarianceMatrix(1, 1.0), Vector([0.0])
+        )
+        newReference = Gaussian(
+            IIDCovarianceMatrix(1, 4.0), Vector([10.0])
+        )
+        sampler = PreconditionedCrankNicolson(
+            RadonNikodym(oldReference, ConstantDensity(1)),
+            1.0,
+            AcceptanceRateDiagnostics(),
+        )
+
+        sampler.target = RadonNikodym(newReference, ConstantDensity(1))
+        expected, _ = newReference.sample(np.random.default_rng(7))
+        current = sampler.initial_state(Vector([10.0]))
+        nextState, transition, _ = sampler.step(
+            current, np.random.default_rng(7)
+        )
+
+        assert sampler.proposal.referenceMeasure is newReference
+        assert bool(transition.outcome)
+        np.testing.assert_allclose(
+            transition.proposed.parameter.coordinate, expected.coordinate
+        )
+        np.testing.assert_allclose(
+            nextState.parameter.coordinate, expected.coordinate
+        )
+
+    def test_retarget_uses_new_derivative_for_ratio_and_rejection(self):
+        oldReference = Gaussian(
+            IIDCovarianceMatrix(1, 1.0), Vector([0.0])
+        )
+        newReference = Gaussian(
+            IIDCovarianceMatrix(1, 4.0), Vector([10.0])
+        )
+        derivative = GaussianDensity(
+            IIDCovarianceMatrix(1, 0.5), Vector([9.0])
+        )
+        sampler = PreconditionedCrankNicolson(
+            RadonNikodym(oldReference, ConstantDensity(1)),
+            1.0,
+            AcceptanceRateDiagnostics(),
+            acceptance=RejectAllAcceptance(),
+        )
+        sampler.target = RadonNikodym(newReference, derivative)
+        current = sampler.initial_state(Vector([10.0]))
+
+        nextState, transition, _ = sampler.step(
+            current, np.random.default_rng(4)
+        )
+        expectedRatio = (
+            derivative.evaluate_log(transition.proposed.parameter)
+            - derivative.evaluate_log(current.parameter)
+        )
+
+        np.testing.assert_allclose(
+            sampler._log_mh_ratio(transition), expectedRatio
+        )
+        assert not bool(transition.outcome)
+        np.testing.assert_array_equal(nextState.parameter.coordinate, [10.0])
 
 
 class TestPCNInvariantMeasure:

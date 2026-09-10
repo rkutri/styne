@@ -117,6 +117,18 @@ class MetropolisAdjustedLangevinAlgorithm(MetropolisHastings):
         super().__init__(targetDensity, proposalMethod, diagnostics,
                          acceptance=acceptance, rng=rng)
 
+    def _proposal_for_target(self, targetDensity):
+        gradient = self._proposalMethod._logGradient
+        owner = getattr(gradient, "__self__", None)
+        if owner is self.target:
+            gradient = targetDensity.evaluate_log_gradient
+        return MALAProposal(
+            targetDensity.domainDimension,
+            self._proposalMethod.stepSize,
+            gradient,
+            targetDensity.evaluate_log,
+        )
+
     def _log_mh_ratio(self, transition: TransitionData):
         """
         Log MH ratio for the Langevin proposal.

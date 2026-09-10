@@ -275,6 +275,37 @@ class TestPMALAProposalStep:
             torch.full((self.DIM,), expected, dtype=coordinate.dtype),
         )
 
+    def test_retarget_rebinds_reference_and_derivative_gradient(self):
+        sampler = PreconditionedMALA(
+            self.target,
+            self.BETA,
+            AcceptanceRateDiagnostics(),
+            gradient=self.target.derivative.evaluate_log_gradient,
+        )
+        reference = Gaussian(
+            IIDCovarianceMatrix(self.DIM, 4.0), Vector(np.full(self.DIM, 5.0))
+        )
+        derivative = GaussianDensity(
+            IIDCovarianceMatrix(self.DIM, 0.5),
+            Vector(np.full(self.DIM, -1.0)),
+        )
+        target = RadonNikodym(reference, derivative)
+
+        sampler.target = target
+        drift = sampler.proposal._drift(self.state)
+        expected = (
+            reference.mean.coordinate
+            + np.sqrt(1.0 - self.BETA ** 2)
+            * (self.state.coordinate - reference.mean.coordinate)
+            + 0.5 * self.BETA ** 2 * reference.covariance.apply(
+                derivative.evaluate_log_gradient(self.state)
+            )
+        )
+
+        assert sampler.proposal._target is target
+        assert sampler.proposal._gradient.__self__ is derivative
+        np.testing.assert_allclose(drift, expected)
+
 
 # ---------------------------------------------------------------------------
 # 3. Invariant measure

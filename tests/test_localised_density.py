@@ -2,13 +2,34 @@ import pytest
 import numpy as np
 
 from styne.mcmc.localised import LocalisedSurrogateDensity
+from styne.mcmc.localised import LocalisedSurrogateTransitionMeasure
+from styne.mcmc.diagnostics import DummyDiagnostics
+from styne.mcmc.method.pcn import PreconditionedCrankNicolson
 from styne.mcmc.method.ratio import log_dot_product_weights
 from styne.statistics.covariance import (
     IIDCovarianceMatrix, DiagonalCovarianceMatrix
 )
 from styne.statistics.gaussian import Gaussian
+from styne.statistics.interface import DensityInterface
 from styne.statistics.radonnikodym import RadonNikodym
 from styne.parameter.vector import Vector
+
+
+class ConstantDensity(DensityInterface):
+
+    def __init__(self, dimension):
+        self._dimension = dimension
+
+    @property
+    def domainType(self):
+        return Vector
+
+    @property
+    def domainDimension(self):
+        return self._dimension
+
+    def evaluate_log(self, parameter):
+        return np.sum(parameter.coordinate * 0.0, axis=-1)
 
 
 def gaussian_surrogate(dim):
@@ -18,6 +39,44 @@ def gaussian_surrogate(dim):
     # derivative is a uniform (zero-gradient) density; use prior.density itself
     # as a stand-in — the test only cares about the regularisation term.
     return RadonNikodym(prior, prior.density)
+
+
+def test_localised_trajectory_retargets_centre_dependent_reference():
+    density = LocalisedSurrogateDensity(4.0, 1.0, ConstantDensity(1))
+    sampler = PreconditionedCrankNicolson(
+        density, 1.0, DummyDiagnostics()
+    )
+    measure = LocalisedSurrogateTransitionMeasure(sampler, nChain=1)
+    centre = Vector([3.0])
+    expectedReference = density.with_location(centre).reference
+    expected, _ = expectedReference.sample(np.random.default_rng(7))
+
+    proposal, trajectory, _ = measure.transition_trajectory(
+        centre, np.random.default_rng(7)
+    )
+
+    np.testing.assert_allclose(proposal.coordinate, expected.coordinate)
+    np.testing.assert_allclose(trajectory[1], expected.coordinate)
+    np.testing.assert_array_equal(sampler.target.location.coordinate, [0.0])
+    np.testing.assert_array_equal(
+        sampler.proposal.referenceMeasure.mean.coordinate, [0.0]
+    )
+
+
+def test_localised_rn_target_keeps_fixed_gaussian_reference():
+    reference = Gaussian(IIDCovarianceMatrix(1, 2.0), Vector([1.0]))
+    surrogate = RadonNikodym(reference, ConstantDensity(1))
+    density = LocalisedSurrogateDensity(4.0, 1.0, surrogate)
+    sampler = PreconditionedCrankNicolson(
+        density, 1.0, DummyDiagnostics()
+    )
+
+    sampler.target = density.with_location(Vector([3.0]))
+
+    assert sampler.proposal.referenceMeasure is reference
+    np.testing.assert_array_equal(
+        sampler.proposal.referenceMeasure.mean.coordinate, [1.0]
+    )
 
 
 # ──────────────────────────────────────────────────────────────────

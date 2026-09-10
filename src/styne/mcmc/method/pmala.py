@@ -164,6 +164,18 @@ class PreconditionedMALA(MetropolisHastings):
 
         return logTarget + quadDiff
 
+    def _proposal_for_target(self, targetDensity):
+        validate_pmala_target(targetDensity)
+        gradient = self._proposalMethod._gradient
+        owner = getattr(gradient, "__self__", None)
+        if owner is self.target:
+            gradient = targetDensity.evaluate_log_gradient
+        elif owner is self.target.derivative:
+            gradient = targetDensity.derivative.evaluate_log_gradient
+        return PMALAProposal(
+            targetDensity, self._proposalMethod.beta, gradient
+        )
+
 
 class PMALAFactory(MHFactory):
     """Factory for constructing PreconditionedMALA instances."""

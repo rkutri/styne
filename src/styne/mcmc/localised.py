@@ -231,7 +231,9 @@ class LocalisedSurrogateTransitionMeasure(SurrogateTransitionMeasure):
         """Run an isolated surrogate trajectory localised at ``initialState``."""
         measure = copy.copy(self)
         measure._mcmc = copy.copy(self._mcmc)
-        measure._mcmc._tgtDensity = self.density.with_location(initialState)
+        measure._mcmc._chain = copy.copy(self._mcmc._chain)
+        measure._mcmc._diagnostics = copy.deepcopy(self._mcmc.diagnostics)
+        measure._mcmc.target = self.density.with_location(initialState)
         measure._initialMeasure = self._localise_initial_measure(initialState)
         trajectoryStart, randomState = measure._initialMeasure.sample(randomState)
         return super(

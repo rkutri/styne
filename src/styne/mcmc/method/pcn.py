@@ -118,6 +118,14 @@ class PreconditionedCrankNicolson(MetropolisHastings):
     def _evaluate_log_density(self, parameter: Parameter):
         return self._tgtDensity.derivative.evaluate_log(parameter)
 
+    def _proposal_for_target(self, targetDensity):
+        if not isinstance(targetDensity, RadonNikodym):
+            raise TypeError(
+                "pCN target must be a RadonNikodym instance (with a Gaussian "
+                "reference measure)."
+            )
+        return PCNProposal(targetDensity.reference, self.proposal.beta)
+
     def _log_mh_ratio(self, transition: TransitionData):
         return transition.proposed.logDensity - transition.current.logDensity
 

@@ -1,9 +1,11 @@
+import numpy as np
 import pytest
 
 from styne.backend import BackendUnavailableError, get_backend, infer_backend
 from styne.gp.gaussianprocess import GaussianProcess
 from styne.mcmc.diagnostics import DummyDiagnostics
 from styne.mcmc.method.mrw import MetropolisedRandomWalk
+from styne.mcmc.method.pcn import PreconditionedCrankNicolson
 from styne.model.forwardmap import ForwardMap
 from styne.model.representation.bspline import BSpline1D
 from styne.model.sglmm import SGLMM
@@ -11,7 +13,8 @@ from styne.parameter import BlockParameter, Vector
 from styne.statistics.bayes import UnnormalisedPosterior
 from styne.statistics.covariance import IIDCovarianceMatrix
 from styne.statistics.data import Data
-from styne.statistics.gaussian import Gaussian
+from styne.statistics.gaussian import Gaussian, GaussianDensity
+from styne.statistics.radonnikodym import RadonNikodym
 from styne.statistics.likelihood import RegressionLikelihood
 from styne.statistics.response import GaussianResponse
 from styne.statistics.stationary import MaternCovariance1D
@@ -142,3 +145,34 @@ def test_sglmm_posterior_mrw_integration_preserves_backend(backend):
     assert isinstance(nextState.parameter, BlockParameter)
     assert nextState.parameter.coordinate.shape == (parameter.dimension,)
     assert transition.logAcceptanceProbability.shape == ()
+
+
+def test_pcn_retarget_preserves_backend_and_uses_new_reference(backend):
+    dtype = 'float32'
+    oldReference = Gaussian(
+        IIDCovarianceMatrix(1, backend.asarray(1.0, dtype=dtype)),
+        Vector(backend.zeros(1, dtype=dtype)),
+    )
+    newReference = Gaussian(
+        IIDCovarianceMatrix(1, backend.asarray(4.0, dtype=dtype)),
+        Vector(backend.full((1,), 10.0, dtype=dtype)),
+    )
+    derivative = GaussianDensity(
+        IIDCovarianceMatrix(1, backend.asarray(1.0, dtype=dtype)),
+        Vector(backend.full((1,), 10.0, dtype=dtype)),
+    )
+    sampler = PreconditionedCrankNicolson(
+        RadonNikodym(oldReference, derivative), 1.0, DummyDiagnostics()
+    )
+    sampler.target = RadonNikodym(newReference, derivative)
+    expected, _ = newReference.sample(backend.random_state(7))
+    current = sampler.initial_state(
+        Vector(backend.full((1,), 10.0, dtype=dtype))
+    )
+
+    _, transition, _ = sampler.step(current, backend.random_state(7))
+
+    assert infer_backend(transition.proposed.parameter.coordinate) is backend
+    np.testing.assert_allclose(
+        transition.proposed.parameter.coordinate, expected.coordinate
+    )

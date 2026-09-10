@@ -266,6 +266,30 @@ def test_mala_numpy_explicit_gradient_controls_the_drift():
     np.testing.assert_allclose(drift, [0.49])
 
 
+def test_mala_retarget_rebinds_density_and_bound_gradient():
+    oldDensity = GaussianDensity(
+        IIDCovarianceMatrix(1, 1.0), Vector(np.zeros(1))
+    )
+    newDensity = GaussianDensity(
+        IIDCovarianceMatrix(1, 2.0), Vector(np.array([3.0]))
+    )
+    sampler = MetropolisAdjustedLangevinAlgorithm(
+        oldDensity,
+        0.2,
+        DummyDiagnostics(),
+        gradient=oldDensity.evaluate_log_gradient,
+    )
+
+    sampler.target = newDensity
+    state = Vector(np.array([1.0]))
+    expected = state.coordinate + 0.5 * 0.2 ** 2 * (
+        newDensity.evaluate_log_gradient(state)
+    )
+
+    assert sampler.proposal._logGradient.__self__ is newDensity
+    np.testing.assert_allclose(sampler.proposal._drift(state), expected)
+
+
 def test_mala_drift_retains_pytorch_gradient_connectivity():
     torch = pytest.importorskip("torch")
 

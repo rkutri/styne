@@ -1,3 +1,4 @@
+import copy
 from abc import abstractmethod
 from typing import Optional
 
@@ -69,9 +70,15 @@ class MetropolisHastings(MCMCSampler):
 
     @target.setter
     def target(self, targetDensity: DensityInterface):
-        """Replace the target density and reset state."""
+        """Replace the target and reconstruct target-dependent proposal state."""
+        proposalMethod = self._proposal_for_target(targetDensity)
         self._tgtDensity = targetDensity
+        self._proposalMethod = proposalMethod
         self.clear()
+
+    def _proposal_for_target(self, targetDensity):
+        """Return an isolated proposal compatible with ``targetDensity``."""
+        return copy.copy(self._proposalMethod)
 
     @property
     def proposal(self):

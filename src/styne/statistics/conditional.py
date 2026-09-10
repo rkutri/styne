@@ -48,6 +48,7 @@ class MetropolisWithinGibbsConditional(ConditionalMeasure):
                 "implement the conditioning protocol."
             )
         target.condition_on(state)
+        self._sampler.target = target
         self._currentBlock = state.block(self._blockIdx)
 
     def condition(self, state: BlockParameter):
@@ -61,14 +62,11 @@ class MetropolisWithinGibbsConditional(ConditionalMeasure):
 
         conditioned = copy.copy(self)
         conditioned._sampler = copy.copy(self._sampler)
-        conditioned._sampler._tgtDensity = target.condition(state)
         conditioned._sampler._chain = Chain()
         conditioned._sampler._diagnostics = copy.deepcopy(
             self._sampler.diagnostics
         )
-        conditioned._sampler._lastState = None
-        conditioned._sampler._runnerState = None
-        conditioned._sampler._iteration = 0
+        conditioned._sampler.target = target.condition(state)
         conditioned._currentBlock = state.block(self._blockIdx)
         conditioned._initialized = False
         return conditioned
