@@ -1,9 +1,9 @@
-from styne.statistics.interface import DensityInterface
+from styne.statistics.interface import DensityInterface, RadonNikodymInterface
 from styne.statistics.measure import AbsolutelyContinuousProbabilityMeasure
 from styne.parameter.parameter import Parameter
 
 
-class RadonNikodym(DensityInterface):
+class RadonNikodym(RadonNikodymInterface):
     """
     Density defined as a Radon-Nikodym derivative with respect to a
     reference measure.

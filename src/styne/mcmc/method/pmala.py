@@ -9,12 +9,14 @@ from styne.mcmc.proposal import ProposalMethod
 from styne.mcmc.transition import TransitionData
 from styne.parameter.parameter import Parameter
 from styne.statistics.gaussian import Gaussian
-from styne.statistics.radonnikodym import RadonNikodym
+from styne.statistics.interface import RadonNikodymInterface
 
 
 def validate_pmala_target(target) -> None:
-    if not isinstance(target, RadonNikodym):
-        raise TypeError("pMALA target must be a RadonNikodym instance.")
+    if not isinstance(target, RadonNikodymInterface):
+        raise TypeError(
+            "pMALA target must implement RadonNikodymInterface."
+        )
     if not isinstance(target.reference, Gaussian):
         raise NotImplementedError(
             "Currently, only Gaussian reference measures are supported.")
@@ -39,7 +41,8 @@ class PMALAProposal(ProposalMethod):
     NumPy execution requires an explicit gradient callable.
     """
 
-    def __init__(self, target: RadonNikodym, beta: float, gradient=None):
+    def __init__(
+            self, target: RadonNikodymInterface, beta: float, gradient=None):
 
         validate_pmala_target(target)
         validate_beta(beta)
@@ -119,7 +122,7 @@ class PreconditionedMALA(MetropolisHastings):
 
     Parameters
     ----------
-    target : RadonNikodym
+    target : RadonNikodymInterface
         Target density with Gaussian reference measure.
     beta : float
         Step size in (0, 1].
@@ -128,7 +131,7 @@ class PreconditionedMALA(MetropolisHastings):
     """
     name = "pMALA"
 
-    def __init__(self, target: RadonNikodym, beta: float, diagnostics,
+    def __init__(self, target: RadonNikodymInterface, beta: float, diagnostics,
                  acceptance: AcceptanceProbability = None,
                  rng: Optional[Generator] = None, gradient=None):
 

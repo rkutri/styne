@@ -3,6 +3,7 @@ import importlib
 
 _SYMBOL_TO_MODULE = {
     "DensityInterface": "styne.statistics.interface",
+    "RadonNikodymInterface": "styne.statistics.interface",
     "LikelihoodInterface": "styne.statistics.interface",
     "CovarianceFunctionInterface": "styne.statistics.interface",
     "CovarianceOperatorInterface": "styne.statistics.interface",

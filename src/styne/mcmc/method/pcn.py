@@ -5,7 +5,7 @@ from styne.backend import infer_backend
 from styne.mcmc.metropolishastings import MetropolisHastings
 from styne.mcmc.acceptance import AcceptanceProbability
 from styne.mcmc.transition import TransitionData
-from styne.statistics.radonnikodym import RadonNikodym
+from styne.statistics.interface import RadonNikodymInterface
 from styne.statistics.measure import ProbabilityMeasure
 from styne.mcmc.proposal import ProposalMethod
 from styne.mcmc.factory import MHFactory
@@ -17,6 +17,18 @@ def validate_beta(beta) -> None:
     if not (0.0 < beta <= 1.0):
         raise ValueError(
             f"pCN step size must satisfy 0 < beta <= 1. Got {beta}.")
+
+
+def validate_pcn_target(target) -> None:
+    """Validate the RN and Gaussian-reference contract required by pCN."""
+    if not isinstance(target, RadonNikodymInterface):
+        raise TypeError(
+            "pCN target must implement RadonNikodymInterface."
+        )
+    if not isinstance(target.reference, Gaussian):
+        raise NotImplementedError(
+            "pCN requires a Gaussian reference measure."
+        )
 
 
 class PCNProposal(ProposalMethod):
@@ -33,9 +45,8 @@ class PCNProposal(ProposalMethod):
 
     Parameters
     ----------
-    target : RadonNikodym
-        Target density expressed as a Radon-Nikodym derivative with
-        respect to a Gaussian reference measure.
+    referenceMeasure : Gaussian
+        Gaussian reference measure preserved by the proposal.
     beta : float
         Step size in (0, 1]. Controls the balance between persistence
         (small beta) and exploration (large beta).
@@ -92,7 +103,7 @@ class PreconditionedCrankNicolson(MetropolisHastings):
 
     Parameters
     ----------
-    target : RadonNikodym
+    target : RadonNikodymInterface
         Target density with Gaussian reference measure.
     beta : float
         Step size in (0, 1].
@@ -105,11 +116,7 @@ class PreconditionedCrankNicolson(MetropolisHastings):
                  acceptance: AcceptanceProbability = None,
                  rng: Optional[Generator] = None):
 
-        if not isinstance(target, RadonNikodym):
-            raise TypeError(
-                "pCN target must be a RadonNikodym instance (with a Gaussian "
-                "reference measure)."
-            )
+        validate_pcn_target(target)
 
         proposalMethod = PCNProposal(target.reference, beta)
         super().__init__(target, proposalMethod, diagnostics,
@@ -119,11 +126,7 @@ class PreconditionedCrankNicolson(MetropolisHastings):
         return self._tgtDensity.derivative.evaluate_log(parameter)
 
     def _proposal_for_target(self, targetDensity):
-        if not isinstance(targetDensity, RadonNikodym):
-            raise TypeError(
-                "pCN target must be a RadonNikodym instance (with a Gaussian "
-                "reference measure)."
-            )
+        validate_pcn_target(targetDensity)
         return PCNProposal(targetDensity.reference, self.proposal.beta)
 
     def _log_mh_ratio(self, transition: TransitionData):
@@ -157,11 +160,7 @@ class PCNFactory(MHFactory):
     def _validate(self) -> None:
         super()._validate()
 
-        if not isinstance(self._target, RadonNikodym):
-            raise TypeError(
-                "pCN target must provide a Gaussian reference "
-                "and RN-derivative implementation."
-            )
+        validate_pcn_target(self._target)
         if self._beta is None:
             raise ValueError("Step size parameter (beta) not set for pCN.")
         validate_beta(self._beta)

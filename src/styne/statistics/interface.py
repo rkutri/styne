@@ -48,6 +48,25 @@ class DensityInterface(ABC):
         ...
 
 
+class RadonNikodymInterface(DensityInterface):
+    """Density represented by an RN factor and its reference measure.
+
+    Samplers such as pCN consume the derivative for acceptance while using
+    the reference to construct proposals. ``evaluate_log`` remains the full
+    target density supplied by the concrete implementation.
+    """
+
+    @property
+    @abstractmethod
+    def reference(self) -> ProbabilityMeasure:
+        ...
+
+    @property
+    @abstractmethod
+    def derivative(self) -> DensityInterface:
+        ...
+
+
 class LikelihoodInterface(DensityInterface):
     """
     Density interface for likelihood functions, adds the data and model the

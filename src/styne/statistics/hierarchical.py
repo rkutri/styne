@@ -4,7 +4,11 @@ from typing import Optional
 
 from styne.backend import infer_backend
 from styne.statistics.measure import ConditionalMeasure
-from styne.statistics.interface import DensityInterface, LikelihoodInterface
+from styne.statistics.interface import (
+    DensityInterface,
+    LikelihoodInterface,
+    RadonNikodymInterface,
+)
 from styne.statistics.likelihood import RegressionLikelihood
 from styne.statistics.radonnikodym import RadonNikodym
 from styne.parameter.parameter import Parameter
@@ -220,22 +224,22 @@ class SGLMMHyperConditional(ConditionalMeasure, DensityInterface):
     def draw(self, rng):
         raise NotImplementedError("SGLMMHyperConditional cannot be drawn from.")
 
-class SGLMMLatentConditional(ConditionalMeasure, DensityInterface):
+class SGLMMLatentConditional(ConditionalMeasure, RadonNikodymInterface):
     """
     Blocks latent evaluation until GP dependencies are synced to
     hyperparameters.
 
-    Proxies unset attributes to `target` via `__getattr__`, so attributes
-    like `derivative` and `reference` on a `RadonNikodym` target are
-    accessible directly on this wrapper.
+    Implements :class:`RadonNikodymInterface` explicitly so Gaussian-reference
+    samplers can consume the conditioned reference and RN factor while generic
+    samplers continue to evaluate the full target.
 
     Cannot be drawn from directly. `draw` unconditionally raises
     `NotImplementedError`. See flag 3 above.
 
     Parameters
     ----------
-    target : DensityInterface
-        The wrapped density, evaluated once GP dependencies are synced.
+    target : RadonNikodym
+        The wrapped RN density, evaluated once GP dependencies are synced.
     gp : GaussianProcess
         GP kept in sync with the current hyperparameter block.
     coarseGP : GaussianProcess, optional
@@ -254,7 +258,7 @@ class SGLMMLatentConditional(ConditionalMeasure, DensityInterface):
 
     def __init__(
             self,
-            target: DensityInterface,
+            target: RadonNikodym,
             gp: GaussianProcess,
             coarseGP: Optional[GaussianProcess] = None,
             partition=None,
@@ -262,6 +266,10 @@ class SGLMMLatentConditional(ConditionalMeasure, DensityInterface):
             hyperIdx: int = 1,
             localisedDensity=None
     ):
+        if not isinstance(target, RadonNikodym):
+            raise TypeError(
+                "target must be a RadonNikodym instance."
+            )
         self._target = target
         self._gp = gp
         self._coarseGP = coarseGP
@@ -286,11 +294,13 @@ class SGLMMLatentConditional(ConditionalMeasure, DensityInterface):
     def domainDimension(self) -> int:
         return self._target.domainDimension
 
-    def __getattr__(self, name):
-        target = self.__dict__.get("_target")
-        if target is not None and hasattr(target, name):
-            return getattr(target, name)
-        raise AttributeError(f"'{type(self).__name__}' object has no attribute '{name}'")
+    @property
+    def reference(self):
+        return self._target.reference
+
+    @property
+    def derivative(self):
+        return self._target.derivative
 
     def evaluate_log(self, parameter: Parameter) -> float:
         return self._target.evaluate_log(parameter)

@@ -82,6 +82,15 @@ class TestPCNSetup:
         with pytest.raises(NotImplementedError):
             PCNProposal(stub, 0.5)
 
+    def test_sampler_rejects_non_gaussian_rn_reference(self):
+        target = RadonNikodym(NonGaussianMeasure(), ConstantDensity(2))
+
+        with pytest.raises(
+                NotImplementedError, match="Gaussian reference measure"):
+            PreconditionedCrankNicolson(
+                target, 0.5, AcceptanceRateDiagnostics()
+            )
+
     def test_rejects_beta_zero(self):
         refCov = IIDCovarianceMatrix(2, 1.0)
         prior = Gaussian(refCov, Vector(np.zeros(2)))

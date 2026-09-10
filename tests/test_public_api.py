@@ -36,7 +36,7 @@ EXPECTED_EXPORTS = {
         "ApproximateCirculantEmbeddingEngine2D",
     },
     "styne.statistics": {
-        "DensityInterface", "LikelihoodInterface",
+        "DensityInterface", "RadonNikodymInterface", "LikelihoodInterface",
         "CovarianceFunctionInterface", "CovarianceOperatorInterface",
         "BayesianModelInterface", "ProbabilityMeasure",
         "AbsolutelyContinuousProbabilityMeasure", "ConditionalMeasure",

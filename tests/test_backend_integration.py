@@ -6,6 +6,7 @@ from styne.gp.gaussianprocess import GaussianProcess
 from styne.mcmc.diagnostics import DummyDiagnostics
 from styne.mcmc.method.mrw import MetropolisedRandomWalk
 from styne.mcmc.method.pcn import PreconditionedCrankNicolson
+from styne.mcmc.method.pmala import PreconditionedMALA
 from styne.model.forwardmap import ForwardMap
 from styne.model.representation.bspline import BSpline1D
 from styne.model.sglmm import SGLMM
@@ -17,6 +18,7 @@ from styne.statistics.gaussian import Gaussian, GaussianDensity
 from styne.statistics.radonnikodym import RadonNikodym
 from styne.statistics.likelihood import RegressionLikelihood
 from styne.statistics.hierarchical import SGLMMLatentConditional
+from styne.statistics.conditional import MetropolisWithinGibbsConditional
 from styne.statistics.response import GaussianResponse
 from styne.statistics.stationary import MaternCovariance1D
 from styne.utility.grid import UniformGrid
@@ -179,7 +181,7 @@ def test_pcn_retarget_preserves_backend_and_uses_new_reference(backend):
     )
 
 
-def test_spatial_conditioning_preserves_backend_composition(backend):
+def spatial_conditional(backend):
     dtype = 'float32'
     sites = UniformGrid(0.1, 0.9, 3)
     gp = process('dna', backend)
@@ -194,17 +196,61 @@ def test_spatial_conditioning_preserves_backend_composition(backend):
     )
     target = UnnormalisedPosterior(gp.measure, likelihood)
     conditional = SGLMMLatentConditional(target, gp)
-    latent = Vector(backend.zeros(gp.parameterDimension, dtype=dtype))
+    latent = Vector(backend.asarray(
+        np.linspace(-0.2, 0.3, gp.parameterDimension), dtype=dtype
+    ))
     hyperparameters = Vector(backend.asarray(
         [-0.7, 0.2], dtype=dtype
     ))
+    return conditional, latent, BlockParameter([latent, hyperparameters])
 
-    conditioned = conditional.condition(
-        BlockParameter([latent, hyperparameters])
-    )
+
+def test_spatial_conditioning_preserves_backend_composition(backend):
+    conditional, latent, joint = spatial_conditional(backend)
+
+    conditioned = conditional.condition(joint)
     value = conditioned.evaluate_log(latent)
 
     assert infer_backend(value) is backend
     assert conditioned.reference is conditioned.gp.measure
     assert conditioned.derivative.model._gp is conditioned.gp
-    assert conditional.gp is gp
+    assert conditional.gp is not conditioned.gp
+
+
+def test_spatial_pcn_conditioning_executes_on_backend(backend):
+    conditional, latent, joint = spatial_conditional(backend)
+    sampler = PreconditionedCrankNicolson(
+        conditional, 0.35, DummyDiagnostics()
+    )
+    update = MetropolisWithinGibbsConditional(sampler, blockIdx=0)
+
+    conditioned = update.condition(joint)
+    sample, _ = conditioned.sample(backend.random_state(13))
+
+    assert infer_backend(sample.coordinate) is backend
+    assert sample.coordinate.shape == latent.coordinate.shape
+    assert conditioned._sampler.proposal.referenceMeasure \
+        is conditioned._sampler.target.reference
+
+
+def test_spatial_pmala_conditioning_executes_on_backend(backend):
+    conditional, latent, joint = spatial_conditional(backend)
+    gradient = (
+        conditional.derivative.evaluate_log_gradient
+        if backend.name == 'numpy' else None
+    )
+    sampler = PreconditionedMALA(
+        conditional,
+        0.2,
+        DummyDiagnostics(),
+        gradient=gradient,
+    )
+    update = MetropolisWithinGibbsConditional(sampler, blockIdx=0)
+
+    conditioned = update.condition(joint)
+    sample, _ = conditioned.sample(backend.random_state(17))
+
+    assert infer_backend(sample.coordinate) is backend
+    assert sample.coordinate.shape == latent.coordinate.shape
+    assert conditioned._sampler.proposal._target \
+        is conditioned._sampler.target
