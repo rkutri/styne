@@ -66,8 +66,8 @@ def test_hierarchical_log_gp_finite_check():
         pcPrior, gp, model, likelihood, latentState
     )
     
-    # Trigger LinAlgError on model.interpolate or model.evaluate
-    model.interpolate.side_effect = np.linalg.LinAlgError("Singular covariance matrix")
+    # Trigger LinAlgError on forward-map evaluation.
+    model.side_effect = np.linalg.LinAlgError("Singular covariance matrix")
     
     result = hyperDensity.evaluate_log(Vector([0.0, 0.0]))
     assert result == -np.inf

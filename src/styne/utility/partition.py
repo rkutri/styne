@@ -4,7 +4,7 @@ from typing import List
 from numpy import ndarray
 
 from styne.parameter.parameter import Parameter
-from styne.statistics.interface import DensityInterface, DifferentiableDensity
+from styne.statistics.interface import DensityInterface
 from styne.utility.densityarithmetic import ProductWrapper
 
 
@@ -116,6 +116,11 @@ class IndependentPartitionDensity(DensityInterface):
         return self._partition.global_domain_type()
 
     @property
+    def parameter(self) -> Parameter:
+        """Parameter template retaining the partition's static metadata."""
+        return self._partition.parameter
+
+    @property
     def domainDimension(self) -> int:
         return self._partition.global_dimension()
 
@@ -135,12 +140,13 @@ class IndependentPartitionDensity(DensityInterface):
 
         self._partition.parameter = state
 
-        from styne.statistics.interface import DifferentiableDensity
-
         gradients = []
         for i, dens in enumerate(self._densities):
-            if not isinstance(dens, DifferentiableDensity):
-                raise RuntimeError(f"Component density at index {i} must implement DifferentiableDensity.")
+            if not callable(getattr(dens, "evaluate_log_gradient", None)):
+                raise RuntimeError(
+                    f"Component density at index {i} must expose "
+                    "evaluate_log_gradient."
+                )
             
             componentParameter = self._partition.component(i)
             gradients.append(dens.evaluate_log_gradient(componentParameter))

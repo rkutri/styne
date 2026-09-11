@@ -20,8 +20,10 @@ def check_mean(means, trueParam):
     meanState = means[0]
     posteriorMean = means[1]
 
-    np.allclose(posteriorMean.coordinate, trueParam.coordinate, atol=MTOL)
-    np.allclose(meanState.coordinate, trueParam.coordinate, atol=2. * MTOL)
+    assert np.allclose(
+        posteriorMean.coordinate, trueParam.coordinate, atol=MTOL)
+    assert np.allclose(
+        meanState.coordinate, trueParam.coordinate, atol=2. * MTOL)
 
 
 # define forward problem

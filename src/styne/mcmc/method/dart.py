@@ -1,8 +1,10 @@
+import copy
 import numpy as np
 from typing import List, Optional
 from logging import getLogger
 from numpy.random import Generator
 
+from styne.backend import infer_backend
 from styne.mcmc.metropolishastings import MetropolisHastings
 from styne.mcmc.factory import MHFactory
 from styne.mcmc.acceptance import AcceptanceProbability
@@ -49,7 +51,6 @@ class LocalisedSurrogateTransition(ProposalMethod):
                 "LocalisedSurrogateTransitionMeasure instance."
             )
 
-        ProposalMethod.__init__(self)
         self._surrogateMeasure = surrogateMeasure
         self._burnin = burnin
         self._thinning = thinning
@@ -74,20 +75,41 @@ class LocalisedSurrogateTransition(ProposalMethod):
     def correction(self) -> RatioEstimator:
         return self._correction
 
-    @ProposalMethod.state.setter
-    def state(self, state: Parameter):
-        ProposalMethod.state.fset(self, state)
-        self._surrogateMeasure.location = state
+    def propose(self, state: Parameter, rng):
+        coarseProposal, trajectory, nextRng = (
+            self._surrogateMeasure.transition_trajectory(state, rng)
+        )
+        proposalTrajectory = None
+        if self._correction.requires_proposal_trajectory \
+                and self._surrogateMeasure.subchainLength > 0:
+            _, proposalTrajectory, nextRng = (
+                self._surrogateMeasure.transition_trajectory(
+                    coarseProposal, nextRng
+                )
+            )
+        return TransitionData(
+            state,
+            coarseProposal,
+            auxiliary={
+                "surrogateTrajectory": trajectory,
+                "proposalTrajectory": proposalTrajectory,
+            },
+        ), nextRng
 
-    def generate_proposal(self, rng: Generator) -> TransitionData:
-        coarseProposal = self._surrogateMeasure.generate_realisation(rng=rng)
-        return TransitionData(self._state, coarseProposal)
-
-    def log_acceptance_correction(self, state, proposal):
+    def log_acceptance_correction(
+            self, state, proposal, trajectory, proposalTrajectory):
+        if self._surrogateMeasure.subchainLength == 0:
+            backend = infer_backend(state.coordinate)
+            metadata = backend.metadata(state.coordinate)
+            return backend.asarray(
+                0., dtype=metadata.dtype, device=metadata.device
+            )
         density = self._surrogateMeasure.density
         logDiffSurrogate = (density.evaluate_log_surrogate(proposal)
                             - density.evaluate_log_surrogate(state))
-        logRatioEstimate = self._correction.log_ratio_estimate(state, proposal)
+        logRatioEstimate = self._correction.log_ratio_estimate(
+            state, proposal, trajectory, proposalTrajectory
+        )
         return -logDiffSurrogate - logRatioEstimate
 
 
@@ -137,13 +159,49 @@ class DART(MetropolisHastings):
         super().__init__(target, proposal, diagnostics,
                          acceptance=acceptance, rng=rng)
 
-    def _log_mh_ratio(self, transition: TransitionData) -> float:
+    @staticmethod
+    def _with_localised_density(proposal, density):
+        measure = proposal.measure.with_density(density)
+        correction = proposal.correction.with_surrogate_measure(measure)
+        return LocalisedSurrogateTransition(
+            measure, proposal._burnin, proposal._thinning, correction
+        )
+
+    def _proposal_for_target(self, targetDensity):
+        density = getattr(targetDensity, "localisedDensity", None)
+        if density is None:
+            return copy.copy(self.proposal)
+
+        proposal = self.proposal
+        if isinstance(proposal, PartitionedSurrogateProposal):
+            coarseProposal = self._with_localised_density(
+                proposal._coarseProposal, density
+            )
+            finePrior = targetDensity.finePrior
+            fineKernel = PCNProposal(finePrior, proposal._fineKernel.beta)
+            return PartitionedSurrogateProposal(
+                targetDensity.partition,
+                coarseProposal,
+                fineKernel,
+                finePrior,
+            )
+
+        if isinstance(proposal, LocalisedSurrogateTransition):
+            return self._with_localised_density(proposal, density)
+
+        return copy.copy(proposal)
+
+    def _log_mh_ratio(self, transition: TransitionData):
         """MH ratio with generic acceptance correction."""
-        target = self._tgtDensity
-        logDiffTarget = (target.evaluate_log(transition.proposal)
-                         - target.evaluate_log(transition.state))
+        logDiffTarget = (
+            transition.proposed.logDensity - transition.current.logDensity
+        )
         correction = self._proposalMethod.log_acceptance_correction(
-            transition.state, transition.proposal)
+            transition.state,
+            transition.proposal,
+            transition.auxiliary["surrogateTrajectory"],
+            transition.auxiliary["proposalTrajectory"],
+        )
         return logDiffTarget + correction
 
 
@@ -159,6 +217,11 @@ class DARTFactory(MHFactory):
     When a partition and fine prior are set, the root chain operates on
     the coarse subspace only; fine modes are proposed from the prior.
     Without partition, all behaviour is identical to the original.
+
+    Configure the selected root chain through ``root``. The proposal parameter
+    is ``root.proposalCovariance`` for ``"mrw"``, ``root.beta`` for ``"pcn"``
+    and ``"pmala"``, and ``root.stepSize`` for ``"mala"``. If it is not set,
+    DART tunes the corresponding parameter automatically during ``create()``.
     """
 
     def __init__(self, root: str = "pcn"):
@@ -426,6 +489,26 @@ class DARTFactory(MHFactory):
             raise ValueError(
                 "All nChain values must be non-negative integers.")
 
+        estimatorTypes = ['cumulant'] * (self._nSurrogate - 1)
+        estimatorTypes.append(
+            self._correction.estimatorType
+            if self._correction is not None
+            else self._correctionType or 'cumulant'
+        )
+        for level, (nChain, estimatorType) in enumerate(zip(
+                self._nChain, estimatorTypes)):
+            if nChain == 0:
+                continue
+            retained = RatioEstimator.retained_sample_count(
+                nChain, self._burnin, self._thinning
+            )
+            required = RatioEstimator.minimum_samples(estimatorType)
+            if retained < required:
+                raise ValueError(
+                    f"DART level {level} retains {retained} ratio sample(s); "
+                    f"{estimatorType} requires at least {required}."
+                )
+
         if any(n == 0 for n in self._nChain):
             self._logger.warning(
                 "At least one subchain length is zero. This recovers "
@@ -554,7 +637,7 @@ class DARTFactory(MHFactory):
             if self._partition is not None:
                 rootInit = Vector(self._partition.rule.extract(0, self._crankedState.coordinate))
             else:
-                rootInit = self._crankedState.clone()
+                rootInit = self._crankedState
             self._tune_root(self._localisedDensity, rootInit)
 
         self._rootFactory.target = self._localisedDensity

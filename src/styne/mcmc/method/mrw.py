@@ -1,18 +1,21 @@
+from typing import Optional
+
+import numpy as np
+from numpy.random import Generator
+
+from styne.backend import infer_backend
 from styne.parameter.parameter import Parameter
 from styne.mcmc.diagnostics import ChainDiagnostics
 from styne.mcmc.proposal import ProposalMethod
 from styne.mcmc.metropolishastings import MetropolisHastings
 from styne.mcmc.acceptance import AcceptanceProbability
 from styne.mcmc.factory import MHFactory
-from styne.mcmc.transition import TransitionData
+from styne.mcmc.transition import (
+    EvaluatedState, RobbinsMonroState, TransitionData,
+)
 from styne.statistics.interface import DensityInterface
 from styne.statistics.covariance import CovarianceMatrix, IIDCovarianceMatrix
 from styne.statistics.gaussian import Gaussian
-import numpy as np
-from typing import Optional
-from numpy.random import Generator
-
-
 class MRWProposal(ProposalMethod):
     """
     Symmetric Gaussian random walk proposal.
@@ -26,7 +29,6 @@ class MRWProposal(ProposalMethod):
     """
 
     def __init__(self, proposalCov: CovarianceMatrix):
-        super().__init__()
         self._proposalMeasure = Gaussian(proposalCov)
 
     @property
@@ -37,22 +39,23 @@ class MRWProposal(ProposalMethod):
     @covariance.setter
     def covariance(self, cov: CovarianceMatrix):
         """Replace the proposal covariance."""
-        self._proposalMeasure.covariance = cov
+        self._proposalMeasure = self._proposalMeasure.with_covariance(cov)
 
-    @ProposalMethod.state.setter
-    def state(self, state: Parameter):
-        ProposalMethod.state.fset(self, state)
-        self._proposalMeasure.mean = state
+    def propose(self, state: Parameter, rng):
+        return self.propose_with_covariance(state, self.covariance, rng)
 
-    def generate_proposal(self, rng: Generator):
-        # Guard against use outside the MH loop, where state may not be set.
-        if self._state is None:
-            raise ValueError(
-                "Trying to generate proposal with undefined state")
-
-        return TransitionData(
-            self._state, self._proposalMeasure.generate_realisation(rng=rng)
+    @staticmethod
+    def propose_with_covariance(state, covariance, rng):
+        backend = infer_backend(state.coordinate)
+        metadata = backend.metadata(state.coordinate)
+        noise, nextRng = backend.normal(
+            rng, state.coordinate.shape,
+            dtype=metadata.dtype, device=metadata.device,
         )
+        proposal = state.with_coordinate(
+            state.coordinate + covariance.apply_chol_factor(noise)
+        )
+        return TransitionData(state, proposal), nextRng
 
 
 class MetropolisedRandomWalk(MetropolisHastings):
@@ -96,10 +99,9 @@ class MetropolisedRandomWalk(MetropolisHastings):
         self._proposalMethod.covariance = cov
 
     def _log_mh_ratio(
-            self, transition: TransitionData) -> float:
+            self, transition: TransitionData):
 
-        return self._tgtDensity.evaluate_log(transition.proposal) \
-            - self._tgtDensity.evaluate_log(transition.state)
+        return transition.proposed.logDensity - transition.current.logDensity
 
 
 class MRWFactory(MHFactory):
@@ -171,7 +173,9 @@ class RobbinsMonroMRW(MetropolisedRandomWalk):
             adaptDecay: float = 0.6,
             rng: Optional[Generator] = None):
         
-        super().__init__(target, proposalCov, diagnostics, acceptance=acceptance, rng=rng)
+        super().__init__(
+            target, proposalCov, diagnostics, acceptance=acceptance, rng=rng
+        )
         
         if not isinstance(proposalCov, IIDCovarianceMatrix):
             raise TypeError(
@@ -181,26 +185,91 @@ class RobbinsMonroMRW(MetropolisedRandomWalk):
         self._adaptOffset = adaptOffset
         self._adaptDecay = adaptDecay
         
-        self._stepCount = 0
-        self._logVariance = np.log(proposalCov.marginalVariance[0])
-        self._initialLogVariance = self._logVariance
+        self._initialVariance = proposalCov.marginalVariance[0]
 
-    def _process_transition(self, transitionData):
-        nextState = super()._process_transition(transitionData)
-        
-        alpha = 1.0 if transitionData.outcome == TransitionData.ACCEPTED else 0.0
-        
-        self._stepCount += 1
-        gamma = 1.0 / (self._stepCount + self._adaptOffset) ** self._adaptDecay
-        
-        self._logVariance += gamma * (alpha - self._targetAcceptance)
-        
-        dimension = self._proposalMethod.covariance.dimension
+    def initial_state(self, parameter):
+        evaluatedState = super().initial_state(parameter)
+        backend = infer_backend(parameter.coordinate)
+        metadata = backend.metadata(parameter.coordinate)
+        variance = backend.asarray(
+            self._initialVariance, dtype=metadata.dtype, device=metadata.device
+        )
+        return RobbinsMonroState(
+            evaluatedState,
+            backend.namespace.log(variance),
+            backend.asarray(0, dtype=metadata.dtype, device=metadata.device),
+        )
+
+    def step(self, currentState, rng):
+        backend = infer_backend(currentState.parameter.coordinate)
+        variance = backend.namespace.exp(currentState.logVariance)
+        covariance = IIDCovarianceMatrix(
+            currentState.parameter.dimension, variance
+        )
+        proposedTransition, proposalRng = self._proposalMethod \
+            .propose_with_covariance(
+                currentState.parameter, covariance, rng
+            )
+        proposedState = EvaluatedState(
+            proposedTransition.proposed.parameter,
+            self._evaluate_log_density(proposedTransition.proposed.parameter),
+        )
+        transition = TransitionData(
+            current=currentState.evaluatedState,
+            proposed=proposedState,
+            auxiliary=proposedTransition.auxiliary,
+        )
+        logAcceptanceProbability = self._acceptance.log_probability(
+            self._log_mh_ratio(transition)
+        )
+        metadata = backend.metadata(currentState.parameter.coordinate)
+        acceptanceUniform, nextRng = backend.uniform(
+            proposalRng, (), dtype=metadata.dtype, device=metadata.device
+        )
+        outcome = backend.namespace.log(acceptanceUniform) \
+            <= logAcceptanceProbability
+        transition = TransitionData(
+            current=currentState.evaluatedState,
+            proposed=proposedState,
+            outcome=outcome,
+            logAcceptanceProbability=logAcceptanceProbability,
+            auxiliary=proposedTransition.auxiliary,
+        )
+        nextCoordinate = backend.namespace.where(
+            outcome,
+            proposedState.parameter.coordinate,
+            currentState.parameter.coordinate,
+        )
+        nextDensity = backend.namespace.where(
+            outcome,
+            proposedState.logDensity,
+            currentState.evaluatedState.logDensity,
+        )
+        nextStepCount = currentState.stepCount + 1
+        gamma = 1.0 / (
+            nextStepCount + self._adaptOffset
+        ) ** self._adaptDecay
+        nextLogVariance = currentState.logVariance + gamma * (
+            outcome - self._targetAcceptance
+        )
+        return RobbinsMonroState(
+            EvaluatedState(
+                currentState.parameter.with_coordinate(nextCoordinate),
+                nextDensity,
+            ),
+            nextLogVariance,
+            nextStepCount,
+        ), transition, nextRng
+
+    def _record_transition(self, transitionData, nextState):
+        super()._record_transition(transitionData, nextState)
         self.proposalCovariance = IIDCovarianceMatrix(
-            dimension, np.exp(self._logVariance))
+            nextState.parameter.dimension,
+            infer_backend(nextState.logVariance).namespace.exp(
+                nextState.logVariance
+            ),
+        )
         
-        return nextState
-
     def clear(self) -> None:
         """
         Reset the chain and revert the proposal covariance to its initial
@@ -211,11 +280,10 @@ class RobbinsMonroMRW(MetropolisedRandomWalk):
         None
         """
         super().clear()
-        self._stepCount = 0
-        self._logVariance = self._initialLogVariance
         dimension = self._proposalMethod.covariance.dimension
         self.proposalCovariance = IIDCovarianceMatrix(
-            dimension, np.exp(self._logVariance))
+            dimension, self._initialVariance
+        )
 
 
 class RobbinsMonroMRWFactory(MHFactory):
@@ -255,4 +323,3 @@ class RobbinsMonroMRWFactory(MHFactory):
             self._target, self._proposalCov, self._diagnostics,
             self._acceptance, self.targetAcceptance,
             self.adaptOffset, self.adaptDecay, rng=self.rng)
-

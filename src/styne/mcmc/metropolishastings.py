@@ -1,13 +1,14 @@
+import copy
 from abc import abstractmethod
 from typing import Optional
 
-from numpy import log
 from numpy.random import Generator
 
+from styne.backend import infer_backend
 from styne.mcmc.sampler import MCMCSampler
 from styne.parameter.parameter import Parameter
 from styne.statistics.interface import DensityInterface
-from styne.mcmc.transition import TransitionData
+from styne.mcmc.transition import EvaluatedState, TransitionData
 from styne.mcmc.proposal import ProposalMethod
 from styne.mcmc.chain import Chain
 from styne.mcmc.annotator import Annotator
@@ -69,9 +70,15 @@ class MetropolisHastings(MCMCSampler):
 
     @target.setter
     def target(self, targetDensity: DensityInterface):
-        """Replace the target density and reset state."""
+        """Replace the target and reconstruct target-dependent proposal state."""
+        proposalMethod = self._proposal_for_target(targetDensity)
         self._tgtDensity = targetDensity
+        self._proposalMethod = proposalMethod
         self.clear()
+
+    def _proposal_for_target(self, targetDensity):
+        """Return an isolated proposal compatible with ``targetDensity``."""
+        return copy.copy(self._proposalMethod)
 
     @property
     def proposal(self):
@@ -122,26 +129,78 @@ class MetropolisHastings(MCMCSampler):
 
 
     @abstractmethod
-    def _log_mh_ratio(self, transition: TransitionData) -> float:
+    def _log_mh_ratio(self, transition: TransitionData):
         """Compute log MH ratio from a proposal transition."""
         ...
 
-    def _accept_reject(self, transition: TransitionData) -> TransitionData:
-        logMHRatio = self._log_mh_ratio(transition)
-        logAcceptProb = self._acceptance.log_probability(logMHRatio)
+    def initial_state(self, parameter: Parameter) -> EvaluatedState:
+        """Evaluate the target density once for a parameter state."""
+        return EvaluatedState(parameter, self._evaluate_log_density(parameter))
 
-        outcome = (TransitionData.ACCEPTED if log(self._rng.uniform()) <= logAcceptProb
-                   else TransitionData.REJECTED)
-        return TransitionData(
-            transition.state, transition.proposal, outcome, transition.auxiliary
+    evaluate_state = initial_state
+
+    def step(self, currentState: EvaluatedState, rng):
+        """Construct and accept or reject one transition without mutation."""
+        proposedTransition, proposalRng = self._proposalMethod.propose(
+            currentState.parameter, rng
         )
+        proposedState = self.initial_state(
+            proposedTransition.proposed.parameter
+        )
+        logMHRatio = self._log_mh_ratio(
+            TransitionData(
+                current=currentState,
+                proposed=proposedState,
+                auxiliary=proposedTransition.auxiliary,
+            )
+        )
+        logAcceptanceProbability = self._acceptance.log_probability(logMHRatio)
+        backend = infer_backend(currentState.parameter.coordinate)
+        metadata = backend.metadata(currentState.parameter.coordinate)
+        batchShape = currentState.parameter.coordinate.shape[:-1]
+        acceptanceUniform, nextRng = backend.uniform(
+            proposalRng, batchShape,
+            dtype=metadata.dtype, device=metadata.device,
+        )
+        outcome = backend.namespace.log(acceptanceUniform) \
+            <= logAcceptanceProbability
+        transition = TransitionData(
+            current=currentState,
+            proposed=proposedState,
+            outcome=outcome,
+            logAcceptanceProbability=logAcceptanceProbability,
+            auxiliary=proposedTransition.auxiliary,
+        )
+        coordinateOutcome = outcome
+        while coordinateOutcome.ndim \
+                < proposedState.parameter.coordinate.ndim:
+            coordinateOutcome = backend.namespace.expand_dims(
+                coordinateOutcome, axis=-1
+            )
+        nextCoordinate = backend.namespace.where(
+            coordinateOutcome,
+            proposedState.parameter.coordinate,
+            currentState.parameter.coordinate,
+        )
+        nextLogDensity = backend.namespace.where(
+            outcome, proposedState.logDensity, currentState.logDensity
+        )
+        nextState = EvaluatedState(
+            currentState.parameter.with_coordinate(nextCoordinate),
+            nextLogDensity,
+        )
+        return nextState, transition, nextRng
 
-    def _update_chain(self, nextState):
+    def _evaluate_log_density(self, parameter: Parameter):
+        return self._tgtDensity.evaluate_log(parameter)
+
+    def _record_transition(self, transitionData, nextState):
+        self._diagnostics.process(transitionData)
         if not self._storeChain:
             return
         annotation = self._annotator.annotate(
-            nextState) if self._annotator else None
-        self._chain.append(nextState.coordinate, annotation)
+            nextState.parameter) if self._annotator else None
+        self._chain.append(nextState.parameter.coordinate, annotation)
 
     def _determine_next_state(self, transitionData):
         if transitionData.outcome == TransitionData.ACCEPTED:
@@ -152,23 +211,6 @@ class MetropolisHastings(MCMCSampler):
 
         raise ValueError(
             f"Invalid transition outcome: {transitionData.outcome}")
-
-    def _process_transition(self, transitionData):
-        self._diagnostics.process(transitionData)
-        nextState = self._determine_next_state(transitionData)
-        self._update_chain(nextState)
-        return nextState
-
-    def _iterate(self) -> Parameter:
-        """Perform a single Metropolis-Hastings transition."""
-
-        self._proposalMethod.state = self._lastState
-        transition = self._proposalMethod.generate_proposal(self._rng)
-
-        transitionOutcome = self._accept_reject(transition)
-        self._lastState = self._process_transition(transitionOutcome)
-
-        return self._lastState
 
     def clear(self):
         """Reset diagnostics and discard all chain history."""

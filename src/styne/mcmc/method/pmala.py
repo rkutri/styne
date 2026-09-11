@@ -1,8 +1,7 @@
-import numpy as np
-from numpy import sqrt
 from typing import Optional
 from numpy.random import Generator
 
+from styne.backend import infer_backend
 from styne.mcmc.metropolishastings import MetropolisHastings
 from styne.mcmc.acceptance import AcceptanceProbability
 from styne.mcmc.factory import MHFactory
@@ -10,22 +9,20 @@ from styne.mcmc.proposal import ProposalMethod
 from styne.mcmc.transition import TransitionData
 from styne.parameter.parameter import Parameter
 from styne.statistics.gaussian import Gaussian
-from styne.statistics.interface import DifferentiableDensity
-from styne.statistics.radonnikodym import RadonNikodym
+from styne.statistics.interface import RadonNikodymInterface
 
 
-def _validate_pmala_target(target) -> None:
-    if not isinstance(target, RadonNikodym):
-        raise TypeError("pMALA target must be a RadonNikodym instance.")
+def validate_pmala_target(target) -> None:
+    if not isinstance(target, RadonNikodymInterface):
+        raise TypeError(
+            "pMALA target must implement RadonNikodymInterface."
+        )
     if not isinstance(target.reference, Gaussian):
         raise NotImplementedError(
             "Currently, only Gaussian reference measures are supported.")
-    if not isinstance(target.derivative, DifferentiableDensity):
-        raise ValueError(
-            "pMALA requires target.derivative to support evaluate_log_gradient.")
 
 
-def _validate_beta(beta) -> None:
+def validate_beta(beta) -> None:
     if not (0.0 < beta <= 1.0):
         raise ValueError(
             f"Step size must satisfy 0 < beta <= 1. Got {beta}.")
@@ -39,21 +36,25 @@ class PMALAProposal(ProposalMethod):
     ∇ log Ψ is the gradient of the log Radon-Nikodym derivative. The
     proposal distribution is N(drift(x), β²C).
 
-    The reference covariance is shared with the target (no copy). During
-    each draw the scaling is temporarily set to β² so that Gaussian
-    sampling produces noise from N(0, β²C), then restored immediately.
+    The reference covariance colors backend-native Gaussian noise directly.
+    JAX and PyTorch differentiate the derivative density automatically;
+    NumPy execution requires an explicit gradient callable.
     """
 
-    def __init__(self, target: RadonNikodym, beta: float):
+    def __init__(
+            self, target: RadonNikodymInterface, beta: float, gradient=None):
 
-        super().__init__()
-        _validate_pmala_target(target)
-        _validate_beta(beta)
+        validate_pmala_target(target)
+        validate_beta(beta)
+        if gradient is not None and not callable(gradient):
+            raise TypeError("pMALA gradient must be callable.")
+        referenceBackend = infer_backend(target.reference.mean.coordinate)
+        if referenceBackend.name == "numpy" and gradient is None:
+            raise ValueError("pMALA requires gradient for the NumPy backend.")
 
         self._beta = beta
         self._target = target
-
-        self._proposalMeasure = Gaussian(self._target.reference.covariance)
+        self._gradient = gradient
 
     @property
     def beta(self) -> float:
@@ -63,46 +64,50 @@ class PMALAProposal(ProposalMethod):
     def referenceMeasure(self) -> Gaussian:
         return self._target.reference
 
-    def _drift(self, state: Parameter) -> np.ndarray:
+    def _gradient_at(self, state):
+        if self._gradient is not None:
+            return self._gradient(state)
+        backend = infer_backend(state.coordinate)
+        namespace = backend.namespace
+        return backend.grad(
+            lambda coordinate: namespace.sum(
+                self._target.derivative.evaluate_log(
+                    state.with_coordinate(coordinate)
+                )
+            )
+        )(state.coordinate)
+
+    def _drift(self, state: Parameter):
         x = state.coordinate
         m = self._target.reference.mean.coordinate
         refCov = self._target.reference.covariance
-        pcnDrift = m + np.sqrt(1. - self._beta**2) * (x - m)
+        backend = infer_backend(x)
+        metadata = backend.metadata(x)
+        persistence = backend.namespace.sqrt(backend.asarray(
+            1. - self._beta ** 2,
+            dtype=metadata.dtype, device=metadata.device,
+        ))
+        pcnDrift = m + persistence * (x - m)
+        return pcnDrift + 0.5 * self._beta ** 2 * refCov.apply(
+            self._gradient_at(state)
+        )
 
-        try:
-            gradLogPsi = (
-                self._target.derivative.evaluate_log_gradient(state)
-            )
-        except (np.linalg.LinAlgError, RuntimeError):
-            return pcnDrift
-
-        if not np.all(np.isfinite(gradLogPsi)):
-            return pcnDrift
-
-        return pcnDrift + 0.5 * self._beta**2 * refCov.apply(gradLogPsi)
-
-
-    def generate_proposal(self, rng: Generator) -> TransitionData:
-        if self._state is None:
-            raise ValueError(
-                "Trying to generate proposal with undefined state")
-
-        # Drift must be computed before scaling is changed: _drift calls
-        # refCov.apply, which uses the current scaling. Setting scaling = β²
-        # first would double-count the factor in the drift term.
-        driftVector = self._drift(self._state)
-        drift = self._state.clone()
-        drift.coordinate = np.asarray(driftVector, dtype=np.float64)
-        self._proposalMeasure.mean = drift
-
+    def propose(self, state: Parameter, rng):
+        driftVector = self._drift(state)
+        backend = infer_backend(state.coordinate)
+        metadata = backend.metadata(state.coordinate)
+        noise, nextRng = backend.normal(
+            rng, state.coordinate.shape,
+            dtype=metadata.dtype, device=metadata.device,
+        )
         refCov = self._target.reference.covariance
-        prevScaling = refCov.scaling
-        refCov.scaling = self._beta**2
-        proposal = self._proposalMeasure.generate_realisation(rng=rng)
-        refCov.scaling = prevScaling
+        proposal = state.with_coordinate(
+            driftVector + self._beta * refCov.apply_chol_factor(noise)
+        )
 
-        return TransitionData(
-            self._state, proposal, auxiliary={'drift': driftVector}
+        return (
+            TransitionData(state, proposal, auxiliary={'drift': driftVector}),
+            nextRng,
         )
 
 
@@ -117,7 +122,7 @@ class PreconditionedMALA(MetropolisHastings):
 
     Parameters
     ----------
-    target : RadonNikodym
+    target : RadonNikodymInterface
         Target density with Gaussian reference measure.
     beta : float
         Step size in (0, 1].
@@ -126,18 +131,18 @@ class PreconditionedMALA(MetropolisHastings):
     """
     name = "pMALA"
 
-    def __init__(self, target: RadonNikodym, beta: float, diagnostics,
+    def __init__(self, target: RadonNikodymInterface, beta: float, diagnostics,
                  acceptance: AcceptanceProbability = None,
-                 rng: Optional[Generator] = None):
+                 rng: Optional[Generator] = None, gradient=None):
 
-        _validate_pmala_target(target)
-        _validate_beta(beta)
+        validate_pmala_target(target)
+        validate_beta(beta)
 
-        proposalMethod = PMALAProposal(target, beta)
+        proposalMethod = PMALAProposal(target, beta, gradient)
         super().__init__(target, proposalMethod, diagnostics,
                          acceptance=acceptance, rng=rng)
 
-    def _log_mh_ratio(self, transition: TransitionData) -> float:
+    def _log_mh_ratio(self, transition: TransitionData):
 
         beta2 = self._proposalMethod.beta**2
         refCov = self._proposalMethod.referenceMeasure.covariance
@@ -145,15 +150,10 @@ class PreconditionedMALA(MetropolisHastings):
         x = transition.state.coordinate
         z = transition.proposal.coordinate
 
-        logTarget = float(
-            self._tgtDensity.evaluate_log(transition.proposal)
-            - self._tgtDensity.evaluate_log(transition.state)
+        logTarget = (
+            transition.proposed.logDensity - transition.current.logDensity
         )
 
-        if logTarget == -np.inf:
-            return -np.inf
-
-        # drift at state was pre-computed during generate_proposal
         meanZgivenX = transition.auxiliary['drift']
         meanXgivenZ = self._proposalMethod._drift(transition.proposal)
 
@@ -165,10 +165,19 @@ class PreconditionedMALA(MetropolisHastings):
             - refCov.dual_quadratic_form(diffZ)
         )
 
-        if not np.isfinite(quadDiff):
-            return -np.inf
-
         return logTarget + quadDiff
+
+    def _proposal_for_target(self, targetDensity):
+        validate_pmala_target(targetDensity)
+        gradient = self._proposalMethod._gradient
+        owner = getattr(gradient, "__self__", None)
+        if owner is self.target:
+            gradient = targetDensity.evaluate_log_gradient
+        elif owner is self.target.derivative:
+            gradient = targetDensity.derivative.evaluate_log_gradient
+        return PMALAProposal(
+            targetDensity, self._proposalMethod.beta, gradient
+        )
 
 
 class PMALAFactory(MHFactory):
@@ -178,6 +187,17 @@ class PMALAFactory(MHFactory):
         super().__init__()
         self._beta: float = None
         self._acceptance: AcceptanceProbability = None
+        self._gradient = None
+
+    @property
+    def gradient(self):
+        return self._gradient
+
+    @gradient.setter
+    def gradient(self, value):
+        if value is not None and not callable(value):
+            raise TypeError("pMALA gradient must be callable.")
+        self._gradient = value
 
     @property
     def beta(self) -> float:
@@ -197,13 +217,13 @@ class PMALAFactory(MHFactory):
 
     def _validate(self) -> None:
         super()._validate()
-        _validate_pmala_target(self._target)
+        validate_pmala_target(self._target)
         if self._beta is None:
             raise ValueError("Step size parameter (beta) not set for pMALA.")
-        _validate_beta(self._beta)
+        validate_beta(self._beta)
 
     def _create_sampler(self) -> PreconditionedMALA:
         return PreconditionedMALA(
             self._target, self._beta, self._diagnostics, self._acceptance,
-            rng=self.rng
+            rng=self.rng, gradient=self._gradient,
         )

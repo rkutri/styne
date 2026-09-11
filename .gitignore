@@ -6,13 +6,18 @@ __pycache__/
 # image files
 *.png
 *.jpeg
+!/docs/assets/*.png
 
 # other files
 *.csv
+!/benchmarks/results/dartlogistic_production_*.csv
+!/benchmarks/results/dartlocalisation_production_*.csv
 *.pdf
 
 # temporary
 localData/
+*.checkpoint.json
+*.checkpoint.json.*.tmp
 
 # vim .swp files
 *.swp
@@ -178,11 +183,8 @@ cython_debug/
 uv.lock
 
 
-# agent rules 
-.agents/rules
+# local caches
 joblib_caches/
 
 # reproducibility figures
 reproducibility/figures/
-
-

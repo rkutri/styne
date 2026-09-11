@@ -1,5 +1,15 @@
 import numpy as np
-from styne.parameter.numeric import Numeric
+
+from styne.backend import BackendInferenceError, infer_backend
+
+
+def as_array(value):
+    """Preserve registered backend arrays; convert Python values to NumPy."""
+    try:
+        infer_backend(value)
+    except BackendInferenceError:
+        return np.asarray(value)
+    return value
 
 
 class Data:
@@ -10,36 +20,34 @@ class Data:
     ----------
     dimension : int
         Dimension of each measurement vector.
-    design : np.ndarray
-        Experimental design matrix or input locations.
+    design : array-like
+        Experimental design matrix or input locations. Registered backend
+        arrays are retained without conversion.
     """
 
-    def __init__(self, dimension: int, design: np.ndarray):
+    def __init__(self, dimension: int, design):
         self._dimension = int(dimension)
-        self._design = np.asarray(design)
+        self._design = as_array(design)
         self._measurement = None
-
-    @property
-    def dType(self):
-        return Numeric
 
     @property
     def dimension(self) -> int:
         return self._dimension
 
     @property
-    def design(self) -> np.ndarray:
+    def design(self):
         return self._design
 
     @property
-    def measurement(self) -> np.ndarray:
+    def measurement(self):
         return self._measurement
 
     @measurement.setter
-    def measurement(self, measurement: np.ndarray) -> None:
+    def measurement(self, measurement) -> None:
 
-        m = np.asarray(measurement, dtype=float)
-        m = np.atleast_2d(m)
+        m = as_array(measurement)
+        if m.ndim == 1:
+            m = m.reshape(1, -1)
 
         if m.ndim != 2:
             raise ValueError(

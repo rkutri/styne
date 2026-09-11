@@ -1,4 +1,7 @@
-"""Curated public surface of styne.mcmc. mcmc.method is an implementation detail, not a documented import path."""
+"""Curated public surface of ``styne.mcmc``.
+
+``mcmc.method`` is an implementation detail, not a documented import path.
+"""
 import importlib
 
 _SYMBOL_TO_MODULE = {
@@ -11,6 +14,8 @@ _SYMBOL_TO_MODULE = {
     "ChainDiagnostics": "styne.mcmc.diagnostics",
     "Chain": "styne.mcmc.chain",
     "GibbsChain": "styne.mcmc.chain",
+    "EvaluatedState": "styne.mcmc.transition",
+    "TransitionData": "styne.mcmc.transition",
     "DART": "styne.mcmc.method.dart",
     "DARTFactory": "styne.mcmc.method.dart",
     "DirectDART": "styne.mcmc.method.dartdirect",

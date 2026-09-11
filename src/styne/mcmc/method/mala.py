@@ -1,16 +1,15 @@
-import numpy as np
 from typing import Optional
 from numpy.random import Generator
 
+import numpy as np
+
+from styne.backend import infer_backend
 from styne.mcmc.proposal import ProposalMethod
 from styne.mcmc.metropolishastings import MetropolisHastings
 from styne.mcmc.acceptance import AcceptanceProbability
 from styne.mcmc.factory import MHFactory
 from styne.mcmc.transition import TransitionData
 from styne.parameter.parameter import Parameter
-from styne.statistics.covariance import IIDCovarianceMatrix
-from styne.statistics.gaussian import Gaussian
-from styne.statistics.interface import DifferentiableDensity
 
 
 class MALAProposal(ProposalMethod):
@@ -33,43 +32,56 @@ class MALAProposal(ProposalMethod):
         (as an ndarray).
     """
 
-    def __init__(self, dim, stepSize, logGradientCallable):
-
-        super().__init__()
-
-        if not callable(logGradientCallable):
-            raise ValueError("gradient must be callable")
-
+    def __init__(
+            self, dim, stepSize, logGradientCallable=None,
+            logDensityCallable=None):
+        if logGradientCallable is not None \
+                and not callable(logGradientCallable):
+            raise TypeError("MALA gradient must be callable.")
+        if logGradientCallable is None and not callable(logDensityCallable):
+            raise TypeError(
+                "MALA requires a log density or explicit gradient."
+            )
         self._h = float(stepSize)
         self._h2 = self._h * self._h
         self._logGradient = logGradientCallable
-
-        propCov = IIDCovarianceMatrix(dim, self._h2)
-        self._proposalMeasure = Gaussian(propCov)
+        self._logDensity = logDensityCallable
 
     @property
     def stepSize(self) -> float:
         return self._h
 
-    def _drift(self, state: Parameter) -> np.ndarray:
-        """Compute the deterministic drift: x + (h^2 / 2) * grad log pi(x)."""
-        return state.coordinate + 0.5 * self._h2 * self._logGradient(state)
-
-    def generate_proposal(self, rng: Generator) -> TransitionData:
-        # Guard against use outside the MH loop, where state may not be set.
-        if self._state is None:
-            raise ValueError(
-                "Trying to generate proposal with undefined state"
+    def _gradient(self, state):
+        if self._logGradient is not None:
+            return self._logGradient(state)
+        backend = infer_backend(state.coordinate)
+        if not backend.capabilities.automaticDifferentiation:
+            raise ValueError("MALA requires gradient for the NumPy backend.")
+        namespace = backend.namespace
+        return backend.grad(
+            lambda coordinate: namespace.sum(
+                self._logDensity(state.with_coordinate(coordinate))
             )
+        )(state.coordinate)
 
-        driftVector = self._drift(self._state)
-        propMean = self._state.clone()
-        propMean.coordinate = np.asarray(driftVector, dtype=np.float64)
+    def _drift(self, state: Parameter):
+        """Compute the deterministic drift: x + (h^2 / 2) * grad log pi(x)."""
+        return state.coordinate + 0.5 * self._h2 * self._gradient(state)
 
-        self._proposalMeasure.mean = propMean
-        proposal = self._proposalMeasure.generate_realisation(rng=rng)
-        return TransitionData(
-            self._state, proposal, auxiliary={'drift': driftVector}
+    def propose(self, state: Parameter, rng):
+        driftVector = self._drift(state)
+        backend = infer_backend(state.coordinate)
+        metadata = backend.metadata(state.coordinate)
+        noise, nextRng = backend.normal(
+            rng, state.coordinate.shape,
+            dtype=metadata.dtype, device=metadata.device,
+        )
+        proposal = state.with_coordinate(
+            driftVector + self._h * noise
+        )
+        return (
+            TransitionData(state, proposal, auxiliary={'drift': driftVector}),
+            nextRng,
         )
 
 
@@ -83,10 +95,8 @@ class MetropolisAdjustedLangevinAlgorithm(MetropolisHastings):
     Parameters
     ----------
     targetDensity : DensityInterface
-        Target density. Must provide an ``evaluate_log_gradient(state)``
-        method returning the gradient of the log-density as an ndarray.
-        This is checked at construction time via duck typing, no specific
-        base class is required, any object with the method will work.
+        Target density. JAX and PyTorch differentiate 'evaluate_log'.
+        NumPy execution requires an explicit 'gradient' callable.
     stepSize : float
         Step size h (standard deviation of the isotropic noise).
     diagnostics : ChainDiagnostics
@@ -96,22 +106,30 @@ class MetropolisAdjustedLangevinAlgorithm(MetropolisHastings):
 
     def __init__(self, targetDensity, stepSize, diagnostics,
                  acceptance: AcceptanceProbability = None,
-                 rng: Optional[Generator] = None):
-
-        if not isinstance(targetDensity, DifferentiableDensity):
-            raise ValueError(
-                "MALA requires a target density with evaluate_log_gradient."
-            )
+                 rng: Optional[Generator] = None, gradient=None):
 
         proposalMethod = MALAProposal(
             targetDensity.domainDimension,
             stepSize,
-            targetDensity.evaluate_log_gradient
+            gradient,
+            targetDensity.evaluate_log,
         )
         super().__init__(targetDensity, proposalMethod, diagnostics,
                          acceptance=acceptance, rng=rng)
 
-    def _log_mh_ratio(self, transition: TransitionData) -> float:
+    def _proposal_for_target(self, targetDensity):
+        gradient = self._proposalMethod._logGradient
+        owner = getattr(gradient, "__self__", None)
+        if owner is self.target:
+            gradient = targetDensity.evaluate_log_gradient
+        return MALAProposal(
+            targetDensity.domainDimension,
+            self._proposalMethod.stepSize,
+            gradient,
+            targetDensity.evaluate_log,
+        )
+
+    def _log_mh_ratio(self, transition: TransitionData):
         """
         Log MH ratio for the Langevin proposal.
 
@@ -123,22 +141,21 @@ class MetropolisAdjustedLangevinAlgorithm(MetropolisHastings):
         x = transition.state.coordinate
         z = transition.proposal.coordinate
 
-        logTarget = float(
-            self._tgtDensity.evaluate_log(transition.proposal)
-            - self._tgtDensity.evaluate_log(transition.state)
+        logTarget = (
+            transition.proposed.logDensity - transition.current.logDensity
         )
 
-        if logTarget == -np.inf:
-            return -np.inf
-
-        # drift at state was pre-computed during generate_proposal
         meanZgivenX = transition.auxiliary['drift']
         meanXgivenZ = self._proposalMethod._drift(transition.proposal)
 
         diffX = x - meanXgivenZ
         diffZ = z - meanZgivenX
 
-        quadDiff = -0.5 / h2 * (diffX @ diffX - diffZ @ diffZ)
+        backend = infer_backend(x)
+        quadDiff = -0.5 / h2 * (
+            backend.namespace.sum(diffX * diffX, axis=-1)
+            - backend.namespace.sum(diffZ * diffZ, axis=-1)
+        )
 
         return logTarget + quadDiff
 
@@ -150,6 +167,17 @@ class MALAFactory(MHFactory):
         super().__init__()
         self._stepSize = None
         self._acceptance: AcceptanceProbability = None
+        self._gradient = None
+
+    @property
+    def gradient(self):
+        return self._gradient
+
+    @gradient.setter
+    def gradient(self, value):
+        if value is not None and not callable(value):
+            raise TypeError("MALA gradient must be callable.")
+        self._gradient = value
 
     @property
     def stepSize(self) -> float:
@@ -182,5 +210,5 @@ class MALAFactory(MHFactory):
     def _create_sampler(self) -> MetropolisAdjustedLangevinAlgorithm:
         return MetropolisAdjustedLangevinAlgorithm(
             self._target, self._stepSize, self._diagnostics, self._acceptance,
-            rng=self.rng
+            rng=self.rng, gradient=self._gradient,
         )

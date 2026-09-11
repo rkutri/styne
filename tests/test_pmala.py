@@ -5,7 +5,7 @@ from styne.mcmc.method.pmala import (
     PMALAFactory,
     PMALAProposal,
     PreconditionedMALA,
-    _validate_pmala_target,
+    validate_pmala_target,
 )
 from styne.mcmc.diagnostics import AcceptanceRateDiagnostics
 from styne.statistics.radonnikodym import RadonNikodym
@@ -22,7 +22,7 @@ from styne.utility.tuning import PMALATuner
 # Shared helpers
 # ---------------------------------------------------------------------------
 
-def _make_valid_target(dim=2):
+def make_valid_target(dim=2):
     refCov = IIDCovarianceMatrix(dim, 1.0)
     refMean = Vector(np.zeros(dim))
     prior = Gaussian(refCov, refMean)
@@ -32,7 +32,7 @@ def _make_valid_target(dim=2):
     return RadonNikodym(prior, derivative)
 
 
-class _NonDifferentiableDensity(DensityInterface):
+class NonDifferentiableDensity(DensityInterface):
     @property
     def domainType(self): return Vector
     @property
@@ -40,7 +40,7 @@ class _NonDifferentiableDensity(DensityInterface):
     def evaluate_log(self, p): return 0.0
 
 
-class _NonGaussianMeasure(AbsolutelyContinuousProbabilityMeasure):
+class NonGaussianMeasure(AbsolutelyContinuousProbabilityMeasure):
     """Stub that looks like an AbsolutelyContinuousProbabilityMeasure but is not Gaussian."""
     class _Density(DensityInterface):
         @property
@@ -73,25 +73,28 @@ class TestPMALASetup:
         with pytest.raises(TypeError):
             PreconditionedMALA(density, 0.5, AcceptanceRateDiagnostics())
 
-    def test_rejects_non_differentiable_derivative(self):
+    def test_numpy_requires_explicit_gradient(self):
         refCov = IIDCovarianceMatrix(2, 1.0)
         prior = Gaussian(refCov, Vector(np.zeros(2)))
-        target = RadonNikodym(prior, _NonDifferentiableDensity())
+        target = RadonNikodym(prior, NonDifferentiableDensity())
+
         with pytest.raises(ValueError):
-            PreconditionedMALA(target, 0.5, AcceptanceRateDiagnostics())
+            PreconditionedMALA(
+                target, 0.5, AcceptanceRateDiagnostics()
+            )
 
     def test_rejects_beta_zero(self):
         with pytest.raises(ValueError):
-            PreconditionedMALA(_make_valid_target(), 0.0,
+            PreconditionedMALA(make_valid_target(), 0.0,
                                AcceptanceRateDiagnostics())
 
     def test_rejects_beta_above_one(self):
         with pytest.raises(ValueError):
-            PreconditionedMALA(_make_valid_target(), 1.1,
+            PreconditionedMALA(make_valid_target(), 1.1,
                                AcceptanceRateDiagnostics())
 
     def test_rejects_non_gaussian_reference(self):
-        stub = _NonGaussianMeasure()
+        stub = NonGaussianMeasure()
         deriv = GaussianDensity(IIDCovarianceMatrix(2, 1.0),
                                 Vector(np.zeros(2)))
         target = RadonNikodym(stub, deriv)
@@ -109,23 +112,33 @@ class TestPMALASetup:
 
     def test_factory_rejects_missing_beta(self):
         factory = PMALAFactory()
-        factory.target = _make_valid_target()
+        factory.target = make_valid_target()
         with pytest.raises(ValueError):
             factory.create()
 
     def test_factory_rejects_invalid_beta(self):
         factory = PMALAFactory()
-        factory.target = _make_valid_target()
+        factory.target = make_valid_target()
         factory.beta = -0.1
         with pytest.raises(ValueError):
             factory.create()
 
     def test_factory_creates_correctly(self):
         factory = PMALAFactory()
-        factory.target = _make_valid_target()
+        target = make_valid_target()
+        factory.target = target
         factory.beta = 0.5
+        factory.gradient = target.derivative.evaluate_log_gradient
         sampler = factory.create()
         assert isinstance(sampler, PreconditionedMALA)
+
+    def test_factory_gradient_round_trip(self):
+        factory = PMALAFactory()
+        gradient = make_valid_target().derivative.evaluate_log_gradient
+
+        factory.gradient = gradient
+
+        assert factory.gradient is gradient
 
 
 # ---------------------------------------------------------------------------
@@ -153,7 +166,9 @@ class TestPMALAProposalStep:
         likMean = Vector(np.ones(self.DIM))
         deriv = GaussianDensity(likCov, likMean)
         self.target = RadonNikodym(prior, deriv)
-        self.proposal = PMALAProposal(self.target, self.BETA)
+        self.proposal = PMALAProposal(
+            self.target, self.BETA, deriv.evaluate_log_gradient
+        )
         self.state = Vector(self.STATE_COORD.copy())
 
         gradLogPsi = np.array([1., 1.]) - np.array([2., 3.])  # [-1, -2]
@@ -168,23 +183,128 @@ class TestPMALAProposalStep:
 
     def test_proposal_mean_matches_drift(self):
         rng = np.random.default_rng(7)
-        self.proposal.state = self.state
         proposals = np.array([
-            self.proposal.generate_proposal(rng).proposal.coordinate
+            self.proposal.propose(self.state, rng)[0].proposal.coordinate
             for _ in range(5000)
         ])
         assert np.allclose(proposals.mean(axis=0), self.expectedDrift, atol=0.05)
 
     def test_proposal_covariance_is_beta2_times_C(self):
         rng = np.random.default_rng(8)
-        self.proposal.state = self.state
         proposals = np.array([
-            self.proposal.generate_proposal(rng).proposal.coordinate
+            self.proposal.propose(self.state, rng)[0].proposal.coordinate
             for _ in range(5000)
         ])
         sampleCov = np.cov(proposals, rowvar=False)
         expected = self.BETA**2 * np.eye(self.DIM)
         assert np.allclose(sampleCov, expected, atol=0.05)
+
+    def test_drift_compiles_with_jax_autodiff(self):
+        jax = pytest.importorskip("jax")
+        jnp = pytest.importorskip("jax.numpy")
+
+        prior = Gaussian(
+            IIDCovarianceMatrix(self.DIM, jnp.array(1.)),
+            Vector(jnp.zeros(self.DIM)),
+        )
+        derivative = GaussianDensity(
+            IIDCovarianceMatrix(self.DIM, jnp.array(1.)),
+            Vector(jnp.ones(self.DIM)),
+        )
+        proposal = PMALAProposal(
+            RadonNikodym(prior, derivative), self.BETA
+        )
+        compiled = jax.jit(
+            lambda coordinate: proposal._drift(Vector(coordinate))
+        )
+
+        drift = compiled(jnp.array(self.STATE_COORD))
+
+        np.testing.assert_allclose(drift, self.expectedDrift)
+
+    def test_drift_compiles_with_pytorch_autodiff(self):
+        torch = pytest.importorskip("torch")
+        from styne.backend import get_backend
+
+        backend = get_backend("pytorch")
+        prior = Gaussian(
+            IIDCovarianceMatrix(self.DIM, torch.tensor(1.)),
+            Vector(torch.zeros(self.DIM)),
+        )
+        derivative = GaussianDensity(
+            IIDCovarianceMatrix(self.DIM, torch.tensor(1.)),
+            Vector(torch.ones(self.DIM)),
+        )
+        proposal = PMALAProposal(
+            RadonNikodym(prior, derivative), self.BETA
+        )
+        compiled = backend.compile(
+            lambda coordinate: proposal._drift(Vector(coordinate)),
+            backend="eager",
+            fullgraph=True,
+        )
+
+        drift = compiled(torch.tensor(self.STATE_COORD))
+
+        torch.testing.assert_close(
+            drift, torch.tensor(self.expectedDrift)
+        )
+
+    def test_drift_retains_pytorch_gradient_connectivity(self):
+        torch = pytest.importorskip("torch")
+
+        prior = Gaussian(
+            IIDCovarianceMatrix(self.DIM, torch.tensor(1.)),
+            Vector(torch.zeros(self.DIM)),
+        )
+        derivative = GaussianDensity(
+            IIDCovarianceMatrix(self.DIM, torch.tensor(1.)),
+            Vector(torch.ones(self.DIM)),
+        )
+        proposal = PMALAProposal(
+            RadonNikodym(prior, derivative), self.BETA
+        )
+        coordinate = torch.tensor(self.STATE_COORD, requires_grad=True)
+
+        drift = proposal._drift(Vector(coordinate))
+        gradient, = torch.autograd.grad(drift.sum(), coordinate)
+
+        expected = np.sqrt(1. - self.BETA ** 2) - 0.5 * self.BETA ** 2
+        torch.testing.assert_close(
+            gradient,
+            torch.full((self.DIM,), expected, dtype=coordinate.dtype),
+        )
+
+    def test_retarget_rebinds_reference_and_derivative_gradient(self):
+        sampler = PreconditionedMALA(
+            self.target,
+            self.BETA,
+            AcceptanceRateDiagnostics(),
+            gradient=self.target.derivative.evaluate_log_gradient,
+        )
+        reference = Gaussian(
+            IIDCovarianceMatrix(self.DIM, 4.0), Vector(np.full(self.DIM, 5.0))
+        )
+        derivative = GaussianDensity(
+            IIDCovarianceMatrix(self.DIM, 0.5),
+            Vector(np.full(self.DIM, -1.0)),
+        )
+        target = RadonNikodym(reference, derivative)
+
+        sampler.target = target
+        drift = sampler.proposal._drift(self.state)
+        expected = (
+            reference.mean.coordinate
+            + np.sqrt(1.0 - self.BETA ** 2)
+            * (self.state.coordinate - reference.mean.coordinate)
+            + 0.5 * self.BETA ** 2 * reference.covariance.apply(
+                derivative.evaluate_log_gradient(self.state)
+            )
+        )
+
+        assert sampler.proposal._target is target
+        assert sampler.proposal._gradient.__self__ is derivative
+        np.testing.assert_allclose(drift, expected)
 
 
 # ---------------------------------------------------------------------------
@@ -217,8 +337,6 @@ class TestPMALAInvariantMeasure:
         return muPost, postVar * np.eye(cls.DIM)
 
     def setup_method(self):
-        np.random.seed(self.SEED)
-
         refCov = IIDCovarianceMatrix(self.DIM, self.PRIOR_VAR)
         prior = Gaussian(refCov, Vector(np.zeros(self.DIM)))
 
@@ -230,6 +348,8 @@ class TestPMALAInvariantMeasure:
         factory = PMALAFactory()
         factory.target = target
         factory.beta = self.BETA
+        factory.gradient = deriv.evaluate_log_gradient
+        factory.rng = np.random.default_rng(self.SEED)
         sampler = factory.create()
         sampler.run(self.N_STEPS, Vector(np.zeros(self.DIM)))
 
@@ -258,8 +378,6 @@ class TestPMALATuner:
     SEED = 0
 
     def setup_method(self):
-        np.random.seed(self.SEED)
-
         refCov = IIDCovarianceMatrix(self.DIM, 4.0)
         prior = Gaussian(refCov, Vector(np.zeros(self.DIM)))
         likCov = IIDCovarianceMatrix(self.DIM, 0.5)
@@ -269,6 +387,8 @@ class TestPMALATuner:
     def test_tuner_returns_preconditioned_mala(self):
         factory = PMALAFactory()
         factory.target = self.target
+        factory.gradient = self.target.derivative.evaluate_log_gradient
+        factory.rng = np.random.default_rng(self.SEED)
         init = Vector(np.zeros(self.DIM))
         tuner = PMALATuner(factory, init)
         sampler = tuner.tune()
@@ -277,9 +397,11 @@ class TestPMALATuner:
     def test_tuned_acceptance_rate_in_range(self):
         factory = PMALAFactory()
         factory.target = self.target
+        factory.gradient = self.target.derivative.evaluate_log_gradient
+        factory.rng = np.random.default_rng(self.SEED)
         init = Vector(np.zeros(self.DIM))
         tuner = PMALATuner(factory, init)
         sampler = tuner.tune()
-        sampler.run(1000, init.clone())
+        sampler.run(1000, init)
         rate = sampler.diagnostics.global_acceptance_rate()
         assert 0.1 <= rate <= 0.9

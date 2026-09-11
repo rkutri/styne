@@ -7,10 +7,9 @@ from styne.statistics.radonnikodym import RadonNikodym
 from styne.mcmc.localised import LocalisedSurrogateDensity
 
 
-def _make_rn_surrogate(priorVar, likVar, dim):
+def make_rn_surrogate(priorVar, likVar, dim):
     priorCov = IIDCovarianceMatrix(dim, priorVar)
-    prior = Gaussian(priorCov)
-    prior.mean = Vector(np.zeros(dim))
+    prior = Gaussian(priorCov, Vector(np.zeros(dim)))
     likCov = IIDCovarianceMatrix(dim, likVar)
     likelihood = GaussianDensity(likCov, Vector(np.zeros(dim)))
     return RadonNikodym(prior, likelihood)
@@ -25,7 +24,7 @@ class TestEvaluateLogUnchanged:
     def test_rn_case_matches_formula(self):
         gamma, theta = 2.0, 0.6
         dim = 3
-        surrogate = _make_rn_surrogate(priorVar=1.5, likVar=0.5, dim=dim)
+        surrogate = make_rn_surrogate(priorVar=1.5, likVar=0.5, dim=dim)
         loc = LocalisedSurrogateDensity(gamma, theta, surrogate, temperFullDensity=False)
         x = np.array([1., -1., 0.5])
         u = np.array([0.5, 0.2, -0.3])
@@ -40,7 +39,7 @@ class TestEvaluateLogUnchanged:
     def test_rn_case_full_tempering(self):
         gamma, theta = 2.0, 0.6
         dim = 3
-        surrogate = _make_rn_surrogate(priorVar=1.5, likVar=0.5, dim=dim)
+        surrogate = make_rn_surrogate(priorVar=1.5, likVar=0.5, dim=dim)
         loc = LocalisedSurrogateDensity(gamma, theta, surrogate, temperFullDensity=True)
         x = np.array([1., -1., 0.5])
         u = np.array([0.5, 0.2, -0.3])
@@ -73,7 +72,7 @@ class TestEvaluateLogUnchanged:
 class TestLocationOnlyMovesRegularisation:
 
     def test_prior_mean_unchanged_after_location_set(self):
-        surrogate = _make_rn_surrogate(priorVar=1.0, likVar=1.0, dim=2)
+        surrogate = make_rn_surrogate(priorVar=1.0, likVar=1.0, dim=2)
         prior_mean_before = surrogate.reference.mean.coordinate.copy()
 
         loc = LocalisedSurrogateDensity(1.0, 0.8, surrogate)
@@ -83,7 +82,7 @@ class TestLocationOnlyMovesRegularisation:
             surrogate.reference.mean.coordinate, prior_mean_before)
 
     def test_location_getter_returns_reg_centre(self):
-        surrogate = _make_rn_surrogate(priorVar=1.0, likVar=1.0, dim=2)
+        surrogate = make_rn_surrogate(priorVar=1.0, likVar=1.0, dim=2)
         loc = LocalisedSurrogateDensity(1.0, 1.0, surrogate)
         x = np.array([3., -2.])
         loc.location = Vector(x)
@@ -92,7 +91,7 @@ class TestLocationOnlyMovesRegularisation:
     def test_evaluate_log_moves_with_location(self):
         gamma, theta = 1.0, 1.0
         dim = 2
-        surrogate = _make_rn_surrogate(priorVar=1.0, likVar=1.0, dim=dim)
+        surrogate = make_rn_surrogate(priorVar=1.0, likVar=1.0, dim=dim)
         loc = LocalisedSurrogateDensity(gamma, theta, surrogate)
         u = Vector(np.array([1., 1.]))
 
@@ -112,7 +111,7 @@ class TestReferenceCovariance:
 
     def test_reference_covariance_is_scaled_copy_when_full_tempering(self):
         priorVar, theta = 2.0, 0.5
-        surrogate = _make_rn_surrogate(priorVar=priorVar, likVar=1.0, dim=2)
+        surrogate = make_rn_surrogate(priorVar=priorVar, likVar=1.0, dim=2)
         loc = LocalisedSurrogateDensity(1.0, theta, surrogate, temperFullDensity=True)
 
         priorCov = surrogate.reference.covariance
@@ -125,7 +124,7 @@ class TestReferenceCovariance:
 
     def test_reference_covariance_is_untouched_when_not_full_tempering(self):
         priorVar, theta = 2.0, 0.5
-        surrogate = _make_rn_surrogate(priorVar=priorVar, likVar=1.0, dim=2)
+        surrogate = make_rn_surrogate(priorVar=priorVar, likVar=1.0, dim=2)
         loc = LocalisedSurrogateDensity(1.0, theta, surrogate, temperFullDensity=False)
 
         priorCov = surrogate.reference.covariance
@@ -138,7 +137,7 @@ class TestReferenceCovariance:
 
     def test_prior_covariance_not_mutated(self):
         priorVar, theta = 1.5, 0.4
-        surrogate = _make_rn_surrogate(priorVar=priorVar, likVar=1.0, dim=2)
+        surrogate = make_rn_surrogate(priorVar=priorVar, likVar=1.0, dim=2)
         priorScalingBefore = surrogate.reference.covariance.scaling
 
         LocalisedSurrogateDensity(1.0, theta, surrogate)

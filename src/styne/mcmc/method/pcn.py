@@ -1,11 +1,11 @@
-from numpy import sqrt
 from typing import Optional
 from numpy.random import Generator
 
+from styne.backend import infer_backend
 from styne.mcmc.metropolishastings import MetropolisHastings
 from styne.mcmc.acceptance import AcceptanceProbability
 from styne.mcmc.transition import TransitionData
-from styne.statistics.radonnikodym import RadonNikodym
+from styne.statistics.interface import RadonNikodymInterface
 from styne.statistics.measure import ProbabilityMeasure
 from styne.mcmc.proposal import ProposalMethod
 from styne.mcmc.factory import MHFactory
@@ -13,10 +13,22 @@ from styne.parameter.parameter import Parameter
 from styne.statistics.gaussian import Gaussian
 
 
-def _validate_beta(beta) -> None:
+def validate_beta(beta) -> None:
     if not (0.0 < beta <= 1.0):
         raise ValueError(
             f"pCN step size must satisfy 0 < beta <= 1. Got {beta}.")
+
+
+def validate_pcn_target(target) -> None:
+    """Validate the RN and Gaussian-reference contract required by pCN."""
+    if not isinstance(target, RadonNikodymInterface):
+        raise TypeError(
+            "pCN target must implement RadonNikodymInterface."
+        )
+    if not isinstance(target.reference, Gaussian):
+        raise NotImplementedError(
+            "pCN requires a Gaussian reference measure."
+        )
 
 
 class PCNProposal(ProposalMethod):
@@ -33,9 +45,8 @@ class PCNProposal(ProposalMethod):
 
     Parameters
     ----------
-    target : RadonNikodym
-        Target density expressed as a Radon-Nikodym derivative with
-        respect to a Gaussian reference measure.
+    referenceMeasure : Gaussian
+        Gaussian reference measure preserved by the proposal.
     beta : float
         Step size in (0, 1]. Controls the balance between persistence
         (small beta) and exploration (large beta).
@@ -43,14 +54,12 @@ class PCNProposal(ProposalMethod):
 
     def __init__(self, referenceMeasure: ProbabilityMeasure, beta: float):
 
-        super().__init__()
-
         if not isinstance(referenceMeasure, Gaussian):
             raise NotImplementedError(
                 "Currently, only Gaussian reference measures are supported"
             )
 
-        _validate_beta(beta)
+        validate_beta(beta)
 
         self._beta = beta
         self._refMeasure = referenceMeasure
@@ -63,27 +72,25 @@ class PCNProposal(ProposalMethod):
     def beta(self) -> float:
         return self._beta
 
-    def generate_proposal(self, rng: Generator) -> Parameter:
-        # Guard against use outside the MH loop, where state may not be set.
-        if self._state is None:
-            raise ValueError(
-                "Trying to generate proposal with undefined state"
-            )
+    def propose(self, state: Parameter, rng):
+        coordinate = state.coordinate
+        backend = infer_backend(coordinate)
+        metadata = backend.metadata(coordinate)
+        noise, nextRng = backend.normal(
+            rng, coordinate.shape,
+            dtype=metadata.dtype, device=metadata.device,
+        )
+        mean = self._refMeasure.mean.coordinate
+        priorNoise = self._refMeasure.covariance.apply_chol_factor(noise)
+        persistence = backend.namespace.sqrt(backend.asarray(
+            1. - self._beta ** 2,
+            dtype=metadata.dtype, device=metadata.device,
+        ))
+        proposal = state.with_coordinate(
+            mean + persistence * (coordinate - mean) + self._beta * priorNoise
+        )
 
-        x = self._state.coordinate
-        xi = self._refMeasure.generate_realisation(rng=rng).coordinate
-        m = self._refMeasure.mean.coordinate
-
-        xCentred = x - m
-        xiCentred = xi - m
-
-        zCentred = sqrt(1. - self._beta**2) * xCentred \
-            + self._beta * xiCentred
-
-        proposal = self._state.clone()
-        proposal.coordinate = m + zCentred
-
-        return TransitionData(self._state, proposal)
+        return TransitionData(state, proposal), nextRng
 
 
 class PreconditionedCrankNicolson(MetropolisHastings):
@@ -96,7 +103,7 @@ class PreconditionedCrankNicolson(MetropolisHastings):
 
     Parameters
     ----------
-    target : RadonNikodym
+    target : RadonNikodymInterface
         Target density with Gaussian reference measure.
     beta : float
         Step size in (0, 1].
@@ -109,20 +116,21 @@ class PreconditionedCrankNicolson(MetropolisHastings):
                  acceptance: AcceptanceProbability = None,
                  rng: Optional[Generator] = None):
 
-        if not isinstance(target, RadonNikodym):
-            raise TypeError(
-                "pCN target must be a RadonNikodym instance (with a Gaussian "
-                "reference measure)."
-            )
+        validate_pcn_target(target)
 
         proposalMethod = PCNProposal(target.reference, beta)
         super().__init__(target, proposalMethod, diagnostics,
                          acceptance=acceptance, rng=rng)
 
-    def _log_mh_ratio(self, transition: TransitionData) -> float:
+    def _evaluate_log_density(self, parameter: Parameter):
+        return self._tgtDensity.derivative.evaluate_log(parameter)
 
-        return self._tgtDensity.derivative.evaluate_log(transition.proposal) \
-            - self._tgtDensity.derivative.evaluate_log(transition.state)
+    def _proposal_for_target(self, targetDensity):
+        validate_pcn_target(targetDensity)
+        return PCNProposal(targetDensity.reference, self.proposal.beta)
+
+    def _log_mh_ratio(self, transition: TransitionData):
+        return transition.proposed.logDensity - transition.current.logDensity
 
 
 class PCNFactory(MHFactory):
@@ -152,14 +160,10 @@ class PCNFactory(MHFactory):
     def _validate(self) -> None:
         super()._validate()
 
-        if not isinstance(self._target, RadonNikodym):
-            raise TypeError(
-                "pCN target must provide a Gaussian reference "
-                "and RN-derivative implementation."
-            )
+        validate_pcn_target(self._target)
         if self._beta is None:
             raise ValueError("Step size parameter (beta) not set for pCN.")
-        _validate_beta(self._beta)
+        validate_beta(self._beta)
 
     def _create_sampler(self) -> PreconditionedCrankNicolson:
         return PreconditionedCrankNicolson(

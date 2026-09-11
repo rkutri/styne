@@ -51,18 +51,24 @@ class MLDAProposal(PartitionedProposalMixin, ProposalMethod):
         partition: Optional[Partition] = None,
         finePrior: Optional[AbsolutelyContinuousProbabilityMeasure] = None,
     ):
-        ProposalMethod.__init__(self)
         self._init_partition(partition, finePrior)
         self._surrogateMeasure = surrogateMeasure
 
-    @ProposalMethod.state.setter
-    def state(self, state: Parameter):
-        ProposalMethod.state.fset(self, state)
+    def propose(self, state: Parameter, rng):
         if self.isPartitioned:
-            self._surrogateMeasure.initialMeasure.location = (
-                self._coarse_from(state))
+            initialState = self._coarse_from(state)
         else:
-            self._surrogateMeasure.initialMeasure.location = state
+            initialState = state
+
+        coarseProposal, nextRng = self._surrogateMeasure.transition(
+            initialState, rng
+        )
+        if not self.isPartitioned:
+            return TransitionData(state, coarseProposal), nextRng
+        fineProposal, nextRng = self._pFinePrior.sample(nextRng)
+        fullProposal = self._merge(
+            coarseProposal.coordinate, fineProposal.coordinate, state)
+        return TransitionData(state, fullProposal), nextRng
 
     @property
     def density(self) -> DensityInterface:
@@ -72,15 +78,6 @@ class MLDAProposal(PartitionedProposalMixin, ProposalMethod):
     @property
     def measure(self) -> SurrogateTransitionMeasure:
         return self._surrogateMeasure
-
-    def generate_proposal(self, rng: Generator) -> TransitionData:
-        coarseProposal = self._surrogateMeasure.generate_realisation(rng=rng)
-        if not self.isPartitioned:
-            return TransitionData(self._state, coarseProposal)
-        fineProposal = self._draw_fine(rng)
-        fullProposal = self._merge(
-            coarseProposal.coordinate, fineProposal.coordinate, self._state)
-        return TransitionData(self._state, fullProposal)
 
 
 class MultilevelDelayedAcceptanceMCMC(MetropolisHastings):
@@ -121,7 +118,7 @@ class MultilevelDelayedAcceptanceMCMC(MetropolisHastings):
         super().__init__(target, proposalMethod, diagnostics,
                          acceptance=acceptance, rng=rng)
 
-    def _log_mh_ratio(self, transition: TransitionData) -> float:
+    def _log_mh_ratio(self, transition: TransitionData):
         """Delayed-acceptance MH ratio, with optional fine-prior correction.
 
         Without partition: logDiffTarget - logDiffSurrogate.
@@ -134,9 +131,8 @@ class MultilevelDelayedAcceptanceMCMC(MetropolisHastings):
         state = transition.state
         proposal = transition.proposal
 
-        tgt = self._tgtDensity
         logDiffTarget = (
-            tgt.evaluate_log(proposal) - tgt.evaluate_log(state)
+            transition.proposed.logDensity - transition.current.logDensity
         )
 
         surr = self._proposalMethod.density
@@ -467,7 +463,7 @@ class MLDAFactory(MHFactory):
             if self._partition is not None:
                 rootInit = Vector(self._partition.rule.extract(0, self._crankedState.coordinate))
             else:
-                rootInit = self._crankedState.clone()
+                rootInit = self._crankedState
             self._tune_root(surrogates[0], rootInit)
 
         self._rootFactory.target = surrogates[0]

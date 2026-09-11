@@ -1,26 +1,27 @@
 from __future__ import annotations
 
-import numpy as np
-
-from styne.model.representation.expansion import Expansion, GridFunctionInterface
-from styne.parameter.parameter import Parameter
+from styne.model.representation.expansion import Expansion
+from styne.parameter.parameter import Parameter, as_coordinate
 
 
 class Function(Parameter):
-    """
-    Function-valued parameter, backed by an `Expansion`.
+    """Evaluable parameter binding coefficients to an ``Expansion``.
 
-    The coordinate is the expansion's coefficient array. Setting it
-    delegates to the expansion's own `coefficient` setter, so any
-    validation happens there, not in this class.
+    For coefficients ``coordinate`` and expansion ``E``, ``evaluate(grid)``
+    computes ``E.evaluate(coordinate, grid)``. Replacing the coordinate shares
+    ``E`` because it contains representation data, not current parameter state.
 
     Parameters
     ----------
+    coordinate : array-like
+        Coefficients with shape ``(..., dimension)``. Leading dimensions are
+        batch dimensions.
     expansion : Expansion
-        The underlying basis and coefficient store.
+        Static mathematical representation evaluated by the coefficients.
     """
 
-    def __init__(self, expansion: Expansion):
+    def __init__(self, coordinate, expansion: Expansion):
+        self._coordinate = self._validate(coordinate, expansion.dimension)
         self._expansion = expansion
 
     @property
@@ -28,30 +29,45 @@ class Function(Parameter):
         return self._expansion.dimension
 
     @property
-    def coordinate(self) -> np.ndarray:
-        return self._expansion.coefficient
-
-    @coordinate.setter
-    def coordinate(self, value: np.ndarray) -> None:
-        self._expansion.coefficient = value
+    def coordinate(self):
+        return self._coordinate
 
     @property
-    def function(self) -> GridFunctionInterface:
-        """
-        The underlying `Expansion`, exposing basis-specific operations
-        (`evaluate`, `evaluate_native`) beyond the flat coordinate view.
-        """
+    def expansion(self) -> Expansion:
+        """Static evaluation strategy shared by reconstructed parameters."""
         return self._expansion
 
-    def clone(self) -> Function:
-        """
-        Return an independent copy, cloning the underlying expansion.
+    def evaluate(self, grid):
+        """Evaluate this parameter's coefficients on ``grid``."""
+        return self._expansion.evaluate(self._coordinate, grid)
 
-        Uses `self.__class__` rather than `Function` directly, so a subclass
-        constructed the same way clones as its own type.
+    def directional_derivative(self, direction, grid):
+        """Apply the expansion derivative at this function's coordinate."""
+        return self._expansion.bind(grid).directional_derivative(
+            self._coordinate, direction
+        )
 
-        Returns
-        -------
-        Function
-        """
-        return self.__class__(self._expansion.clone())
+    def adjoint_derivative(self, cotangent, grid):
+        """Apply the adjoint expansion derivative at this coordinate."""
+        return self._expansion.bind(grid).adjoint_derivative(
+            self._coordinate, cotangent
+        )
+
+    @staticmethod
+    def _validate(coordinate, dimension):
+        coordinate = as_coordinate(coordinate)
+        if coordinate.ndim < 1 or coordinate.shape[-1] != dimension:
+            raise ValueError(
+                "Function coordinate shape must be (..., dimension); "
+                f"got {coordinate.shape} for dimension {dimension}."
+            )
+        return coordinate
+
+    def with_coordinate(self, coordinate) -> Function:
+        return self.__class__(coordinate, self._expansion)
+
+    @classmethod
+    def _restore(cls, coordinate, expansion):
+        parameter = super()._restore(coordinate)
+        parameter._expansion = expansion
+        return parameter

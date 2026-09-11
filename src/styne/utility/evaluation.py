@@ -2,11 +2,11 @@ import numpy as np
 
 from typing import Callable
 
-from styne.model.representation.expansion import GridFunctionInterface
+from styne.model.representation.expansion import GridFunction
 from styne.utility.grid import Grid
 
 
-class ExplicitFunction(GridFunctionInterface):
+class ExplicitFunction:
 
     def __init__(self, fcn_callable):
 
@@ -21,10 +21,10 @@ class ExplicitFunction(GridFunctionInterface):
         return np.array([self._fcn(x) for x in grid])
 
 
-class TransformWrapper(GridFunctionInterface):
+class TransformWrapper:
 
     def __init__(self, operation: Callable,
-                 gridFunction: GridFunctionInterface):
+                 gridFunction: GridFunction):
         self._op = operation
         self._gf = gridFunction
 

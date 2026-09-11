@@ -1,3 +1,5 @@
+import copy
+
 from styne.statistics.measure import ProbabilityMeasure
 from typing import Optional
 import numpy as np
@@ -60,19 +62,23 @@ class LocalisedSurrogateDensity(RadonNikodym):
         self._tempering = tempering
         self._spectralWeights = spectralWeights
         self._temperFullDensity = temperFullDensity
+        self._scaledDerivative = None
 
         regCov = self._build_reg_covariance(
             surrogateDensity.domainDimension, spectralWeights
         )
         self._regGaussian = Gaussian(regCov)
-        
-        # Use a clone of the surrogate's mean to preserve domainType (e.g. Function vs Vector)
+
         if hasattr(surrogateDensity, 'reference'):
-            self._regGaussian.mean =  surrogateDensity.reference.mean.clone()
+            self._regGaussian = self._regGaussian.with_mean(
+                surrogateDensity.reference.mean.with_coordinate(
+                    np.zeros(surrogateDensity.domainDimension)
+                )
+            )
         else:
-            self._regGaussian.mean = Vector(np.zeros(surrogateDensity.domainDimension))
-        
-        self._regGaussian.mean.coordinate = np.zeros(surrogateDensity.domainDimension)
+            self._regGaussian = self._regGaussian.with_mean(Vector(
+                np.zeros(surrogateDensity.domainDimension)
+            ))
 
         # if the surrogate density is itself a Radon-Nikodym density, there is a
         # choice in which to consider the reference measure. We choose the
@@ -80,10 +86,12 @@ class LocalisedSurrogateDensity(RadonNikodym):
         # be the prior in a Bayesian model. Important for preconditioned MCMCs.
         if isinstance(surrogateDensity, RadonNikodym):
             scaledDerivative = LogScalingWrapper(surrogateDensity.derivative, tempering)
+            self._scaledDerivative = scaledDerivative
 
             if temperFullDensity:
-                scaledCov = surrogateDensity.reference.covariance.clone()
-                scaledCov.scaling = scaledCov.scaling / tempering
+                scaledCov = surrogateDensity.reference.covariance.with_scaling(
+                    surrogateDensity.reference.covariance.scaling / tempering
+                )
                 reference = Gaussian(scaledCov, surrogateDensity.reference.mean)
                 
                 self._surrogateComponent = ProductWrapper([
@@ -123,7 +131,29 @@ class LocalisedSurrogateDensity(RadonNikodym):
 
     @location.setter
     def location(self, location: Parameter):
-        self._regGaussian.mean = location
+        self._replace_regularisation(self._regGaussian.with_mean(location))
+
+    def with_location(self, location: Parameter):
+        """Return this density localised at ``location``."""
+        result = copy.copy(self)
+        result.location = location
+        return result
+
+    def with_surrogate_density(self, surrogateDensity, spectralWeights=None):
+        """Rebuild the localised density around a replacement surrogate."""
+        result = type(self)(
+            self._reg,
+            self._tempering,
+            surrogateDensity,
+            spectralWeights=spectralWeights,
+            temperFullDensity=self._temperFullDensity,
+        )
+        result.location = self.location
+        return result
+
+    @property
+    def surrogateDensity(self):
+        return self._surrogateDensity
 
     @property
     def regularisation(self) -> float:
@@ -149,9 +179,20 @@ class LocalisedSurrogateDensity(RadonNikodym):
         if weights is None:
             return
         self._spectralWeights = weights
-        self._regGaussian.covariance = DiagonalCovarianceMatrix(
-            1.0 / np.clip(self._reg * weights**2, 1e-30, None)
+        self._replace_regularisation(
+            self._regGaussian.with_covariance(DiagonalCovarianceMatrix(
+                1.0 / np.clip(self._reg * weights**2, 1e-30, None)
+            ))
         )
+
+    def _replace_regularisation(self, measure):
+        self._regGaussian = measure
+        if isinstance(self._surrogateDensity, RadonNikodym):
+            self._derivative = ProductWrapper([
+                measure.density, self._scaledDerivative
+            ])
+        else:
+            self._reference = measure
 
 
 
@@ -180,6 +221,12 @@ class LocalisedSurrogateTransitionMeasure(SurrogateTransitionMeasure):
         if not isinstance(surrogateChain.target, LocalisedSurrogateDensity):
             raise TypeError("surrogateChain target must be a "
                             "LocalisedSurrogateDensity instance.")
+        if nChain == 0 and initialMeasure is not None and not isinstance(
+                initialMeasure, (DiracMeasure, Gaussian)):
+            raise TypeError(
+                "Zero-subchain DART requires a Dirac or Gaussian initial "
+                "measure."
+            )
 
         super().__init__(surrogateChain, nChain, initialMeasure)
 
@@ -189,8 +236,43 @@ class LocalisedSurrogateTransitionMeasure(SurrogateTransitionMeasure):
 
     @location.setter
     def location(self, location: Parameter):
-        self._initialMeasure.location = location
+        self._initialMeasure = self._localise_initial_measure(location)
         self._mcmc.target.location = location
+
+    def _localise_initial_measure(self, location: Parameter):
+        if hasattr(self._initialMeasure, "with_location"):
+            return self._initialMeasure.with_location(location)
+        if hasattr(self._initialMeasure, "with_mean"):
+            return self._initialMeasure.with_mean(location)
+
+        initialMeasure = copy.copy(self._initialMeasure)
+        initialMeasure.location = location
+        return initialMeasure
+
+    def with_density(self, density: LocalisedSurrogateDensity):
+        """Return an isolated transition measure targeting ``density``."""
+        if not isinstance(density, LocalisedSurrogateDensity):
+            raise TypeError("density must be a LocalisedSurrogateDensity.")
+        result = copy.copy(self)
+        result._mcmc = copy.copy(self._mcmc)
+        result._mcmc._chain = copy.copy(self._mcmc._chain)
+        result._mcmc._diagnostics = copy.deepcopy(self._mcmc.diagnostics)
+        result._mcmc.target = density
+        result._initialMeasure = copy.copy(self._initialMeasure)
+        return result
+
+    def transition_trajectory(self, initialState: Parameter, randomState):
+        """Run an isolated surrogate trajectory localised at ``initialState``."""
+        measure = copy.copy(self)
+        measure._mcmc = copy.copy(self._mcmc)
+        measure._mcmc._chain = copy.copy(self._mcmc._chain)
+        measure._mcmc._diagnostics = copy.deepcopy(self._mcmc.diagnostics)
+        measure._mcmc.target = self.density.with_location(initialState)
+        measure._initialMeasure = self._localise_initial_measure(initialState)
+        trajectoryStart, randomState = measure._initialMeasure.sample(randomState)
+        return super(
+            LocalisedSurrogateTransitionMeasure, measure
+        ).transition_trajectory(trajectoryStart, randomState)
 
     @property
     def regularisation(self) -> float:

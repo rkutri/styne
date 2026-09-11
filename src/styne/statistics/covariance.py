@@ -1,21 +1,43 @@
 import numpy as np
 from abc import abstractmethod
 
-from numpy import sqrt
-from scipy.linalg import cholesky, solve_triangular
-
+from styne.backend import BackendInferenceError, get_backend, infer_backend
 from styne.statistics.interface import CovarianceOperatorInterface
 
 
-class CovarianceMatrix(CovarianceOperatorInterface):
-    """
-    Abstract base class for covariance matrices.
+def backend_array(value):
+    try:
+        return infer_backend(value), value
+    except BackendInferenceError:
+        backend = get_backend("numpy")
+        return backend, backend.asarray(value)
 
-    Subclasses provide dimension, log-determinant, Cholesky application,
-    inverse application, and direct application. All operations respect
-    the `scaling` property (default 1.0), which multiplies the represented
-    covariance by a positive scalar without altering stored data.
-    """
+
+def scaling_array(backend, reference, scaling):
+    try:
+        scalingBackend = infer_backend(scaling)
+    except BackendInferenceError:
+        metadata = backend.metadata(reference)
+        return backend.asarray(
+            scaling, dtype=metadata.dtype, device=metadata.device
+        )
+    if scalingBackend.name != backend.name:
+        infer_backend(reference, scaling)
+    return scaling
+
+
+def matrix_apply(matrix, vector):
+    return (matrix @ vector[..., None])[..., 0]
+
+
+class CovarianceMatrix(CovarianceOperatorInterface):
+    """Abstract base class for immutable backend-native covariance matrices."""
+
+    def __init__(self, backend, reference, scaling=1.0):
+        self._backend = backend
+        self._scaling = scaling_array(backend, reference, scaling)
+        if backend.name == "numpy" and np.any(self._scaling <= 0.0):
+            raise ValueError(f"Scaling must be positive. Got {scaling}.")
 
     @property
     @abstractmethod
@@ -27,210 +49,184 @@ class CovarianceMatrix(CovarianceOperatorInterface):
         pass
 
     @abstractmethod
-    def apply(self, x: np.ndarray) -> np.ndarray:
+    def apply(self, x):
         pass
 
     @abstractmethod
-    def quadratic_form(self, x: np.ndarray) -> float:
-        """Evaluate the quadratic form x^T C x."""
+    def to_cholesky(self):
+        """Return a dense lower factor of the scaled covariance."""
         pass
 
     @abstractmethod
-    def dual_quadratic_form(self, x: np.ndarray) -> float:
-        """Evaluate the dual quadratic form x^T C^{-1} x."""
+    def quadratic_form(self, x):
+        """Evaluate ``x.T @ C @ x`` over the final coordinate axis."""
+        pass
+
+    @abstractmethod
+    def dual_quadratic_form(self, x):
+        """Evaluate ``x.T @ C^{-1} @ x`` over the final coordinate axis."""
         pass
 
     @property
-    def scaling(self) -> float:
-        return getattr(self, '_scaling', 1.0)
-
-    @scaling.setter
-    def scaling(self, value: float):
-        if value <= 0:
-            raise ValueError(f"Scaling must be positive. Got {value}.")
-        self._scaling = float(value)
+    def scaling(self):
+        return self._scaling
 
     @abstractmethod
-    def clone(self) -> 'CovarianceMatrix':
-        """
-        Return an independent copy with identical behavior. 
-        
-        Subclasses must ensure that underlying coordinate arrays are copied 
-        to prevent aliasing between instances.
-        """
-        ... 
+    def with_scaling(self, scaling):
+        """Return an equivalent covariance with replacement scaling."""
+        ...
 
 
 class DiagonalCovarianceMatrix(CovarianceMatrix):
-    """
-    Covariance matrix of independent random variables.
+    """Covariance matrix of independent random variables."""
 
-    Stored internally via the square root of the marginal variances
-    (for Cholesky application) and the precision (reciprocal variances).
-
-    Parameters
-    ----------
-    marginalVariance : ndarray
-        One-dimensional array of positive marginal variances.
-    """
-
-    def __init__(self, marginalVariance):
-
-        marginalVariance = np.asarray(marginalVariance, dtype=np.float64)
-        self._validate_variance(marginalVariance)
-
-        self._sqrtMV = np.sqrt(marginalVariance)
-        self._precision = np.reciprocal(marginalVariance)
-
-    def clone(self) -> 'DiagonalCovarianceMatrix':
-        """
-        Create an independent copy with cloned variance arrays. 
-        
-        Copying the underlying arrays avoids aliasing if the marginal variances 
-        are later modified via the setter on either instance.
-        """
-        # Create a new instance with the same marginal variance (handles array copy)
-        newObj = DiagonalCovarianceMatrix(np.square(self._sqrtMV))
-        if hasattr(self, '_scaling'):
-            newObj.scaling = self.scaling
-        return newObj
-
-    @staticmethod
-    def _validate_variance(variance):
-        if np.any(variance <= 0.):
+    def __init__(self, marginalVariance, scaling=1.0):
+        backend, marginalVariance = backend_array(marginalVariance)
+        if marginalVariance.ndim != 1:
+            raise ValueError("Marginal variances must be one-dimensional.")
+        if backend.name == "numpy" and np.any(marginalVariance <= 0.0):
             raise ValueError(
-                "All marginal variances must be strictly positive.")
+                "All marginal variances must be strictly positive."
+            )
+
+        super().__init__(backend, marginalVariance, scaling)
+        self._sqrtMV = backend.namespace.sqrt(marginalVariance)
+
+    def with_scaling(self, scaling):
+        return DiagonalCovarianceMatrix(self.marginalVariance, scaling)
 
     @property
     def marginalVariance(self):
-        return np.square(self._sqrtMV)
-
-    @marginalVariance.setter
-    def marginalVariance(self, mVar):
-        mVar = np.asarray(mVar, dtype=np.float64)
-        self._validate_variance(mVar)
-        self._sqrtMV = np.sqrt(mVar)
-        self._precision = np.reciprocal(mVar)
+        return self._backend.namespace.square(self._sqrtMV)
 
     @property
     def dimension(self):
-        return self._precision.size
+        return self._sqrtMV.shape[-1]
 
-    def apply_chol_factor(self, x: np.ndarray) -> np.ndarray:
-        return sqrt(self.scaling) * self._sqrtMV * x
+    def apply_chol_factor(self, x):
+        infer_backend(self._sqrtMV, x)
+        return self._backend.namespace.sqrt(self.scaling) * self._sqrtMV * x
 
-    def apply_chol_factor_transpose(self, x: np.ndarray) -> np.ndarray:
-        return sqrt(self.scaling) * self._sqrtMV * x
+    def apply_chol_factor_transpose(self, x):
+        return self.apply_chol_factor(x)
 
-    def log_determinant(self) -> float:
-        base = float(np.sum(np.log(np.square(self._sqrtMV))))
-        return base + self.dimension * np.log(self.scaling)
+    def to_cholesky(self):
+        metadata = self._backend.metadata(self._sqrtMV)
+        diagonal = self._backend.namespace.sqrt(self.scaling) * self._sqrtMV
+        return self._backend.eye(
+            self.dimension, dtype=metadata.dtype, device=metadata.device
+        ) * diagonal
 
-    def apply_inverse(self, x: np.ndarray) -> np.ndarray:
-        return self._precision * x / self.scaling
+    def log_determinant(self):
+        namespace = self._backend.namespace
+        return namespace.sum(namespace.log(self.marginalVariance), axis=-1) + \
+            self.dimension * namespace.log(self.scaling)
 
-    def quadratic_form(self, x: np.ndarray) -> float:
-        return float(np.sum(np.square(x) * self.marginalVariance)) * self.scaling
+    def apply_inverse(self, x):
+        infer_backend(self._sqrtMV, x)
+        return x / (self.scaling * self.marginalVariance)
 
-    def dual_quadratic_form(self, x: np.ndarray) -> float:
-        return float(np.sum(np.square(x) * self._precision)) / self.scaling
+    def quadratic_form(self, x):
+        namespace = self._backend.namespace
+        return namespace.sum(x * self.apply(x), axis=-1)
 
-    def apply(self, x: np.ndarray) -> np.ndarray:
+    def dual_quadratic_form(self, x):
+        namespace = self._backend.namespace
+        return namespace.sum(x * self.apply_inverse(x), axis=-1)
+
+    def apply(self, x):
+        infer_backend(self._sqrtMV, x)
         return self.scaling * self.marginalVariance * x
 
 
 class IIDCovarianceMatrix(DiagonalCovarianceMatrix):
-    """
-    Covariance matrix of i.i.d. random variables: variance * I.
+    """Covariance matrix with one marginal variance repeated by dimension."""
 
-    Parameters
-    ----------
-    dimension : int
-        Size of the state space.
-    variance : float
-        Common marginal variance (must be positive).
-    """
+    def __init__(self, dimension, variance, scaling=1.0):
+        backend, variance = backend_array(variance)
+        metadata = backend.metadata(variance)
+        marginalVariance = backend.ones(
+            dimension, dtype=metadata.dtype, device=metadata.device
+        ) * variance
+        super().__init__(marginalVariance, scaling)
 
-    def __init__(self, dimension, variance):
-        margVar = np.full(dimension, variance)
-        super().__init__(margVar)
+    def with_scaling(self, scaling):
+        return IIDCovarianceMatrix(
+            self.dimension, self.marginalVariance[0], scaling
+        )
 
 
 class DenseCovarianceMatrix(CovarianceMatrix):
-    """
-    General (dense) symmetric positive-definite covariance matrix.
+    """Dense symmetric positive-definite covariance matrix."""
 
-    Stored internally via its lower-triangular Cholesky factor.
-
-    Parameters
-    ----------
-    denseCovMat : ndarray
-        Two-dimensional symmetric positive-definite matrix.
-    """
-
-    def __init__(self, denseCovMat):
-
-        denseCovMat = np.asarray(denseCovMat, dtype=np.float64)
-
-        s = denseCovMat.shape
-        if denseCovMat.ndim != 2 or s[0] != s[1]:
+    def __init__(self, denseCovMat, scaling=1.0):
+        backend, denseCovMat = backend_array(denseCovMat)
+        if (
+                denseCovMat.ndim < 2
+                or denseCovMat.shape[-2] != denseCovMat.shape[-1]):
             raise ValueError(
-                f"Covariance matrix must be square. Got shape {s} instead."
+                "Covariance matrix must be square over its final two axes."
             )
-
-        if not np.allclose(denseCovMat, denseCovMat.T):
+        if backend.name == "numpy" and not np.allclose(
+                denseCovMat,
+                np.swapaxes(denseCovMat, -1, -2)):
             raise ValueError("Covariance matrix must be symmetric.")
 
-        self._dim = s[0]
-        from scipy.linalg import LinAlgError
+        super().__init__(backend, denseCovMat, scaling)
         try:
-            self._cholFactor = cholesky(denseCovMat, lower=True)
-        except LinAlgError as e:
+            self._cholFactor = backend.cholesky(denseCovMat)
+        except np.linalg.LinAlgError as error:
             from styne.utility.exceptions import NotPositiveDefinite
-            raise NotPositiveDefinite("Covariance matrix is not positive definite.") from e
+            raise NotPositiveDefinite(
+                "Covariance matrix is not positive definite."
+            ) from error
 
-    def clone(self) -> 'DenseCovarianceMatrix':
-        """
-        Create an independent copy with a cloned Cholesky factor.
-        """
-        # We can't easily call __init__ without the original dense matrix,
-        # so we use __class__.__new__ and manually set the state.
-        newObj = self.__class__.__new__(self.__class__)
-        newObj._dim = self._dim
-        newObj._cholFactor = self._cholFactor.copy()
-        if hasattr(self, '_scaling'):
-            newObj.scaling = self.scaling
-        return newObj
+    def with_scaling(self, scaling):
+        return DenseCovarianceMatrix(self.to_dense(), scaling)
 
     @property
     def dimension(self):
-        return self._dim
+        return self._cholFactor.shape[-1]
 
-    def apply_chol_factor(self, x: np.ndarray) -> np.ndarray:
-        return sqrt(self.scaling) * (self._cholFactor @ x)
+    def apply_chol_factor(self, x):
+        infer_backend(self._cholFactor, x)
+        return self._backend.namespace.sqrt(self.scaling) * matrix_apply(
+            self._cholFactor, x
+        )
 
-    def apply_chol_factor_transpose(self, x: np.ndarray) -> np.ndarray:
-        return sqrt(self.scaling) * (self._cholFactor.T @ x)
+    def apply_chol_factor_transpose(self, x):
+        infer_backend(self._cholFactor, x)
+        transpose = self._backend.namespace.swapaxes(self._cholFactor, -1, -2)
+        return self._backend.namespace.sqrt(self.scaling) * matrix_apply(
+            transpose, x
+        )
 
-    def log_determinant(self) -> float:
-        base = float(2. * np.sum(np.log(np.diag(self._cholFactor))))
-        return base + self._dim * np.log(self.scaling)
+    def to_cholesky(self):
+        return self._backend.namespace.sqrt(self.scaling) * self._cholFactor
 
-    def apply_inverse(self, x: np.ndarray) -> np.ndarray:
-        y = solve_triangular(self._cholFactor, x, lower=True)
-        return solve_triangular(self._cholFactor.T, y, lower=False) / self.scaling
+    def log_determinant(self):
+        namespace = self._backend.namespace
+        diagonal = namespace.diagonal(self._cholFactor)
+        return 2.0 * namespace.sum(namespace.log(diagonal), axis=-1) + \
+            self.dimension * namespace.log(self.scaling)
 
-    def quadratic_form(self, x: np.ndarray) -> float:
-        y = self._cholFactor.T @ x
-        return float(np.sum(np.square(y))) * self.scaling
+    def apply_inverse(self, x):
+        infer_backend(self._cholFactor, x)
+        solution = self._backend.solve(self.to_dense(), x[..., None])
+        return solution[..., 0] / self.scaling
 
-    def dual_quadratic_form(self, x: np.ndarray) -> float:
-        y = solve_triangular(self._cholFactor, x, lower=True)
-        return float(np.sum(np.square(y))) / self.scaling
+    def quadratic_form(self, x):
+        namespace = self._backend.namespace
+        return namespace.sum(x * self.apply(x), axis=-1)
 
-    def apply(self, x: np.ndarray) -> np.ndarray:
-        return self.scaling * (self._cholFactor @ (self._cholFactor.T @ x))
+    def dual_quadratic_form(self, x):
+        namespace = self._backend.namespace
+        return namespace.sum(x * self.apply_inverse(x), axis=-1)
+
+    def apply(self, x):
+        infer_backend(self._cholFactor, x)
+        return self.scaling * matrix_apply(self.to_dense(), x)
 
     def to_dense(self):
-        """Reconstruct the full covariance matrix from the Cholesky factor."""
-        return np.matmul(self._cholFactor, self._cholFactor.T)
+        transpose = self._backend.namespace.swapaxes(self._cholFactor, -1, -2)
+        return self._cholFactor @ transpose

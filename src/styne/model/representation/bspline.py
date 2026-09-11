@@ -3,10 +3,50 @@ import scipy.interpolate as si
 
 from typing import List
 
-from styne.model.representation.expansion import Expansion
+from styne.model.representation.expansion import (
+    BoundLinearExpansion,
+    LinearExpansion,
+    backend_constant,
+)
+from styne.utility.grid import Grid
 
 
-class BSpline2D(Expansion):
+def validate_coefficient(coefficient, dimension):
+    if coefficient.ndim < 1:
+        raise ValueError(
+            "coefficient must have shape (..., dimension)"
+        )
+    if coefficient.shape[-1] != dimension:
+        raise ValueError(
+            f"Expected {dimension} coefficients, "
+            f"got {coefficient.shape[-1]}."
+        )
+    return coefficient
+
+
+def grid_array(grid):
+    return grid.to_array() if isinstance(grid, Grid) else np.asarray(grid)
+
+
+class BSplineEvaluation(BoundLinearExpansion):
+
+    def __init__(self, designMatrix):
+        self._designMatrix = np.asarray(designMatrix)
+
+    @property
+    def dimension(self):
+        return self._designMatrix.shape[1]
+
+    def evaluate(self, coefficient):
+        coefficient = validate_coefficient(coefficient, self.dimension)
+        designMatrix = backend_constant(self._designMatrix, coefficient)
+        return coefficient @ designMatrix.T
+
+    def _adjoint_derivative(self, coefficient, cotangent):
+        return cotangent @ backend_constant(self._designMatrix, cotangent)
+
+
+class BSpline2D(LinearExpansion):
     """
     Tensor-product B-spline on a 2D rectangular domain.
 
@@ -29,7 +69,6 @@ class BSpline2D(Expansion):
         self._nBasis = list(nBasis)
         self._splineX = BSpline1D(nBasis[0], degree, boundary[0])
         self._splineY = BSpline1D(nBasis[1], degree, boundary[1])
-        self._coeff = None
 
     @property
     def dimension(self) -> int:
@@ -42,35 +81,6 @@ class BSpline2D(Expansion):
     @property
     def splineY(self) -> 'BSpline1D':
         return self._splineY
-
-    @property
-    def coefficient(self) -> np.ndarray:
-
-        if self._coeff is None:
-            raise ValueError(
-                "Trying to retrieve coefficient before BSpline2D setup."
-            )
-
-        return self._coeff.copy()
-
-    @coefficient.setter
-    def coefficient(self, coefficient: np.ndarray) -> None:
-        self.project(self.validate(coefficient))
-
-    def project(self, coefficient: np.ndarray) -> None:
-
-        if coefficient.size != self.dimension:
-            raise ValueError(
-                f"Expected {self.dimension} coefficients, "
-                f"got {coefficient.size}."
-            )
-
-        self._coeff = coefficient
-
-        # Initialise 1D splines with dummy coefficients to set up knots,
-        # which are needed for design_matrix calls.
-        self._splineX.coefficient = np.zeros(self._nBasis[0])
-        self._splineY.coefficient = np.zeros(self._nBasis[1])
 
     def design_matrix(self, grid: np.ndarray) -> np.ndarray:
         """
@@ -86,12 +96,7 @@ class BSpline2D(Expansion):
             phi_i(grid[k,0]) * psi_j(grid[k,1]).
         """
 
-        if self._coeff is None:
-            raise ValueError(
-                "Trying to retrieve design matrix before BSpline2D is set up."
-            )
-
-        grid = np.asarray(grid)
+        grid = grid_array(grid)
         N = grid.shape[0]
         nx, ny = self._nBasis
 
@@ -101,20 +106,11 @@ class BSpline2D(Expansion):
         # result[k, i*ny+j] = PhiX[k,i] * PhiY[k,j]
         return (PhiX[:, :, None] * PhiY[:, None, :]).reshape(N, nx * ny)
 
-    def evaluate(self, grid: np.ndarray) -> np.ndarray:
-        """
-        Parameters
-        ----------
-        grid : ndarray of shape (N, 2)
-
-        Returns
-        -------
-        ndarray of shape (N,)
-        """
-        return self.design_matrix(grid) @ self._coeff
+    def _bind(self, grid) -> BoundLinearExpansion:
+        return BSplineEvaluation(self.design_matrix(grid))
 
 
-class BSpline1D(Expansion):
+class BSpline1D(LinearExpansion):
 
     def __init__(self,
                  nBasis: int,
@@ -136,33 +132,11 @@ class BSpline1D(Expansion):
         self._boundary = boundary
         self._degree = degree
 
-        self._bspline = None
+        self._knots = self._set_bspline_knots()
 
     @property
     def dimension(self) -> int:
-
-        if self._bspline is None:
-            return self._nBasis
-
-        if self._nBasis != self._bspline.c.size:
-            raise ValueError("Value mismatch in BSpline coefficient size.")
-
         return self._nBasis
-
-    @property
-    def coefficient(self) -> np.ndarray:
-
-        if self._bspline is None:
-            raise ValueError(
-                "Trying to retrieve coefficient before BSpline setup."
-            )
-
-        # return read-only coefficient (copy)
-        return self._bspline.tck[1]
-
-    @coefficient.setter
-    def coefficient(self, coefficient: np.ndarray) -> None:
-        self.project(self.validate(coefficient))
 
     @property
     def degree(self):
@@ -172,22 +146,27 @@ class BSpline1D(Expansion):
     def boundary(self):
         return list(self._boundary)
 
+    def greville_abscissae(self) -> np.ndarray:
+        """Return the standard collocation points for this basis."""
+        if self.degree == 0:
+            left = self._knots[:self.dimension]
+            right = self._knots[1:self.dimension + 1]
+            return 0.5 * (left + right)
+        return np.array([
+            np.mean(self._knots[i + 1:i + self.degree + 1])
+            for i in range(self.dimension)
+        ])
+
     def design_matrix(self, grid: np.ndarray) -> np.ndarray:
-
-        if self._bspline is None:
-            raise ValueError(
-                "Trying to retrieve design matrix before Spline is set up."
-            )
-
-        t = self._bspline.t
-        k = self.degree
-
-        return self._bspline.design_matrix(grid, t, k).toarray()
+        grid = grid_array(grid).ravel()
+        return si.BSpline.design_matrix(
+            grid, self._knots, self.degree, extrapolate=False
+        ).toarray()
 
     def spline_interval(self):
-
-        tck = self._bspline.tck
-        return tck[0][tck[2]:tck[2] + tck[1].size]
+        return self._knots[
+            self._degree:self._degree + self._nBasis
+        ]
 
     def _set_bspline_knots(self) -> np.ndarray:
         """
@@ -204,13 +183,5 @@ class BSpline1D(Expansion):
 
         return np.concatenate((leftClamp, domain, rightClamp))
 
-    def project(self, coefficient: np.ndarray) -> None:
-
-        t = self._set_bspline_knots()
-
-        self._bspline = si.BSpline(
-            t, coefficient, self._degree, extrapolate=False
-        )
-
-    def evaluate(self, grid: np.ndarray) -> np.ndarray:
-        return self._bspline(grid)
+    def _bind(self, grid) -> BoundLinearExpansion:
+        return BSplineEvaluation(self.design_matrix(grid))
