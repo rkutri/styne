@@ -337,8 +337,6 @@ class TestPMALAInvariantMeasure:
         return muPost, postVar * np.eye(cls.DIM)
 
     def setup_method(self):
-        np.random.seed(self.SEED)
-
         refCov = IIDCovarianceMatrix(self.DIM, self.PRIOR_VAR)
         prior = Gaussian(refCov, Vector(np.zeros(self.DIM)))
 
@@ -351,6 +349,7 @@ class TestPMALAInvariantMeasure:
         factory.target = target
         factory.beta = self.BETA
         factory.gradient = deriv.evaluate_log_gradient
+        factory.rng = np.random.default_rng(self.SEED)
         sampler = factory.create()
         sampler.run(self.N_STEPS, Vector(np.zeros(self.DIM)))
 
@@ -379,8 +378,6 @@ class TestPMALATuner:
     SEED = 0
 
     def setup_method(self):
-        np.random.seed(self.SEED)
-
         refCov = IIDCovarianceMatrix(self.DIM, 4.0)
         prior = Gaussian(refCov, Vector(np.zeros(self.DIM)))
         likCov = IIDCovarianceMatrix(self.DIM, 0.5)
@@ -391,6 +388,7 @@ class TestPMALATuner:
         factory = PMALAFactory()
         factory.target = self.target
         factory.gradient = self.target.derivative.evaluate_log_gradient
+        factory.rng = np.random.default_rng(self.SEED)
         init = Vector(np.zeros(self.DIM))
         tuner = PMALATuner(factory, init)
         sampler = tuner.tune()
@@ -400,6 +398,7 @@ class TestPMALATuner:
         factory = PMALAFactory()
         factory.target = self.target
         factory.gradient = self.target.derivative.evaluate_log_gradient
+        factory.rng = np.random.default_rng(self.SEED)
         init = Vector(np.zeros(self.DIM))
         tuner = PMALATuner(factory, init)
         sampler = tuner.tune()

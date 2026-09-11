@@ -338,8 +338,6 @@ class TestPCNInvariantMeasure:
         return muPost, postVar * np.eye(cls.DIM)
 
     def setup_method(self):
-        np.random.seed(self.SEED)
-
         refCov = IIDCovarianceMatrix(self.DIM, self.PRIOR_VAR)
         prior = Gaussian(refCov, Vector(np.zeros(self.DIM)))
 
@@ -351,6 +349,7 @@ class TestPCNInvariantMeasure:
         factory = PCNFactory()
         factory.target = target
         factory.beta = self.BETA
+        factory.rng = np.random.default_rng(self.SEED)
         sampler = factory.create()
         sampler.run(self.N_STEPS, Vector(np.zeros(self.DIM)))
 
@@ -377,8 +376,6 @@ class TestPCNTuner:
     SEED = 0
 
     def setup_method(self):
-        np.random.seed(self.SEED)
-
         refCov = IIDCovarianceMatrix(self.DIM, 4.0)
         prior = Gaussian(refCov, Vector(np.zeros(self.DIM)))
         likCov = IIDCovarianceMatrix(self.DIM, 0.5)
@@ -388,6 +385,7 @@ class TestPCNTuner:
     def test_tuner_returns_preconditioned_crank_nicolson(self):
         factory = PCNFactory()
         factory.target = self.target
+        factory.rng = np.random.default_rng(self.SEED)
         init = Vector(np.zeros(self.DIM))
         tuner = PCNTuner(factory, init)
         sampler = tuner.tune()
@@ -396,6 +394,7 @@ class TestPCNTuner:
     def test_tuned_acceptance_rate_in_range(self):
         factory = PCNFactory()
         factory.target = self.target
+        factory.rng = np.random.default_rng(self.SEED)
         init = Vector(np.zeros(self.DIM))
         tuner = PCNTuner(factory, init)
         sampler = tuner.tune()
