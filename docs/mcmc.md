@@ -31,6 +31,10 @@ and reverse moves. It is not a licence to omit the correction for arbitrary
 state-dependent parameters. `for_target(target, previous)` reconstructs
 settings taken from the old target; explicitly supplied settings stay fixed.
 
+`with_target` and `with_proposal` create fresh outer runner history and
+diagnostics. They can share unchanged nested proposal components. Construct
+separate nested samplers when their stateful diagnostics must be independent.
+
 Block proposals propagate the random state from one block to the next. Their
 corrections are converted to Lebesgue before summation, since the blocks may
 use different reference measures. Partition rules preserve backend arrays and

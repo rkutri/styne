@@ -5,10 +5,12 @@ import pytest
 
 from styne.backend import get_backend
 from styne.mcmc import BlockProposal, MetropolisHastings, MetropolisedRandomWalk
-from styne.mcmc.diagnostics import DummyDiagnostics
+from styne.mcmc.diagnostics import DummyDiagnostics, PersistentAcceptanceRateDiagnostics
+from styne.mcmc.method.mlda import MLDAProposal
 from styne.mcmc.method.mrw import MRWProposal
 from styne.mcmc.method.pcn import PCNProposal
 from styne.mcmc.proposal import ProposalMethod
+from styne.mcmc.surrogate import SurrogateTransitionMeasure
 from styne.parameter import Vector
 from styne.statistics import Gaussian, IIDCovarianceMatrix
 from styne.statistics.radonnikodym import RadonNikodym
@@ -114,3 +116,29 @@ def test_partition_roundtrip_preserves_batches_and_coordinate_order(backendName)
     result = rule.merge([rule.extract(i, coordinate) for i in range(2)])
     assert type(result) is type(coordinate)
     np.testing.assert_array_equal(np.asarray(result), np.asarray(coordinate))
+
+
+def test_new_outer_runner_does_not_reset_shared_inner_diagnostics():
+    target = gaussian(1.0, [0.0]).density
+    inner = MetropolisedRandomWalk(target, IIDCovarianceMatrix(1, 0.5),
+                                  PersistentAcceptanceRateDiagnostics())
+    start = Vector(np.zeros(1))
+    inner.run(3, start)
+    summary = inner.diagnostics.summary()
+    proposal = MLDAProposal(SurrogateTransitionMeasure(inner, 2))
+    outer = MetropolisHastings(target, proposal, DummyDiagnostics())
+
+    for copied in (outer.with_target(target), outer.with_proposal(proposal)):
+        assert copied.chain.length == 0
+        assert inner.diagnostics.summary() == summary
+        assert inner.diagnostics._total == 3
+
+
+def test_new_runner_resets_its_own_persistent_diagnostics():
+    target = gaussian(1.0, [0.0]).density
+    original = MetropolisedRandomWalk(target, IIDCovarianceMatrix(1, 0.5),
+                                     PersistentAcceptanceRateDiagnostics())
+    original.run(3, Vector(np.zeros(1)))
+    copied = original.with_proposal(original.proposal)
+    assert copied.diagnostics._total == 0
+    assert original.diagnostics._total == 3
