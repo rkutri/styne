@@ -8,7 +8,6 @@ from styne.mcmc.proposal import ProposalMethod
 from styne.mcmc.metropolishastings import MetropolisHastings
 from styne.mcmc.acceptance import AcceptanceProbability
 from styne.mcmc.factory import MHFactory
-from styne.mcmc.transition import TransitionData
 from styne.parameter.parameter import Parameter
 
 
@@ -19,6 +18,10 @@ class MALAProposal(ProposalMethod):
     Given step size h (standard deviation), the proposal from state x is
 
         z = x + (h^2 / 2) * grad log pi(x) + h * xi,   xi ~ N(0, I)
+
+    Its correction compares the Gaussian proposal densities in both
+    directions, relative to the Lebesgue measure, with the gradient at z
+    evaluated when proposing.
 
     Parameters
     ----------
@@ -51,6 +54,16 @@ class MALAProposal(ProposalMethod):
     def stepSize(self) -> float:
         return self._h
 
+    def for_target(self, target, previous):
+        gradient, logDensity = self._logGradient, self._logDensity
+        if getattr(gradient, "__self__", None) is previous:
+            gradient = target.evaluate_log_gradient
+        if getattr(logDensity, "__self__", None) is previous:
+            logDensity = target.evaluate_log
+        if gradient is self._logGradient and logDensity is self._logDensity:
+            return self
+        return type(self)(target.domainDimension, self._h, gradient, logDensity)
+
     def _gradient(self, state):
         if self._logGradient is not None:
             return self._logGradient(state)
@@ -79,10 +92,14 @@ class MALAProposal(ProposalMethod):
         proposal = state.with_coordinate(
             driftVector + self._h * noise
         )
-        return (
-            TransitionData(state, proposal, auxiliary={'drift': driftVector}),
-            nextRng,
+        # The forward Gaussian density only needs the drawn noise.
+        namespace = backend.namespace
+        reverse = state.coordinate - self._drift(proposal)
+        logCorrection = (
+            0.5 * namespace.sum(noise * noise, axis=-1)
+            - 0.5 / self._h2 * namespace.sum(reverse * reverse, axis=-1)
         )
+        return self.record(state, proposal, logCorrection), nextRng
 
 
 class MetropolisAdjustedLangevinAlgorithm(MetropolisHastings):
@@ -116,48 +133,6 @@ class MetropolisAdjustedLangevinAlgorithm(MetropolisHastings):
         )
         super().__init__(targetDensity, proposalMethod, diagnostics,
                          acceptance=acceptance, rng=rng)
-
-    def _proposal_for_target(self, targetDensity):
-        gradient = self._proposalMethod._logGradient
-        owner = getattr(gradient, "__self__", None)
-        if owner is self.target:
-            gradient = targetDensity.evaluate_log_gradient
-        return MALAProposal(
-            targetDensity.domainDimension,
-            self._proposalMethod.stepSize,
-            gradient,
-            targetDensity.evaluate_log,
-        )
-
-    def _log_mh_ratio(self, transition: TransitionData):
-        """
-        Log MH ratio for the Langevin proposal.
-
-        Accounts for the asymmetry of the proposal kernel via the
-        quadratic correction term.
-        """
-        h2 = self._proposalMethod.stepSize ** 2
-
-        x = transition.state.coordinate
-        z = transition.proposal.coordinate
-
-        logTarget = (
-            transition.proposed.logDensity - transition.current.logDensity
-        )
-
-        meanZgivenX = transition.auxiliary['drift']
-        meanXgivenZ = self._proposalMethod._drift(transition.proposal)
-
-        diffX = x - meanXgivenZ
-        diffZ = z - meanZgivenX
-
-        backend = infer_backend(x)
-        quadDiff = -0.5 / h2 * (
-            backend.namespace.sum(diffX * diffX, axis=-1)
-            - backend.namespace.sum(diffZ * diffZ, axis=-1)
-        )
-
-        return logTarget + quadDiff
 
 
 class MALAFactory(MHFactory):

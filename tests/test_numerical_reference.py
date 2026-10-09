@@ -32,7 +32,7 @@ from styne.utility.finiteelement import (
     p1_mass_lumped_1d,
     p1_stiffness_1d,
 )
-from tests.reference_oracles import dna_synthesis_matrix
+from tests.reference_oracles import FixedNormalRng, dna_synthesis_matrix
 
 
 def test_covariance_reference_values():
@@ -213,17 +213,19 @@ def test_deterministic_proposal_reference_calculations():
         density, 0.3, AcceptanceRateDiagnostics(),
         gradient=density.evaluate_log_gradient,
     )
+    malaNoise = (np.array([0.95, -0.2]) - expectedDrift) / 0.3
+    proposalRecord, _ = mala.proposal.propose(state, FixedNormalRng(malaNoise))
     transition = TransitionData(
-        state,
-        Vector(np.array([0.95, -0.2])),
-        auxiliary={"drift": expectedDrift},
+        current=mala.initial_state(state),
+        proposed=mala.initial_state(proposalRecord.proposed.parameter),
+        auxiliary=proposalRecord.auxiliary,
     )
-    transition = TransitionData(
-        current=mala.evaluate_state(transition.state),
-        proposed=mala.evaluate_state(transition.proposal),
-        auxiliary=transition.auxiliary,
+    np.testing.assert_allclose(
+        transition.proposed.parameter.coordinate, [0.95, -0.2], atol=1e-12
     )
-    assert np.isclose(mala._log_mh_ratio(transition), 0.004726111092448165)
+    assert np.isclose(
+        mala._log_mh_ratio(transition, mala.proposal.reference), 0.004726111092448165
+    )
 
     reference = Gaussian(
         DiagonalCovarianceMatrix(np.array([1.5, 0.6])),
@@ -236,14 +238,10 @@ def test_deterministic_proposal_reference_calculations():
         fixedReferenceInput.coordinate - reference.mean.coordinate
     ) / np.sqrt(reference.covariance.marginalVariance)
 
-    class FixedNormalRng:
-
-        def standard_normal(self, size):
-            assert size == fixedNoise.shape
-            return fixedNoise
-
     np.testing.assert_allclose(
-        pcn.propose(pcnState, FixedNormalRng())[0].proposal.coordinate,
+        pcn.propose(
+            pcnState, FixedNormalRng(fixedNoise)
+        )[0].proposed.parameter.coordinate,
         [1.109909083394701, -0.30660605559646714],
         rtol=0.0, atol=1e-12,
     )

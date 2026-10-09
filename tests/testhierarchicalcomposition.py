@@ -308,7 +308,7 @@ def test_spatial_pmala_conditions_rn_factor_gradient():
         )
         np.testing.assert_allclose(
             conditionedUpdate._sampler.initial_state(latent).logDensity,
-            fresh.evaluate_log(latent),
+            fresh.derivative.evaluate_log(latent),
         )
         sample, _ = conditionedUpdate.sample(np.random.default_rng(6))
         assert sample.dimension == gp.parameterDimension
@@ -502,3 +502,18 @@ def test_public_spatial_hierarchy_sweeps_both_named_blocks():
     assert not np.array_equal(
         nextState.block(1).coordinate, state.block(1).coordinate
     )
+    fresh = fresh_latent_target(gp, likelihood, nextState.block(1))
+    swept = hierarchy.conditional(0, nextState)._sampler.target
+    np.testing.assert_allclose(
+        swept.evaluate_log(nextState.block(0)),
+        fresh.evaluate_log(nextState.block(0)),
+    )
+    np.testing.assert_allclose(
+        hierarchy.evaluate_log(nextState),
+        root.density.evaluate_log(nextState.block(1))
+        + fresh.evaluate_log(nextState.block(0)),
+    )
+    assert latentSampler.target is latentFactor
+    assert latentFactor.gp is gp
+    assert latentFactor.reference is gp.measure
+    assert latentFactor.derivative.model._gp is gp

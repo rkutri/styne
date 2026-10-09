@@ -2,6 +2,7 @@
 import importlib
 
 _SYMBOL_TO_MODULE = {
+    "RobbinsMonroAdaptation": "styne.utility.adaptation",
     "Grid": "styne.utility.grid",
     "UniformGrid": "styne.utility.grid",
     "Interpolation1D": "styne.utility.interpolation",

@@ -324,3 +324,27 @@ def test_jax_parameter_pytrees_accept_structural_placeholders():
         reconstructed.block(index).coordinate is placeholder
         for index, placeholder in enumerate(placeholders)
     )
+
+
+def test_jax_scan_runs_concrete_loops_eagerly_with_compiled_results():
+    backend = get_backend("jax")
+
+    def accumulate(carry, value):
+        nextCarry = carry + value
+        return nextCarry, (nextCarry, 2.0 * nextCarry)
+
+    inputs = jnp.arange(4.0)
+    eager = backend.scan(accumulate, jnp.asarray(0.0), inputs)
+    compiled = backend.compile(
+        lambda values: backend.scan(accumulate, jnp.asarray(0.0), values)
+    )(inputs)
+    counted = backend.scan(
+        lambda carry, _: (carry + 1.0, carry), jnp.asarray(0.0), None, length=3
+    )
+
+    for actual, expected in zip(
+            jax.tree_util.tree_leaves(eager),
+            jax.tree_util.tree_leaves(compiled)):
+        np.testing.assert_allclose(actual, expected)
+    np.testing.assert_allclose(counted[1], [0.0, 1.0, 2.0])
+    assert counted[0] == pytest.approx(3.0)

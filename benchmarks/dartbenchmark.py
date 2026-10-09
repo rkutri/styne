@@ -37,8 +37,7 @@ from styne.mcmc.method.dartdirect import DirectDART  # noqa: E402
 from styne.mcmc.method.mala import MALAFactory  # noqa: E402
 from styne.mcmc.method.mlda import MLDAFactory  # noqa: E402
 from styne.mcmc.metropolishastings import MetropolisHastings  # noqa: E402
-from styne.mcmc.proposal import ProposalMethod  # noqa: E402
-from styne.mcmc.transition import TransitionData  # noqa: E402
+from styne.mcmc.proposal import ProposalMethod, zero_correction  # noqa: E402
 from styne.parameter import Vector  # noqa: E402
 from styne.statistics import DenseCovarianceMatrix, Gaussian  # noqa: E402
 from styne.statistics.logistic import LogisticPosterior  # noqa: E402
@@ -160,10 +159,18 @@ class SamplingMetrics:
 
 
 class IndependentGaussianProposal(ProposalMethod):
-    """Independent draws from one fixed, tempered Gaussian surrogate."""
+    """Independent draws from one fixed, tempered Gaussian surrogate.
+
+    The draws are reversible for the Gaussian, so the correction is zero
+    relative to it.
+    """
 
     def __init__(self, proposalMeasure):
         self._proposalMeasure = proposalMeasure
+
+    @property
+    def reference(self):
+        return self._proposalMeasure
 
     def propose(self, state, rng):
         backend = infer_backend(state.coordinate)
@@ -175,46 +182,19 @@ class IndependentGaussianProposal(ProposalMethod):
             state.with_coordinate(mean)
         )
         proposal, nextRng = proposalMeasure.sample(rng)
-        return TransitionData(state, proposal), nextRng
+        return self.record(state, proposal, zero_correction(state)), nextRng
 
 
-class UnlocalisedGaussianSurrogate(MetropolisHastings):
+def unlocalised_gaussian_surrogate(target, tempering, surrogate):
     """Exact independence-MH limit of Gaussian DART at zero localisation."""
-
-    name = 'unlocalised surrogate'
-
-    def __init__(self, target, tempering, surrogate):
-        covariance = surrogate.covariance.with_scaling(
-            surrogate.covariance.scaling / tempering
-        )
-        proposalMeasure = Gaussian(covariance, surrogate.mean)
-        super().__init__(
-            target,
-            IndependentGaussianProposal(proposalMeasure),
-            DummyDiagnostics(),
-        )
-        self._tempering = tempering
-        self._surrogate = surrogate
-
-    def _log_mh_ratio(self, transition):
-        stateDifference = (
-            transition.state.coordinate - self._surrogate.mean.coordinate
-        )
-        proposalDifference = (
-            transition.proposal.coordinate - self._surrogate.mean.coordinate
-        )
-        surrogateDifference = 0.5 * self._tempering * (
-            self._surrogate.covariance.dual_quadratic_form(
-                proposalDifference
-            )
-            - self._surrogate.covariance.dual_quadratic_form(
-                stateDifference
-            )
-        )
-        targetDifference = (
-            transition.proposed.logDensity - transition.current.logDensity
-        )
-        return targetDifference + surrogateDifference
+    covariance = surrogate.covariance.with_scaling(
+        surrogate.covariance.scaling / tempering
+    )
+    return MetropolisHastings(
+        target,
+        IndependentGaussianProposal(Gaussian(covariance, surrogate.mean)),
+        DummyDiagnostics(),
+    )
 
 
 @lru_cache(maxsize=None)
@@ -851,7 +831,7 @@ def run_ablation_cell(
             gamma,
         )
     elif method == UNLOCALISED:
-        sampler = UnlocalisedGaussianSurrogate(
+        sampler = unlocalised_gaussian_surrogate(
             target, TEMPERING, surrogate
         )
     else:

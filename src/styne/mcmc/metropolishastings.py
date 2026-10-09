@@ -1,5 +1,4 @@
 import copy
-from abc import abstractmethod
 from typing import Optional
 
 from numpy.random import Generator
@@ -7,9 +6,9 @@ from numpy.random import Generator
 from styne.backend import infer_backend
 from styne.mcmc.sampler import MCMCSampler
 from styne.parameter.parameter import Parameter
-from styne.statistics.interface import DensityInterface
+from styne.statistics.interface import DensityInterface, RadonNikodymInterface
 from styne.mcmc.transition import EvaluatedState, TransitionData
-from styne.mcmc.proposal import ProposalMethod
+from styne.mcmc.proposal import ProposalMethod, log_reference_ratio
 from styne.mcmc.chain import Chain
 from styne.mcmc.annotator import Annotator
 from styne.mcmc.diagnostics import ChainDiagnostics
@@ -20,8 +19,12 @@ class MetropolisHastings(MCMCSampler):
     """
     Metropolis-Hastings sampler base class.
 
-    Subclasses implement '_log_mh_ratio' to define the variant of the algorithm.
-    This class handles accept/reject, diagnostics, and chain bookkeeping.
+    The proposal defines the variant of the algorithm. It returns its log
+    acceptance correction relative to its reference measure, and the log MH
+    ratio adds that correction to the target ratio relative to the same
+    measure. States store a 'RadonNikodymInterface' target relative to its
+    reference and any other target in full. This class handles accept/reject,
+    diagnostics, and chain bookkeeping.
 
     Parameters
     ----------
@@ -76,9 +79,33 @@ class MetropolisHastings(MCMCSampler):
         self._proposalMethod = proposalMethod
         self.clear()
 
+    def with_target(self, targetDensity: DensityInterface):
+        """Retarget a fresh outer runner; unchanged proposal components are shared."""
+        result = self.with_proposal(self._proposal_for_target(targetDensity))
+        result._tgtDensity = targetDensity
+        return result
+
+    def with_proposal(self, proposalMethod: ProposalMethod, rng=None):
+        """Replace the proposal in a fresh runner, optionally setting its RNG."""
+        result = copy.copy(self)
+        result._chain = copy.copy(self._chain)
+        result._diagnostics = copy.deepcopy(self._diagnostics)
+        result._rng = copy.deepcopy(self._rng) if rng is None else rng
+        result._proposalMethod = proposalMethod
+        # Only this runner is copied. Resetting nested diagnostics would alter
+        # samplers owned by the supplied proposal.
+        MCMCSampler.clear(result)
+        result._diagnostics.reset()
+        result._chain.clear()
+        return result
+
     def _proposal_for_target(self, targetDensity):
-        """Return an isolated proposal compatible with ``targetDensity``."""
-        return copy.copy(self._proposalMethod)
+        """Return an isolated proposal for ``targetDensity``."""
+        # Copying keeps a proposal with adjustable settings, such as a random
+        # walk covariance, apart from this sampler's.
+        return copy.copy(
+            self._proposalMethod.for_target(targetDensity, self._tgtDensity)
+        )
 
     @property
     def proposal(self):
@@ -128,10 +155,19 @@ class MetropolisHastings(MCMCSampler):
         return result
 
 
-    @abstractmethod
-    def _log_mh_ratio(self, transition: TransitionData):
-        """Compute log MH ratio from a proposal transition."""
-        ...
+    @property
+    def targetReference(self):
+        """Measure the stored target densities refer to, None for Lebesgue."""
+        if isinstance(self._tgtDensity, RadonNikodymInterface):
+            return self._tgtDensity.reference
+        return None
+
+    def _log_mh_ratio(self, transition: TransitionData, reference):
+        """Log MH ratio, the target ratio plus the proposal's correction."""
+        return (
+            self._log_target_ratio(transition, reference)
+            + transition.auxiliary["logCorrection"]
+        )
 
     def initial_state(self, parameter: Parameter) -> EvaluatedState:
         """Evaluate the target density once for a parameter state."""
@@ -139,9 +175,31 @@ class MetropolisHastings(MCMCSampler):
 
     evaluate_state = initial_state
 
+    def zero_sums(self, state):
+        """Accepted-transition counts, one per chain."""
+        coordinate = state.parameter.coordinate
+        backend = infer_backend(coordinate)
+        metadata = backend.metadata(coordinate)
+        return {"accepted": backend.zeros(
+            coordinate.shape[:-1], dtype=metadata.dtype, device=metadata.device
+        )}
+
+    def add_to_sums(self, sums, transition):
+        accepted = sums["accepted"]
+        backend = infer_backend(accepted)
+        metadata = backend.metadata(accepted)
+        one, zero = (
+            backend.asarray(value, dtype=metadata.dtype, device=metadata.device)
+            for value in (1.0, 0.0)
+        )
+        return {"accepted": accepted + backend.namespace.where(
+            transition.outcome, one, zero
+        )}
+
     def step(self, currentState: EvaluatedState, rng):
         """Construct and accept or reject one transition without mutation."""
-        proposedTransition, proposalRng = self._proposalMethod.propose(
+        proposal = self._proposalMethod.condition(currentState.parameter)
+        proposedTransition, proposalRng = proposal.propose(
             currentState.parameter, rng
         )
         proposedState = self.initial_state(
@@ -152,7 +210,7 @@ class MetropolisHastings(MCMCSampler):
                 current=currentState,
                 proposed=proposedState,
                 auxiliary=proposedTransition.auxiliary,
-            )
+            ), proposal.reference,
         )
         logAcceptanceProbability = self._acceptance.log_probability(logMHRatio)
         backend = infer_backend(currentState.parameter.coordinate)
@@ -192,7 +250,25 @@ class MetropolisHastings(MCMCSampler):
         return nextState, transition, nextRng
 
     def _evaluate_log_density(self, parameter: Parameter):
+        # A Radon-Nikodym target is stored relative to its reference, so a
+        # proposal preserving that reference needs no reference evaluations.
+        if isinstance(self._tgtDensity, RadonNikodymInterface):
+            return self._tgtDensity.derivative.evaluate_log(parameter)
         return self._tgtDensity.evaluate_log(parameter)
+
+    def _log_target_ratio(self, transition: TransitionData, proposalReference):
+        """Log target ratio relative to the reference of the proposal."""
+        logRatio = transition.proposed.logDensity - transition.current.logDensity
+        targetReference = self.targetReference
+        if targetReference is proposalReference:
+            return logRatio
+        current = transition.current.parameter
+        proposed = transition.proposed.parameter
+        return (
+            logRatio
+            + log_reference_ratio(targetReference, current, proposed)
+            - log_reference_ratio(proposalReference, current, proposed)
+        )
 
     def _record_transition(self, transitionData, nextState):
         self._diagnostics.process(transitionData)

@@ -66,35 +66,52 @@ class SurrogateTransitionMeasure(AbsolutelyContinuousProbabilityMeasure):
         return self._initialMeasure
 
     def transition(self, initialState: Parameter, randomState):
-        proposal, _, nextState = self.transition_trajectory(
+        _, end, _, nextState = self.transition_trajectory(
             initialState, randomState
         )
-        return proposal, nextState
+        return end.parameter, nextState
 
     def transition_trajectory(self, initialState: Parameter, randomState):
         """Run the surrogate transition from an explicit initial state.
 
-        This is the numerical path used by delayed-acceptance proposals. It
-        does not populate the wrapped sampler's chain or alter its runner
-        state, so one surrogate measure can safely be reused by independent
-        outer transitions.
+        Returns the first and last evaluated states of the surrogate chain,
+        its stacked coordinates and the propagated random state. This is the
+        numerical path used by delayed-acceptance proposals. It does not
+        populate the wrapped sampler's chain or alter its runner state, so
+        one surrogate measure can safely be reused by independent outer
+        transitions.
         """
         if not self._mcmc._uses_pure_step():
             raise RuntimeError(
                 "Surrogate transitions require a sampler with step()."
             )
 
-        state = self._mcmc.initial_state(initialState)
-        trajectory = [self._mcmc._parameter_from_state(state).coordinate]
-        for _ in range(self._nChain):
+        def advance(carry, _):
+            state, randomState = carry
             state, _, randomState = self._mcmc.step(state, randomState)
-            trajectory.append(self._mcmc._parameter_from_state(state).coordinate)
+            return (state, randomState), state.parameter.coordinate
+
+        start = self._mcmc.initial_state(initialState)
         backend = infer_backend(initialState.coordinate)
-        return (
-            self._mcmc._parameter_from_state(state),
-            backend.namespace.stack(trajectory),
-            randomState,
-        )
+        namespace = backend.namespace
+        # A transformed loop keeps a compiled root chain from unrolling all of
+        # its steps into the graph of the outer transition.
+        if self._nChain > 0 and backend.capabilities.transformedLoops:
+            (end, randomState), steps = backend.scan(
+                advance, (start, randomState), None, length=self._nChain
+            )
+            trajectory = namespace.concatenate(
+                (start.parameter.coordinate[None], steps), axis=0
+            )
+        else:
+            end, coordinates = start, [start.parameter.coordinate]
+            for _ in range(self._nChain):
+                (end, randomState), coordinate = advance(
+                    (end, randomState), None
+                )
+                coordinates.append(coordinate)
+            trajectory = namespace.stack(coordinates)
+        return start, end, trajectory, randomState
 
     def sample(self, randomState) -> tuple[Parameter, object]:
         """

@@ -42,14 +42,15 @@ def test_unlocalised_ratio_matches_independence_mh():
     target, surrogate, precision = common.gaussian_components(
         backend, problem, 'combined_misspecification', 42_004
     )
-    sampler = common.UnlocalisedGaussianSurrogate(
+    sampler = common.unlocalised_gaussian_surrogate(
         target, common.TEMPERING, surrogate
     )
     state = Vector(np.array([0.2, -0.1, 0.4, 0.3]))
     proposal = Vector(np.array([-0.3, 0.5, 0.1, -0.2]))
     transition = TransitionData(
-        current=sampler.evaluate_state(state),
-        proposed=sampler.evaluate_state(proposal),
+        current=sampler.initial_state(state),
+        proposed=sampler.initial_state(proposal),
+        auxiliary={"logCorrection": np.asarray(0.0)},
     )
     mean = np.asarray(surrogate.mean.coordinate)
     stateDifference = state.coordinate - mean
@@ -63,7 +64,9 @@ def test_unlocalised_ratio_matches_independence_mh():
         )
     )
 
-    assert sampler._log_mh_ratio(transition) == pytest.approx(expected)
+    assert sampler._log_mh_ratio(
+        transition, sampler.proposal.reference
+    ) == pytest.approx(expected)
 
 
 def test_configuration_ratios_use_ratios_of_means():
