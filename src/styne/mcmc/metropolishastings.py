@@ -80,12 +80,9 @@ class MetropolisHastings(MCMCSampler):
         self.clear()
 
     def with_target(self, targetDensity: DensityInterface):
-        """Return an isolated copy of this sampler targeting ``targetDensity``."""
-        result = copy.copy(self)
-        result._chain = copy.copy(self._chain)
-        result._diagnostics = copy.deepcopy(self._diagnostics)
-        result._rng = copy.deepcopy(self._rng)
-        result.target = targetDensity
+        """Retarget a fresh outer runner; unchanged proposal components are shared."""
+        result = self.with_proposal(self._proposal_for_target(targetDensity))
+        result._tgtDensity = targetDensity
         return result
 
     def with_proposal(self, proposalMethod: ProposalMethod, rng=None):
@@ -95,7 +92,11 @@ class MetropolisHastings(MCMCSampler):
         result._diagnostics = copy.deepcopy(self._diagnostics)
         result._rng = copy.deepcopy(self._rng) if rng is None else rng
         result._proposalMethod = proposalMethod
-        result.clear()
+        # Only this runner is copied. Resetting nested diagnostics would alter
+        # samplers owned by the supplied proposal.
+        MCMCSampler.clear(result)
+        result._diagnostics.reset()
+        result._chain.clear()
         return result
 
     def _proposal_for_target(self, targetDensity):
