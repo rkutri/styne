@@ -1,6 +1,6 @@
 from abc import ABC, abstractmethod
 from contextlib import nullcontext
-from typing import Optional
+from typing import Any, NamedTuple, Optional
 from numpy.random import Generator, default_rng
 from tqdm.contrib.logging import logging_redirect_tqdm
 
@@ -10,6 +10,22 @@ from styne.backend import infer_backend
 from styne.parameter.parameter import Parameter
 from styne.mcmc.chain import Chain
 from styne.mcmc.diagnostics import DummyDiagnostics
+from styne.mcmc.transition import parameter_of
+
+
+class Trajectory(NamedTuple):
+    """Result of a compiled trajectory.
+
+    'coordinates' holds the coordinates after every 'thinning'-th transition,
+    'readouts' the caller's read-out after every transition or None, and
+    'sums' the running sums of the transition records.
+    """
+
+    final: Parameter
+    coordinates: Any
+    readouts: Any
+    sums: Any
+    rng: Any
 
 
 class MCMCSampler(ABC):
@@ -106,39 +122,88 @@ class MCMCSampler(ABC):
             parameter = self._parameter_from_state(nextState)
             self.chain.append(parameter.coordinate)
 
-    def transformed_trajectory(self, nSteps, initialState, rng=None):
-        """Run pure transitions as one backend-native computation."""
-        self._validate_initial(initialState)
-        if nSteps < 1:
-            raise ValueError("Transformed trajectories require positive nSteps.")
+    def zero_sums(self, state):
+        """Running sums of no transition, for a trajectory from ``state``."""
+        return {}
+
+    def add_to_sums(self, sums, transition):
+        """``sums`` with the record of one more transition added."""
+        return sums
+
+    def transformed_trajectory(self, nSteps, initialState, rng=None,
+                               thinning=1, readout=None) -> Trajectory:
+        """Run pure transitions as one backend-native computation.
+
+        The loop carries the running sums of the transition records, so that
+        no record outlives its transition. The coordinates are kept after
+        every 'thinning'-th transition, which must divide 'nSteps', and
+        'readout' maps the parameter after every transition to an array.
+        Each call compiles anew. For a run in chunks, see
+        'compiled_trajectory'.
+        """
+        return self.compiled_trajectory(nSteps, thinning, readout)(
+            initialState, rng
+        )
+
+    def compiled_trajectory(self, nSteps, thinning=1, readout=None):
+        """Return 'transformed_trajectory' as a function compiled once.
+
+        The function maps an initial parameter and random state to a
+        Trajectory. Compilation is reused for chunks with compatible input
+        shapes and dtypes. Keep the sampler configuration fixed while using
+        this function; changing its target or proposal requires a new one.
+        """
         if not self._uses_pure_step():
-            raise RuntimeError(
-                "Transformed trajectories require a sampler with step()."
+            raise RuntimeError("Transformed trajectories require a sampler with step().")
+        if isinstance(nSteps, bool) or not isinstance(nSteps, int) or nSteps < 1:
+            raise ValueError("Transformed trajectories require positive integer nSteps.")
+        if isinstance(thinning, bool) or not isinstance(thinning, int) \
+                or thinning < 1 or nSteps % thinning:
+            raise ValueError(
+                f"thinning must divide nSteps. Got {thinning} and {nSteps}."
             )
+        compiled = {}
 
-        backend = infer_backend(initialState.coordinate)
-        if not backend.capabilities.transformedLoops:
-            raise RuntimeError(
-                f"Backend {backend.name!r} does not support transformed loops."
+        def run(initialState, rng=None) -> Trajectory:
+            self._validate_initial(initialState)
+            backend = infer_backend(initialState.coordinate)
+            if not backend.capabilities.transformedLoops:
+                raise RuntimeError(
+                    f"Backend {backend.name!r} does not support transformed loops."
+                )
+            if backend.name not in compiled:
+                compiled[backend.name] = backend.compile(
+                    self._trajectory_loop(backend, nSteps, thinning, readout)
+                )
+            randomState = self._rng if rng is None else rng
+            (finalState, nextRng, sums), (coordinates, readouts) = \
+                compiled[backend.name](initialState, randomState)
+            if readouts is not None:
+                readouts = readouts.reshape((nSteps,) + tuple(readouts.shape[2:]))
+            return Trajectory(
+                parameter_of(finalState), coordinates, readouts, sums, nextRng
             )
-        randomState = self._rng if rng is None else rng
+        return run
 
+    def _trajectory_loop(self, backend, nSteps, thinning, readout):
         def advance(carry, _):
-            state, currentRng = carry
-            nextState, _, nextRng = self.step(state, currentRng)
-            return (nextState, nextRng), self._parameter_from_state(
-                nextState
-            ).coordinate
+            state, currentRng, sums = carry
+            nextState, transition, nextRng = self.step(state, currentRng)
+            output = None if readout is None else readout(parameter_of(nextState))
+            return (nextState, nextRng, self.add_to_sums(sums, transition)), output
+
+        # An inner loop over the thinning interval keeps one coordinate each.
+        def advance_block(carry, _):
+            carry, outputs = backend.scan(advance, carry, None, length=thinning)
+            return carry, (parameter_of(carry[0]).coordinate, outputs)
 
         def execute(parameter, currentRng):
             state = self.initial_state(parameter)
             return backend.scan(
-                advance, (state, currentRng), None, length=nSteps
+                advance_block, (state, currentRng, self.zero_sums(state)), None,
+                length=nSteps // thinning,
             )
-
-        compiled = backend.compile(execute)
-        (finalState, nextRng), coordinates = compiled(initialState, randomState)
-        return self._parameter_from_state(finalState), coordinates, nextRng
+        return execute
 
     def _drive(self, nSteps, progress, description):
         samplerName = getattr(self, "name", self.__class__.__name__)

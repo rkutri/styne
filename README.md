@@ -97,6 +97,11 @@ The NumPy/SciPy PDE example is in
 State is immutable and backend-native. Sampling methods accept and return
 explicit random states, and parameter updates use `with_*` methods.
 
+The [MCMC extension guide](docs/mcmc.md) describes proposal corrections,
+warm-up adaptation, compiled trajectories and migration within 0.3.0.
+Run `python examples/adaptation.py --backend numpy --smoke` for a small
+warm-up followed by sampling with a fixed proposal scale.
+
 `HierarchicalBayes` keeps the factors used to evaluate the joint density
 separate from the invariant updates used by `BlockGibbs`. Add each non-root
 factor with `add_conditional`, then add one full conditional or invariant

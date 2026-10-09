@@ -106,7 +106,7 @@ def test_samples(kappa, h):
     )
 
     for loc in locations:
-        _, subchain, rng = surrogateMeasure.transition_trajectory(loc, rng)
+        _, _, subchain, rng = surrogateMeasure.transition_trajectory(loc, rng)
         subchain = np.asarray(subchain)
 
         burnin = 2000

@@ -250,10 +250,14 @@ class TestPCNLogMHRatio:
         )
 
         transition = TransitionData(
-            current=sampler.evaluate_state(state),
-            proposed=sampler.evaluate_state(proposal),
+            current=sampler.initial_state(state),
+            proposed=sampler.initial_state(proposal),
+            auxiliary={"logCorrection": np.asarray(0.0)},
         )
-        assert np.isclose(sampler._log_mh_ratio(transition), expected)
+        assert sampler.proposal.reference is target.reference
+        assert np.isclose(
+            sampler._log_mh_ratio(transition, sampler.proposal.reference), expected
+        )
 
     def test_retarget_rebuilds_proposal_from_new_reference(self):
         oldReference = Gaussian(
@@ -312,7 +316,7 @@ class TestPCNLogMHRatio:
         )
 
         np.testing.assert_allclose(
-            sampler._log_mh_ratio(transition), expectedRatio
+            sampler._log_mh_ratio(transition, sampler.proposal.reference), expectedRatio
         )
         assert not bool(transition.outcome)
         np.testing.assert_array_equal(nextState.parameter.coordinate, [10.0])

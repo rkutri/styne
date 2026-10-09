@@ -1,20 +1,27 @@
 from typing import Optional
+
+import numpy as np
 from numpy.random import Generator
 
 from styne.backend import infer_backend
 from styne.mcmc.metropolishastings import MetropolisHastings
 from styne.mcmc.acceptance import AcceptanceProbability
-from styne.mcmc.transition import TransitionData
 from styne.statistics.interface import RadonNikodymInterface
 from styne.statistics.measure import ProbabilityMeasure
-from styne.mcmc.proposal import ProposalMethod
+from styne.mcmc.proposal import ProposalMethod, zero_correction
 from styne.mcmc.factory import MHFactory
 from styne.parameter.parameter import Parameter
 from styne.statistics.gaussian import Gaussian
 
 
 def validate_beta(beta) -> None:
-    if not (0.0 < beta <= 1.0):
+    # A traced step size, as an adaptation compiles it, has no value to check.
+    inRange = (beta > 0.0) & (beta <= 1.0)
+    try:
+        valid = bool(np.asarray(inRange))
+    except TypeError:
+        return
+    if not valid:
         raise ValueError(
             f"pCN step size must satisfy 0 < beta <= 1. Got {beta}.")
 
@@ -69,8 +76,18 @@ class PCNProposal(ProposalMethod):
         return self._refMeasure
 
     @property
+    def reference(self) -> Gaussian:
+        return self._refMeasure
+
+    @property
     def beta(self) -> float:
         return self._beta
+
+    def for_target(self, target, previous):
+        if self._refMeasure is not getattr(previous, "reference", None):
+            return self
+        validate_pcn_target(target)
+        return type(self)(target.reference, self._beta)
 
     def propose(self, state: Parameter, rng):
         coordinate = state.coordinate
@@ -90,7 +107,7 @@ class PCNProposal(ProposalMethod):
             mean + persistence * (coordinate - mean) + self._beta * priorNoise
         )
 
-        return TransitionData(state, proposal), nextRng
+        return self.record(state, proposal, zero_correction(state)), nextRng
 
 
 class PreconditionedCrankNicolson(MetropolisHastings):
@@ -122,15 +139,11 @@ class PreconditionedCrankNicolson(MetropolisHastings):
         super().__init__(target, proposalMethod, diagnostics,
                          acceptance=acceptance, rng=rng)
 
-    def _evaluate_log_density(self, parameter: Parameter):
-        return self._tgtDensity.derivative.evaluate_log(parameter)
-
     def _proposal_for_target(self, targetDensity):
+        # The legacy hook condition_on can change the reference of the same
+        # target in place, so the reference is always taken anew.
         validate_pcn_target(targetDensity)
         return PCNProposal(targetDensity.reference, self.proposal.beta)
-
-    def _log_mh_ratio(self, transition: TransitionData):
-        return transition.proposed.logDensity - transition.current.logDensity
 
 
 class PCNFactory(MHFactory):

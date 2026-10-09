@@ -6,6 +6,7 @@ import importlib
 
 _SYMBOL_TO_MODULE = {
     "MetropolisHastings": "styne.mcmc.metropolishastings",
+    "Trajectory": "styne.mcmc.sampler",
     "MCMCSampler": "styne.mcmc.sampler",
     "ProposalMethod": "styne.mcmc.proposal",
     "MHFactory": "styne.mcmc.factory",
@@ -27,8 +28,6 @@ _SYMBOL_TO_MODULE = {
     "PCNFactory": "styne.mcmc.method.pcn",
     "MetropolisedRandomWalk": "styne.mcmc.method.mrw",
     "MRWFactory": "styne.mcmc.method.mrw",
-    "RobbinsMonroMRW": "styne.mcmc.method.mrw",
-    "RobbinsMonroMRWFactory": "styne.mcmc.method.mrw",
     "MultilevelDelayedAcceptanceMCMC": "styne.mcmc.method.mlda",
     "MLDAFactory": "styne.mcmc.method.mlda",
     "BlockGibbs": "styne.mcmc.method.gibbs",

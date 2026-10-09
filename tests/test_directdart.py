@@ -7,6 +7,7 @@ from styne.mcmc.method.dartdirect import DirectDART, DirectDARTProposal
 from styne.mcmc.transition import TransitionData
 from styne.parameter import Vector
 from styne.statistics import DenseCovarianceMatrix, Gaussian
+from tests.reference_oracles import FixedNormalRng
 
 
 def test_directdart_proposal_mean():
@@ -28,15 +29,14 @@ def test_directdart_proposal_mean():
     )
     state = Vector(np.array([0.5, 0.5]))
 
-    transition, _ = proposal.propose(state, np.random.default_rng(0))
+    transition, _ = proposal.propose(state, FixedNormalRng(np.zeros(2)))
 
     expectedB = (
         tempering * precision @ surrogateMean.coordinate
         + gamma * state.coordinate
     )
     expectedMean = proposalCovariance @ expectedB
-    assert np.allclose(transition.auxiliary['bx'], expectedB)
-    assert np.allclose(transition.auxiliary['mux'], expectedMean)
+    assert np.allclose(transition.proposed.parameter.coordinate, expectedMean)
 
 
 def test_directdart_mh_ratio():
@@ -66,10 +66,14 @@ def test_directdart_mh_ratio():
         + gamma * state.coordinate
     )
     mux = proposalCovariance @ bx
+    noise = np.linalg.solve(
+        np.linalg.cholesky(proposalCovariance), proposed.coordinate - mux
+    )
+    proposalRecord, _ = sampler.proposal.propose(state, FixedNormalRng(noise))
     transition = TransitionData(
-        current=sampler.evaluate_state(state),
-        proposed=sampler.evaluate_state(proposed),
-        auxiliary={'bx': bx, 'mux': mux},
+        current=sampler.initial_state(state),
+        proposed=sampler.initial_state(proposalRecord.proposed.parameter),
+        auxiliary=proposalRecord.auxiliary,
     )
     bz = (
         tempering * precision @ surrogateMean.coordinate
@@ -92,7 +96,9 @@ def test_directdart_mh_ratio():
         )
     )
 
-    assert sampler._log_mh_ratio(transition) == pytest.approx(expected)
+    assert sampler._log_mh_ratio(
+        transition, sampler.proposal.reference
+    ) == pytest.approx(expected)
 
 
 def make_directdart(backend):

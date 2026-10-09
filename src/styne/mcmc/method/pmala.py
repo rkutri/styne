@@ -6,7 +6,6 @@ from styne.mcmc.metropolishastings import MetropolisHastings
 from styne.mcmc.acceptance import AcceptanceProbability
 from styne.mcmc.factory import MHFactory
 from styne.mcmc.proposal import ProposalMethod
-from styne.mcmc.transition import TransitionData
 from styne.parameter.parameter import Parameter
 from styne.statistics.gaussian import Gaussian
 from styne.statistics.interface import RadonNikodymInterface
@@ -38,7 +37,9 @@ class PMALAProposal(ProposalMethod):
 
     The reference covariance colors backend-native Gaussian noise directly.
     JAX and PyTorch differentiate the derivative density automatically;
-    NumPy execution requires an explicit gradient callable.
+    NumPy execution requires an explicit gradient callable. The correction
+    compares the proposal densities in both directions relative to the
+    Lebesgue measure.
     """
 
     def __init__(
@@ -63,6 +64,18 @@ class PMALAProposal(ProposalMethod):
     @property
     def referenceMeasure(self) -> Gaussian:
         return self._target.reference
+
+    def for_target(self, target, previous):
+        if self._target is not previous:
+            return self
+        validate_pmala_target(target)
+        gradient = self._gradient
+        owner = getattr(gradient, "__self__", None)
+        if owner is previous:
+            gradient = target.evaluate_log_gradient
+        elif owner is previous.derivative:
+            gradient = target.derivative.evaluate_log_gradient
+        return type(self)(target, self._beta, gradient)
 
     def _gradient_at(self, state):
         if self._gradient is not None:
@@ -104,11 +117,13 @@ class PMALAProposal(ProposalMethod):
         proposal = state.with_coordinate(
             driftVector + self._beta * refCov.apply_chol_factor(noise)
         )
-
-        return (
-            TransitionData(state, proposal, auxiliary={'drift': driftVector}),
-            nextRng,
+        # The forward Gaussian density only needs the drawn noise.
+        reverse = state.coordinate - self._drift(proposal)
+        logCorrection = (
+            0.5 * backend.namespace.sum(noise * noise, axis=-1)
+            - 0.5 / self._beta ** 2 * refCov.dual_quadratic_form(reverse)
         )
+        return self.record(state, proposal, logCorrection), nextRng
 
 
 class PreconditionedMALA(MetropolisHastings):
@@ -116,9 +131,8 @@ class PreconditionedMALA(MetropolisHastings):
     Preconditioned MALA sampler.
 
     Extends pCN with a Langevin drift driven by $\nabla \log \Psi$ (the
-    derivative's log-gradient). The full target (derivative + reference)
-    enters the log acceptance ratio, the reference geometry enters the
-    drift and the metric for the quadratic correction term.
+    derivative's log-gradient). The reference geometry enters the drift and
+    the metric of the proposal's correction.
 
     Parameters
     ----------
@@ -141,43 +155,6 @@ class PreconditionedMALA(MetropolisHastings):
         proposalMethod = PMALAProposal(target, beta, gradient)
         super().__init__(target, proposalMethod, diagnostics,
                          acceptance=acceptance, rng=rng)
-
-    def _log_mh_ratio(self, transition: TransitionData):
-
-        beta2 = self._proposalMethod.beta**2
-        refCov = self._proposalMethod.referenceMeasure.covariance
-
-        x = transition.state.coordinate
-        z = transition.proposal.coordinate
-
-        logTarget = (
-            transition.proposed.logDensity - transition.current.logDensity
-        )
-
-        meanZgivenX = transition.auxiliary['drift']
-        meanXgivenZ = self._proposalMethod._drift(transition.proposal)
-
-        diffX = x - meanXgivenZ
-        diffZ = z - meanZgivenX
-
-        quadDiff = -0.5 / beta2 * (
-            refCov.dual_quadratic_form(diffX)
-            - refCov.dual_quadratic_form(diffZ)
-        )
-
-        return logTarget + quadDiff
-
-    def _proposal_for_target(self, targetDensity):
-        validate_pmala_target(targetDensity)
-        gradient = self._proposalMethod._gradient
-        owner = getattr(gradient, "__self__", None)
-        if owner is self.target:
-            gradient = targetDensity.evaluate_log_gradient
-        elif owner is self.target.derivative:
-            gradient = targetDensity.derivative.evaluate_log_gradient
-        return PMALAProposal(
-            targetDensity, self._proposalMethod.beta, gradient
-        )
 
 
 class PMALAFactory(MHFactory):

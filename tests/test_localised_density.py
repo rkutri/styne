@@ -51,11 +51,11 @@ def test_localised_trajectory_retargets_centre_dependent_reference():
     expectedReference = density.with_location(centre).reference
     expected, _ = expectedReference.sample(np.random.default_rng(7))
 
-    proposal, trajectory, _ = measure.transition_trajectory(
+    _, end, trajectory, _ = measure.transition_trajectory(
         centre, np.random.default_rng(7)
     )
 
-    np.testing.assert_allclose(proposal.coordinate, expected.coordinate)
+    np.testing.assert_allclose(end.parameter.coordinate, expected.coordinate)
     np.testing.assert_allclose(trajectory[1], expected.coordinate)
     np.testing.assert_array_equal(sampler.target.location.coordinate, [0.0])
     np.testing.assert_array_equal(
