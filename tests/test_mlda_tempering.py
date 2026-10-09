@@ -10,12 +10,13 @@ from styne.utility.densityarithmetic import LogScalingWrapper
 from tests.testSetup import GaussianTargetDensity
 
 
-def _make_rn_surrogate(
+def make_rn_surrogate(
     priorVariance: float, likelihoodVariance: float, dimension: int
 ) -> RadonNikodym:
     priorCovariance = IIDCovarianceMatrix(dimension, priorVariance)
-    priorMeasure = Gaussian(priorCovariance)
-    priorMeasure.mean = Vector(np.zeros(dimension))
+    priorMeasure = Gaussian(
+        priorCovariance, Vector(np.zeros(dimension))
+    )
     likelihoodCovariance = IIDCovarianceMatrix(dimension, likelihoodVariance)
     likelihoodDensity = GaussianDensity(
         likelihoodCovariance, Vector(np.zeros(dimension))
@@ -28,7 +29,7 @@ def test_mlda_tempering_validation():
     targetDensity = GaussianTargetDensity(
         Vector(np.zeros(dimension)), np.eye(dimension)
     )
-    rnSurrogate = _make_rn_surrogate(
+    rnSurrogate = make_rn_surrogate(
         priorVariance=1.0, likelihoodVariance=1.0, dimension=dimension
     )
     nonRnSurrogate = GaussianTargetDensity(
@@ -80,10 +81,10 @@ def test_mlda_tempering_sampler_creation():
     targetDensity = GaussianTargetDensity(
         Vector(np.zeros(dimension)), np.eye(dimension)
     )
-    rnSurrogate0 = _make_rn_surrogate(
+    rnSurrogate0 = make_rn_surrogate(
         priorVariance=2.0, likelihoodVariance=0.5, dimension=dimension
     )
-    rnSurrogate1 = _make_rn_surrogate(
+    rnSurrogate1 = make_rn_surrogate(
         priorVariance=1.0, likelihoodVariance=1.0, dimension=dimension
     )
 

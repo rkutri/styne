@@ -3,29 +3,39 @@ import numpy as np
 from typing import List
 from numpy import ndarray
 
+from styne.backend import infer_backend
 from styne.parameter.parameter import Parameter
-from styne.statistics.interface import DensityInterface, DifferentiableDensity
-from styne.utility.densityarithmetic import ProductWrapper
+from styne.statistics.interface import DensityInterface
 
 
-from abc import ABC, abstractmethod
-
-class PartitionRule(ABC):
+class PartitionRule:
     """
-    Template pattern for parameter partitioning rules.
+    Partition of coordinate indices into ordered components.
+
+    Subclasses may provide their own indices and number of components.
     """
+
+    def __init__(self, indices):
+        components = [np.asarray(component) for component in indices]
+        if any(component.ndim != 1 or (component.size and not np.issubdtype(
+                component.dtype, np.integer)) for component in components):
+            raise ValueError("Partition indices must be one-dimensional integers.")
+        self._indices = [component.astype(int) for component in components]
+        if not self._indices:
+            raise ValueError("A partition needs at least one component.")
+        order = np.concatenate(self._indices)
+        if not np.array_equal(np.sort(order), np.arange(order.size)):
+            raise ValueError("Partition components must enumerate every coordinate once.")
 
     @property
-    @abstractmethod
     def numComponents(self) -> int:
-        ... 
+        return len(self._indices)
 
-    @abstractmethod
     def indices(self, idx: int) -> ndarray:
         """
         Return the coordinate indices belonging to partition component idx.
         """
-        ... 
+        return self._indices[idx]
 
     def component_dimension(self, idx: int) -> int:
         return len(self.indices(idx))
@@ -34,17 +44,17 @@ class PartitionRule(ABC):
         return sum(self.component_dimension(i) for i in range(self.numComponents))
 
     def extract(self, idx: int, coordinate: ndarray) -> ndarray:
-        return coordinate[self.indices(idx)]
+        return coordinate[..., self.indices(idx)]
 
     def merge(self, components: List[ndarray]) -> ndarray:
         if len(components) != self.numComponents:
             raise ValueError(
                 f"Expected {self.numComponents} components, got {len(components)}."
             )
-        result = np.empty(self.total_dimension())
-        for i, comp in enumerate(components):
-            result[self.indices(i)] = comp
-        return result
+        # Concatenation and a permutation preserve backend arrays and batches.
+        order = np.concatenate([self.indices(i) for i in range(self.numComponents)])
+        joined = infer_backend(*components).namespace.concatenate(components, axis=-1)
+        return joined[..., np.argsort(order)]
 
 
 class Partition:
@@ -59,7 +69,9 @@ class Partition:
     def __init__(self, partitionRule: PartitionRule, parameter: Parameter):
 
         if partitionRule.total_dimension() != parameter.dimension:
-            raise ValueError("Partition rule total dimension must match parameter dimension.")
+            raise ValueError(
+                "Partition rule total dimension must match parameter dimension."
+            )
 
         self._globalParameter = parameter
         self._rule = partitionRule
@@ -76,7 +88,9 @@ class Partition:
     def parameter(self, newParameter: Parameter) -> None:
 
         if newParameter.dimension != self._rule.total_dimension():
-            raise ValueError("New parameter dimension must match partition rule total dimension.")
+            raise ValueError(
+                "New parameter dimension must match partition rule total dimension."
+            )
 
         self._globalParameter = newParameter
 
@@ -100,7 +114,9 @@ class IndependentPartitionDensity(DensityInterface):
     def __init__(self, partition: Partition, componentDensities: List[DensityInterface]):
 
         if partition.rule.numComponents != len(componentDensities):
-            raise ValueError("Number of components in partition must match number of densities.")
+            raise ValueError(
+                "Number of components in partition must match number of densities."
+            )
 
         for i, dens in enumerate(componentDensities):
             if dens.domainDimension != partition.rule.component_dimension(i):
@@ -114,6 +130,11 @@ class IndependentPartitionDensity(DensityInterface):
     @property
     def domainType(self) -> Parameter:
         return self._partition.global_domain_type()
+
+    @property
+    def parameter(self) -> Parameter:
+        """Parameter template retaining the partition's static metadata."""
+        return self._partition.parameter
 
     @property
     def domainDimension(self) -> int:
@@ -135,12 +156,13 @@ class IndependentPartitionDensity(DensityInterface):
 
         self._partition.parameter = state
 
-        from styne.statistics.interface import DifferentiableDensity
-
         gradients = []
         for i, dens in enumerate(self._densities):
-            if not isinstance(dens, DifferentiableDensity):
-                raise RuntimeError(f"Component density at index {i} must implement DifferentiableDensity.")
+            if not callable(getattr(dens, "evaluate_log_gradient", None)):
+                raise RuntimeError(
+                    f"Component density at index {i} must expose "
+                    "evaluate_log_gradient."
+                )
             
             componentParameter = self._partition.component(i)
             gradients.append(dens.evaluate_log_gradient(componentParameter))

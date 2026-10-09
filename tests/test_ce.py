@@ -14,7 +14,7 @@ from styne.statistics.stationary import matern_covariance
 from styne.utility.exceptions import NotPositiveDefinite
 
 
-def _matern_cov(r, lengthScale=0.3, smoothness=1.5, variance=1.0):
+def matern_cov(r, lengthScale=0.3, smoothness=1.5, variance=1.0):
     return matern_covariance(r, lengthScale, smoothness, variance)
 
 
@@ -27,12 +27,12 @@ class TestCirculantEmbeddingConstruction:
     def test_initial_padding_exceeds_max_raises(self):
         with pytest.raises(RuntimeError):
             CirculantEmbeddingEngine1D(
-                _matern_cov, self.vertPerDim, self.domExt, padding=1024, maxPadding=512
+                matern_cov, self.vertPerDim, self.domExt, padding=1024, maxPadding=512
             )
 
     def test_draw_shape_1d(self):
         engine = CirculantEmbeddingEngine1D(
-            _matern_cov, self.vertPerDim, self.domExt
+            matern_cov, self.vertPerDim, self.domExt
         )
         rng = default_rng(42)
         sample = engine.draw(rng)
@@ -40,7 +40,7 @@ class TestCirculantEmbeddingConstruction:
 
     def test_draw_shape_2d(self):
         engine = CirculantEmbeddingEngine2D(
-            _matern_cov, self.vertPerDim, self.domExt
+            matern_cov, self.vertPerDim, self.domExt
         )
         rng = default_rng(42)
         sample = engine.draw(rng)
@@ -48,14 +48,14 @@ class TestCirculantEmbeddingConstruction:
 
     def test_eigenvalues_are_real_and_nonneg(self):
         engine = CirculantEmbeddingEngine1D(
-            _matern_cov, self.vertPerDim, self.domExt
+            matern_cov, self.vertPerDim, self.domExt
         )
         assert np.all(np.isreal(engine._eigenvalues))
         assert engine._eigenvalues.min() >= -engine._tol
 
     def test_draw_deterministic_with_seed(self):
         engine = CirculantEmbeddingEngine1D(
-            _matern_cov, self.vertPerDim, self.domExt
+            matern_cov, self.vertPerDim, self.domExt
         )
         sample1 = engine.draw(default_rng(123))
         sample2 = engine.draw(default_rng(123))
@@ -65,14 +65,14 @@ class TestCirculantEmbeddingConstruction:
 class TestCirculantEmbeddingPadding:
 
     def test_indefinite_initial_triggers_padding_increase(self):
-        covFcn = lambda r: _matern_cov(r, lengthScale=2.0)
+        covFcn = lambda r: matern_cov(r, lengthScale=2.0)
         engine = CirculantEmbeddingEngine1D(
             covFcn, vertPerDim=16, domExt=1.0, autotunePadding=False
         )
         assert engine._padding > 0
 
     def test_autotune_reduces_padding(self):
-        covFcn = lambda r: _matern_cov(r, lengthScale=2.0)
+        covFcn = lambda r: matern_cov(r, lengthScale=2.0)
         engineNoTune = CirculantEmbeddingEngine1D(
             covFcn, vertPerDim=16, domExt=1.0, autotunePadding=False
         )
@@ -82,7 +82,7 @@ class TestCirculantEmbeddingPadding:
         assert engineTune._padding <= engineNoTune._padding
 
     def test_max_padding_exhaustion_raises(self):
-        covFcn = lambda r: _matern_cov(r, lengthScale=5.0)
+        covFcn = lambda r: matern_cov(r, lengthScale=5.0)
         with pytest.raises(NotPositiveDefinite):
             CirculantEmbeddingEngine1D(
                 covFcn, vertPerDim=16, domExt=1.0, maxPadding=2
@@ -94,7 +94,7 @@ class TestApproximateCirculantEmbedding:
     def setup_method(self):
         self.vertPerDim = 16
         self.domExt = 1.0
-        self.covFcn = lambda r: _matern_cov(r, lengthScale=2.0)
+        self.covFcn = lambda r: matern_cov(r, lengthScale=2.0)
 
     def test_approximate_1d_eigenvalues_nonneg(self):
         engine = ApproximateCirculantEmbeddingEngine1D(
@@ -129,7 +129,7 @@ class TestCirculantEmbeddingCorrectness:
         self.vertPerDim = 10
         self.domExt = 1.0
         self.variance = 0.8
-        self.covFcn = lambda r: _matern_cov(
+        self.covFcn = lambda r: matern_cov(
             r, lengthScale=0.2, smoothness=1.5, variance=self.variance
         )
         self.nSamples = 2500
@@ -193,4 +193,3 @@ class TestCirculantEmbeddingCorrectness:
         frobTrue = np.linalg.norm(trueCov, "fro")
         frobErr = np.linalg.norm(empiricalCov - trueCov, "fro")
         assert frobErr / frobTrue < 0.3
-

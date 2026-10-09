@@ -1,6 +1,6 @@
 import numpy as np
-from scipy.special import logsumexp
 
+from styne.backend import infer_backend
 from styne.statistics.interface import DensityInterface
 
 
@@ -67,16 +67,46 @@ class GaussianMixtureDensity(DensityInterface):
         return self._components[0].domainDimension
 
     def evaluate_log(self, parameter):
-        log_vals = [g.evaluate_log(parameter) for g in self._components]
-        return logsumexp(self._logWeights + log_vals)
+        backend = infer_backend(parameter.coordinate)
+        namespace = backend.namespace
+        metadata = backend.metadata(parameter.coordinate)
+        logValues = namespace.stack([
+            component.evaluate_log(parameter)
+            for component in self._components
+        ])
+        logWeights = backend.asarray(
+            self._logWeights,
+            dtype=metadata.dtype,
+            device=metadata.device,
+        )
+        weightIndex = (slice(None),) + (None,) * (logValues.ndim - 1)
+        return namespace.logsumexp(
+            logWeights[weightIndex] + logValues, axis=0
+        )
 
     def evaluate_log_gradient(self, parameter):
-        log_vals = np.array([g.evaluate_log(parameter) for g in self._components])
-        gradients = np.array([g.evaluate_log_gradient(parameter) for g in self._components])
-        
-        # log P(C=k | x) = log(w_k) + log N(x|k) - log(\sum w_j N(x|j))
-        log_joint = self._logWeights + log_vals
-        log_marginal = logsumexp(log_joint)
-        resp = np.exp(log_joint - log_marginal)
-        
-        return np.sum(resp[:, None] * gradients, axis=0)
+        backend = infer_backend(parameter.coordinate)
+        namespace = backend.namespace
+        metadata = backend.metadata(parameter.coordinate)
+        logValues = namespace.stack([
+            component.evaluate_log(parameter)
+            for component in self._components
+        ])
+        gradients = namespace.stack([
+            component.evaluate_log_gradient(parameter)
+            for component in self._components
+        ])
+        logWeights = backend.asarray(
+            self._logWeights,
+            dtype=metadata.dtype,
+            device=metadata.device,
+        )
+        weightIndex = (slice(None),) + (None,) * (logValues.ndim - 1)
+        logJoint = logWeights[weightIndex] + logValues
+        responsibilities = namespace.exp(
+            logJoint - namespace.logsumexp(logJoint, axis=0)
+        )
+        return namespace.sum(
+            namespace.expand_dims(responsibilities, axis=-1) * gradients,
+            axis=0,
+        )

@@ -1,8 +1,9 @@
-import numpy as np
-
-
 class Chain:
-    """Trajectory and annotation storage for a single MCMC chain."""
+    """Backend-native trajectory and annotation storage for one MCMC chain.
+
+    Numerical samples are retained exactly as supplied. Conversion for
+    plotting or reporting belongs to the caller, outside MCMC execution.
+    """
 
     def __init__(self):
         self._trajectory = []
@@ -35,8 +36,8 @@ class Chain:
 
         Parameters
         ----------
-        stateVector : np.ndarray
-            Coordinate vector to append.
+        stateVector : array
+            Backend-native coordinate vector to append without conversion.
         annotation : object, optional
             Attached only if `enable_annotations` has been called.
         """

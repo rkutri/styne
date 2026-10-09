@@ -1,9 +1,7 @@
 import numpy as np
-import pytest
-import warnings
 
 from styne.statistics.response import PoissonResponse
-from styne.model.model import Model
+from styne.model.forwardmap import ForwardMap
 from styne.parameter.vector import Vector
 from styne.statistics.radonnikodym import RadonNikodym
 from styne.statistics.gaussian import Gaussian
@@ -12,12 +10,12 @@ from styne.statistics.interface import DensityInterface
 from styne.mcmc.method.pmala import PMALAProposal
 
 
-class MockDifferentiableModel(Model):
+class MockDifferentiableForwardMap(ForwardMap):
     """Mock model returning pre-defined evaluation and computing adjoint."""
 
     def __init__(self, evaluation: np.ndarray):
         super().__init__()
-        self._evaluation = evaluation
+        self._response = evaluation
 
     @property
     def pType(self):
@@ -25,16 +23,17 @@ class MockDifferentiableModel(Model):
 
     @property
     def pDim(self) -> int:
-        return len(self._evaluation)
+        return len(self._response)
 
-    def _interpolate(self, parameter) -> None:
-        pass
+    def _prepare(self, parameter):
+        return self._response
 
-    def _evaluate(self) -> None:
-        pass
+    def _evaluate(self, preparedState):
+        return preparedState
 
-    def adjoint_directional_derivative(self, vector: np.ndarray) -> np.ndarray:
-        return vector
+    def adjoint_derivative(
+            self, parameter, cotangent: np.ndarray) -> np.ndarray:
+        return cotangent
 
 
 class MockNonFiniteGradientDensity(DensityInterface):
@@ -58,8 +57,8 @@ class MockNonFiniteGradientDensity(DensityInterface):
         return self._gradientValue
 
 
-def test_poisson_log_likelihood_limits():
-    """Verify log-likelihood does not raise overflow warnings and stays finite."""
+def test_poisson_log_likelihood_preserves_unclipped_target():
+    """Extreme predictors use the Poisson target, not a clipped surrogate."""
     response = PoissonResponse()
     yVal = np.array([1.0, 2.0])
 
@@ -68,44 +67,32 @@ def test_poisson_log_likelihood_limits():
     likelihoodNormal = response.log_likelihood(yVal, etaNormal)
     assert np.isfinite(likelihoodNormal)
 
-    # Inputs at the boundary or exceeding clamp limit, including infinity
-    etaExtreme = np.array([500.0, 800.0, np.inf, -np.inf])
-    yExtreme = np.array([1.0, 1.0, 1.0, 1.0])
+    etaLarge = np.array([35.0])
+    expected = 35.0 - np.exp(35.0)
+    assert response.log_likelihood(np.array([1.0]), etaLarge) == expected
 
-    with warnings.catch_warnings():
-        warnings.simplefilter("error")
-        likelihoodExtreme = response.log_likelihood(yExtreme, etaExtreme)
-
-    assert np.isfinite(likelihoodExtreme)
-    # The linear predictor term is clamped to [_etaFloor, _etaCeil].
-    # At eta = inf, it is clamped to 30.0, so it remains extremely negative and finite.
-    assert likelihoodExtreme < 0.0
+    with np.errstate(over="ignore", invalid="ignore"):
+        likelihoodExtreme = response.log_likelihood(
+            np.array([1.0, 1.0]), np.array([800.0, -np.inf])
+        )
+    assert np.isneginf(likelihoodExtreme)
 
 
-
-def test_poisson_score_limits():
-    """Verify score does not raise overflow warnings and returns finite values."""
+def test_poisson_score_preserves_unclipped_target():
+    """The score remains the derivative of the unclipped log likelihood."""
     response = PoissonResponse()
     yVal = np.array([1.0, 1.0, 1.0, 1.0])
     etaExtreme = np.array([500.0, 800.0, np.inf, -np.inf])
-    modelVal = MockDifferentiableModel(etaExtreme)
+    with np.errstate(over="ignore"):
+        scoreVal = response.score(yVal, etaExtreme)
 
-    with warnings.catch_warnings():
-        warnings.simplefilter("error")
-        scoreVal = response.score(yVal, modelVal)
-
-    assert np.isfinite(scoreVal).all()
-    # At extreme positive eta, score = y - exp(clip(eta)) which should be extremely negative.
-    # At eta = -inf, score = y - exp(-500.0) ≈ y - 0 = y > 0 (for y=1.0).
     assert scoreVal[0] < 0.0
-    assert scoreVal[1] < 0.0
-    assert scoreVal[2] < 0.0
-    assert scoreVal[3] > 0.0
+    assert np.isneginf(scoreVal[1])
+    assert np.isneginf(scoreVal[2])
+    assert scoreVal[3] == 1.0
 
 
-
-def test_pmala_drift_non_finite_fallback():
-    """Verify PMALA proposal falls back to pCN drift when gradient is non-finite."""
+def test_pmala_drift_preserves_non_finite_gradient():
     refCovariance = IIDCovarianceMatrix(2, 1.0)
     refMean = Vector(np.zeros(2))
     priorVal = Gaussian(refCovariance, refMean)
@@ -116,15 +103,12 @@ def test_pmala_drift_non_finite_fallback():
     targetVal = RadonNikodym(priorVal, derivVal)
 
     betaVal = 0.5
-    proposalVal = PMALAProposal(targetVal, betaVal)
+    proposalVal = PMALAProposal(
+        targetVal, betaVal, derivVal.evaluate_log_gradient
+    )
     stateVal = Vector(np.array([2.0, 3.0]))
 
     # Compute proposal drift
     computedDrift = proposalVal._drift(stateVal)
 
-    # Expected drift is pCN drift since gradient is non-finite: m + sqrt(1 - beta^2) * (x - m)
-    expectedDrift = refMean.coordinate + np.sqrt(1.0 - betaVal**2) * (
-        stateVal.coordinate - refMean.coordinate
-    )
-
-    assert np.allclose(computedDrift, expectedDrift)
+    assert not np.all(np.isfinite(computedDrift))

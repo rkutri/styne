@@ -1,11 +1,12 @@
-import numpy as np
 from numpy import ndarray, log, pi
 from numpy.random import Generator
 
+from styne.backend import infer_backend
 from styne.parameter.parameter import Parameter
 from styne.statistics.interface import DensityInterface
 from styne.statistics.measure import AbsolutelyContinuousProbabilityMeasure
 from styne.statistics.covariance import CovarianceMatrix
+from styne.model.representation.expansion import backend_constant
 
 _LOG2PI = log(2. * pi)
 
@@ -27,7 +28,8 @@ class GaussianDensity(DensityInterface):
     -----
     The mean is required and must be set before calling ``evaluate_log``,
     ``draw``, or accessing ``domainType`` / ``domainDimension``. It can be
-    updated at any time via the ``mean`` setter.
+    Use :meth:`with_mean` or :meth:`with_covariance` to create a modified
+    density; instances are immutable.
     """
 
     def __init__(
@@ -55,9 +57,8 @@ class GaussianDensity(DensityInterface):
         self._require_mean()
         return self._mean
 
-    @mean.setter
-    def mean(self, mean: Parameter):
-        self._mean = mean
+    def with_mean(self, mean: Parameter):
+        return type(self)(self._cov, mean)
 
     @property
     def domainType(self):
@@ -73,14 +74,13 @@ class GaussianDensity(DensityInterface):
     def covariance(self) -> CovarianceMatrix:
         return self._cov
 
-    @covariance.setter
-    def covariance(self, covariance: CovarianceMatrix):
+    def with_covariance(self, covariance: CovarianceMatrix):
         self._validate_covariance(covariance)
-        self._cov = covariance
+        return type(self)(covariance, self._mean)
 
     def evaluate_log(
             self, parameter: Parameter, normalised=False
-    ) -> float:
+    ):
         """
         Evaluate the log-density at 'parameter'.
 
@@ -99,15 +99,17 @@ class GaussianDensity(DensityInterface):
         self._require_mean()
 
         x = parameter.coordinate - self._mean.coordinate
-        logDens = -0.5 * self._cov.dual_quadratic_form(x)
+        half = backend_constant(0.5, x)
+        logDens = -half * self._cov.dual_quadratic_form(x)
 
         if normalised:
             logDet = self._cov.log_determinant()
-            logDens -= 0.5 * (self.domainDimension * _LOG2PI + logDet)
+            log2pi = backend_constant(_LOG2PI, x)
+            logDens -= half * (self.domainDimension * log2pi + logDet)
 
         return logDens
 
-    # satisfies the DifferentiableDensity protocol
+    # Explicit derivative API for NumPy gradient-based methods.
     def evaluate_log_gradient(self, parameter: Parameter) -> ndarray:
         """
         Gradient of the log-density with respect to the parameter.
@@ -122,7 +124,7 @@ class GaussianDensity(DensityInterface):
         v = parameter.coordinate - self._mean.coordinate
         return -self._cov.apply_inverse(v)
 
-    # satisfies the TwiceDifferentiableDensity protocol
+    # Explicit derivative API for NumPy gradient-based methods.
     def evaluate_log_hessian(self, parameter: Parameter) -> ndarray:
         """
         Hessian of the log-density with respect to the parameter.
@@ -132,7 +134,13 @@ class GaussianDensity(DensityInterface):
         ndarray
             -Sigma^{-1}.
         """
-        return -self._cov.apply_inverse(np.eye(self.domainDimension))
+        coordinates = self._mean.coordinate
+        backend = infer_backend(coordinates)
+        metadata = backend.metadata(coordinates)
+        identity = backend.eye(
+            self.domainDimension, dtype=metadata.dtype, device=metadata.device
+        )
+        return -self._cov.apply_inverse(identity)
 
 
 class Gaussian(AbsolutelyContinuousProbabilityMeasure):
@@ -152,41 +160,31 @@ class Gaussian(AbsolutelyContinuousProbabilityMeasure):
     def mean(self) -> Parameter:
         return self._density.mean
 
-    @mean.setter
-    def mean(self, mean: Parameter):
-        self._density.mean = mean
+    def with_mean(self, mean: Parameter):
+        return type(self)(self.covariance, mean)
 
     @property
     def covariance(self) -> CovarianceMatrix:
         return self._density.covariance
 
-    @covariance.setter
-    def covariance(self, covariance: CovarianceMatrix):
-        self._density.covariance = covariance
+    def with_covariance(self, covariance: CovarianceMatrix):
+        return type(self)(covariance, self._density._mean)
 
     @property
     def density(self) -> DensityInterface:
         return self._density
 
-    def draw(self, rng: Generator) -> Parameter:
-        """
-        Draw a sample using the provided random number generator.
-
-        Parameters
-        ----------
-        rng : Generator
-            NumPy random generator instance.
-
-        Returns
-        -------
-        Parameter
-            A sample from this Gaussian.
-        """
+    def sample(self, randomState) -> tuple[Parameter, object]:
+        """Draw a reparameterised sample with explicit random-state flow."""
         m = self.mean.coordinate
-        xi = rng.standard_normal(self.density.domainDimension)
+        backend = infer_backend(m)
+        metadata = backend.metadata(m)
+        xi, nextState = backend.normal(
+            randomState, m.shape, dtype=metadata.dtype, device=metadata.device
+        )
         colouredXi = self.density.covariance.apply_chol_factor(xi)
 
-        realisation = self.mean.clone()
-        realisation.coordinate = m + colouredXi
+        return self.mean.with_coordinate(m + colouredXi), nextState
 
-        return realisation
+    def draw(self, rng: Generator) -> Parameter:
+        return self.sample(rng)[0]

@@ -11,6 +11,7 @@ Covers:
 import numpy as np
 import pytest
 
+from styne.backend import infer_backend
 from styne.mcmc.method.gibbs import BlockGibbs, GibbsBuilder
 from styne.statistics.bayes import HierarchicalBayes, HierarchicalBayesModelBuilder
 from styne.statistics.measure import ConditionalMeasure
@@ -52,26 +53,63 @@ class CorrelatedGaussianConditional(ConditionalMeasure):
 
     def condition_on(self, state) -> None:
         otherVal = state.block(self._otherIdx).coordinate[0]
-        self._gaussian.mean = Vector(np.array([self._rho * otherVal]))
+        self._gaussian = self._gaussian.with_mean(
+            Vector(np.array([self._rho * otherVal]))
+        )
 
     def draw(self, rng):
         return self._gaussian.draw(rng)
 
 
-def _make_model(rho: float) -> HierarchicalBayes:
+class BackendConditional(ConditionalMeasure):
+    """Test conditional that samples on the state array's backend."""
+
+    def __init__(self, blockIdx):
+        self._blockIdx = blockIdx
+        self._state = None
+
+    @property
+    def blockDimension(self):
+        return 1
+
+    @property
+    def density(self):
+        raise NotImplementedError
+
+    def condition_on(self, state):
+        self._state = state
+
+    def sample(self, randomState):
+        coordinate = self._state.block(self._blockIdx).coordinate
+        backend = infer_backend(coordinate)
+        metadata = backend.metadata(coordinate)
+        noise, nextRng = backend.normal(
+            randomState, coordinate.shape,
+            dtype=metadata.dtype, device=metadata.device,
+        )
+        return Vector(coordinate + noise), nextRng
+
+
+def make_model(rho: float) -> HierarchicalBayes:
     """Build a HierarchicalBayes for a 2D correlated Gaussian with correlation rho."""
     root = Gaussian(IIDCovarianceMatrix(1, 1.0), Vector(np.zeros(1)))
+    firstUpdate = CorrelatedGaussianConditional(0, rho)
+    rootUpdate = CorrelatedGaussianConditional(1, rho)
     return (
         HierarchicalBayesModelBuilder()
-        .set_root(root)
-        .add_conditional(CorrelatedGaussianConditional(0, rho))
-        .add_conditional(CorrelatedGaussianConditional(1, rho))
+        .set_root(root, name="root")
+        .add_conditional(firstUpdate, name="latent")
+        .add_update(firstUpdate)
+        .add_update(rootUpdate)
         .build()
     )
 
 
-def _make_init() -> BlockParameter:
-    return BlockParameter([Vector(np.zeros(1)), Vector(np.zeros(1))])
+def make_init() -> BlockParameter:
+    return BlockParameter(
+        [Vector(np.zeros(1)), Vector(np.zeros(1))],
+        names={"latent": 0, "root": 1},
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -82,31 +120,144 @@ class TestBlockGibbsStructure:
 
     def setup_method(self):
         np.random.seed(0)
-        self.model = _make_model(rho=0.5)
+        self.model = make_model(rho=0.5)
         self.sampler = BlockGibbs(self.model)
 
     def test_chain_length(self):
         N = 50
-        self.sampler.run(N, _make_init())
+        self.sampler.run(N, make_init())
         assert self.sampler.chain.length == N + 1
 
     def test_block_entry_count(self):
         N = 50
-        self.sampler.run(N, _make_init())
+        self.sampler.run(N, make_init())
         assert len(self.sampler.chain.block(0).trajectory) == N + 1
         assert len(self.sampler.chain.block(1).trajectory) == N + 1
 
     def test_last_state_is_block_parameter(self):
-        self.sampler.run(10, _make_init())
+        self.sampler.run(10, make_init())
         assert isinstance(self.sampler.lastState, BlockParameter)
         assert self.sampler.lastState.nBlocks == 2
+        assert self.sampler.lastState.names == {"latent": 0, "root": 1}
+        assert tuple(
+            self.sampler.lastState.block(index).dimension
+            for index in range(2)
+        ) == (1, 1)
+
+    def test_public_model_counts_root_block(self):
+        assert self.model.nBlocks == 2
+        assert self.model.blockDimensions == (1, 1)
+        assert self.model.blockNames == ("latent", "root")
 
     def test_builder(self):
         builder = GibbsBuilder()
         builder.model = self.model
         sampler = builder.build()
-        sampler.run(10, _make_init())
+        sampler.run(10, make_init())
         assert sampler.chain.length == 11
+
+    def test_step_does_not_condition_model_templates(self):
+        templates = [BackendConditional(0), BackendConditional(1)]
+
+        class Model:
+            nBlocks = 2
+
+            @staticmethod
+            def conditional(index, state):
+                return templates[index].condition(state)
+
+        sampler = BlockGibbs(Model())
+        nextState, _, _ = sampler.step(make_init(), np.random.default_rng(3))
+
+        assert all(template._state is None for template in templates)
+        assert isinstance(nextState, BlockParameter)
+
+    def test_step_preserves_jax_blocks_and_random_state(self):
+        jax = pytest.importorskip("jax")
+        jnp = pytest.importorskip("jax.numpy")
+        templates = [BackendConditional(0), BackendConditional(1)]
+
+        class Model:
+            nBlocks = 2
+
+            @staticmethod
+            def conditional(index, state):
+                return templates[index].condition(state)
+
+        sampler = BlockGibbs(Model())
+        initialState = BlockParameter([
+            Vector(jnp.zeros(1)), Vector(jnp.zeros(1)),
+        ])
+
+        nextState, _, nextRng = sampler.step(initialState, jax.random.key(2))
+
+        assert isinstance(nextState.block(0).coordinate, jax.Array)
+        assert isinstance(nextState.block(1).coordinate, jax.Array)
+        assert isinstance(nextRng, jax.Array)
+
+    def test_step_preserves_pytorch_blocks(self):
+        torch = pytest.importorskip("torch")
+        templates = [BackendConditional(0), BackendConditional(1)]
+
+        class Model:
+            nBlocks = 2
+
+            @staticmethod
+            def conditional(index, state):
+                return templates[index].condition(state)
+
+        sampler = BlockGibbs(Model())
+        initialState = BlockParameter([
+            Vector(torch.zeros(1)), Vector(torch.zeros(1)),
+        ])
+
+        nextState, _, _ = sampler.step(
+            initialState, torch.Generator().manual_seed(2)
+        )
+
+        assert isinstance(nextState.block(0).coordinate, torch.Tensor)
+        assert isinstance(nextState.block(1).coordinate, torch.Tensor)
+
+    def test_builder_rejects_sampling_without_root_update(self):
+        model = (
+            HierarchicalBayesModelBuilder()
+            .set_root(Gaussian(
+                IIDCovarianceMatrix(1, 1.0), Vector(np.zeros(1))
+            ))
+            .add_conditional(CorrelatedGaussianConditional(0, 0.5))
+            .build()
+        )
+
+        assert model.nBlocks == 2
+        with pytest.raises(ValueError, match="one invariant update"):
+            BlockGibbs(model)
+
+
+def test_three_block_joint_factorisation_excludes_update_densities():
+    firstFactor = CorrelatedGaussianConditional(0, 0.25)
+    secondFactor = CorrelatedGaussianConditional(1, -0.4)
+    root = Gaussian(IIDCovarianceMatrix(1, 2.0), Vector([0.0]))
+    updates = [
+        CorrelatedGaussianConditional(0, -0.8),
+        CorrelatedGaussianConditional(1, 0.7),
+        CorrelatedGaussianConditional(1, -0.2),
+    ]
+    model = HierarchicalBayes(
+        [firstFactor, secondFactor], root, updates=updates
+    )
+    state = BlockParameter([
+        Vector([0.3]), Vector([-0.6]), Vector([1.2])
+    ])
+    expected = root.density.evaluate_log(state.block(2))
+    expected += firstFactor.condition(state).density.evaluate_log(
+        state.block(0)
+    )
+    expected += secondFactor.condition(state).density.evaluate_log(
+        state.block(1)
+    )
+
+    assert model.nBlocks == 3
+    np.testing.assert_allclose(model.evaluate_log(state), expected)
 
 
 # ---------------------------------------------------------------------------
@@ -121,12 +272,12 @@ class TestBlockGibbsInvariantMeasure:
     SEED = 42
 
     def setup_method(self):
-        model = _make_model(rho=self.RHO)
+        model = make_model(rho=self.RHO)
         sampler = BlockGibbs(
             model,
             rng=np.random.default_rng(self.SEED),
         )
-        sampler.run(self.N_STEPS, _make_init())
+        sampler.run(self.N_STEPS, make_init())
 
         traj0 = np.array(sampler.chain.block(0).trajectory)[self.BURNIN:, 0]
         traj1 = np.array(sampler.chain.block(1).trajectory)[self.BURNIN:, 0]

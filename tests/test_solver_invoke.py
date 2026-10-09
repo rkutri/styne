@@ -65,17 +65,16 @@ def reference_lotka_volterra_full_solution(
 def test_invoke():
 
     solver = LotkaVolterraSolver(design, config)
-    solver.interpolate(parameter)
-    solver.evaluate()
+    evaluation = solver(parameter)
 
     # Check if solution succeeds
     assert solver.status == EvaluationStatus.SUCCESS
 
     # Check the shape of the evaluation array
-    assert solver._evaluation.shape == (config['nData'], config['dataDim'])
-    assert solver._evaluation is not None
+    assert evaluation.shape == (config['nData'], config['dataDim'])
+    assert evaluation is not None
 
-    for res in solver._evaluation:
+    for res in evaluation:
         assert res[0] >= 0
         assert res[1] >= 0
 
@@ -91,7 +90,7 @@ def test_invoke():
         alpha, beta, gamma, delta, y0, t_span)
 
     # Compare results
-    np.testing.assert_allclose(solver._evaluation, ref_result,
+    np.testing.assert_allclose(evaluation, ref_result,
                                rtol=1e-3, atol=1e-6)
 
 

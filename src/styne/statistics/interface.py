@@ -1,16 +1,17 @@
 from abc import ABC, abstractmethod
-from typing import Optional, Union, Sequence, runtime_checkable, Protocol
+from typing import Any, Optional, Union, Sequence, TypeAlias
 
 from numpy import ndarray
 from numpy.random import Generator, SeedSequence
 
-from styne.model.model import Model
+from styne.model.forwardmap import ForwardMap
 from styne.parameter.parameter import Parameter
 from styne.statistics.measure import ProbabilityMeasure
 from styne.statistics.data import Data
 
 
 SeedType = Union[int, Sequence[int], SeedSequence, None]
+BackendArray: TypeAlias = Any
 
 
 class DensityInterface(ABC):
@@ -25,7 +26,8 @@ class DensityInterface(ABC):
     -----
     Subclasses implement `domainType`, `domainDimension`, and `evaluate_log`.
     The interface makes no guarantee about normalisation. `evaluate_log` may
-    return a properly normalised log-density or one missing an additive
+    return a rank-zero array owned by the state backend. It may be a properly
+    normalised log-density or one missing an additive
     constant, depending on the implementation. Check the concrete class's
     own docstring, don't assume either way. This matters for MCMC code that
     compares densities across different classes rather than only within one.
@@ -42,35 +44,26 @@ class DensityInterface(ABC):
         ...
 
     @abstractmethod
-    def evaluate_log(self, state: Parameter) -> float:
+    def evaluate_log(self, state: Parameter) -> BackendArray:
         ...
 
 
-@runtime_checkable
-class DifferentiableDensity(Protocol):
-    """
-    Protocol for densities that expose a log-gradient.
+class RadonNikodymInterface(DensityInterface):
+    """Density represented by an RN factor and its reference measure.
+
+    Samplers such as pCN consume the derivative for acceptance while using
+    the reference to construct proposals. ``evaluate_log`` remains the full
+    target density supplied by the concrete implementation.
     """
 
-    def evaluate_log_gradient(self, state: Parameter) -> ndarray:
-        """
-        Evaluate the gradient of the logarithm of the density.
-        """
-
+    @property
+    @abstractmethod
+    def reference(self) -> ProbabilityMeasure:
         ...
 
-
-@runtime_checkable
-class TwiceDifferentiableDensity(DifferentiableDensity, Protocol):
-    """
-    Protocol for densities that expose a log-hessian.
-    """
-
-    def evaluate_log_hessian(self, state: Parameter) -> ndarray:
-        """
-        Evaluate the Hessian of the logarithm of the density.
-        """
-
+    @property
+    @abstractmethod
+    def derivative(self) -> DensityInterface:
         ...
 
 
@@ -92,32 +85,40 @@ class LikelihoodInterface(DensityInterface):
 
     @property
     @abstractmethod
-    def model(self) -> Model:
+    def model(self) -> ForwardMap:
         ...
 
 
 class CovarianceOperatorInterface(ABC):
     """
-    Interface for objects that apply a covariance operator and its Cholesky
-    factors to a vector, without necessarily exposing the operator's full
-    structure (dense, diagonal, or otherwise).
+    Interface for backend-native covariance operator applications.
+
+    A covariance operator may use dense, diagonal, or other internal
+    structure. Its numerical inputs and outputs are backend arrays: NumPy,
+    PyTorch, or JAX arrays remain owned by their originating backend. The
+    operator dimension is structural Python metadata and is therefore an
+    ``int``. Implementations that additionally expose scalar numerical
+    quantities, such as log determinants or quadratic forms, return rank-zero
+    backend arrays rather than Python ``float`` values.
 
     Notes
     -----
     Subclasses implement `apply_chol_factor`, `apply_chol_factor_transpose`,
-    and `apply_inverse`.
+    and `apply_inverse`. Each operation accepts a vector or batch of vectors
+    in the backend's usual trailing-coordinate layout and returns an array of
+    the corresponding shape.
     """
 
     @abstractmethod
-    def apply_chol_factor(self, x: ndarray) -> ndarray:
+    def apply_chol_factor(self, x: BackendArray) -> BackendArray:
         ...
 
     @abstractmethod
-    def apply_chol_factor_transpose(self, x: ndarray) -> ndarray:
+    def apply_chol_factor_transpose(self, x: BackendArray) -> BackendArray:
         ...
 
     @abstractmethod
-    def apply_inverse(self, x: ndarray) -> ndarray:
+    def apply_inverse(self, x: BackendArray) -> BackendArray:
         ...
 
 
@@ -157,17 +158,4 @@ class BayesianModelInterface(ABC):
     @property
     @abstractmethod
     def prior(self) -> ProbabilityMeasure:
-        ...
-
-
-class Predictor(ABC):
-    """
-    Interface for out-of-sample forward predictions.
-    """
-
-    @abstractmethod
-    def mean(self) -> ndarray:
-        """
-        Estimate the mean of the predictor at the query sites.
-        """
         ...

@@ -1,4 +1,4 @@
-from typing import List
+from typing import List, Optional, Sequence
 
 from styne.statistics.interface import BayesianModelInterface, DensityInterface
 from styne.statistics.likelihood import LikelihoodInterface
@@ -43,17 +43,14 @@ class HierarchicalBayes(DensityInterface):
     """
     Composite hierarchical Bayesian model.
 
-    Holds one ConditionalMeasure per non-root block and an unconditional
-    root measure. Implements DensityInterface over the full joint
-    BlockParameter and provides access to configured block conditionals for
-    Gibbs/MwG sampling.
+    Holds one conditional joint-density factor per non-root block and an
+    unconditional root factor. Gibbs updates are configured separately, one
+    full conditional or invariant transition per block.
 
     Notes
     -----
-    `evaluate_log` sums the root log-density and each conditional's
-    log-density; the result is unnormalised. Correctness holds only when
-    conditionals contribute distinct, non-overlapping factors, the
-    standard 2-block case.
+    `evaluate_log` sums only the generative factors. Update densities are not
+    included, preventing double-counting when full conditionals share factors.
 
     Parameters
     ----------
@@ -61,15 +58,42 @@ class HierarchicalBayes(DensityInterface):
         One conditional per non-root block, in block order.
     root : AbsolutelyContinuousProbabilityMeasure
         Unconditional measure for the root block.
+    updates : sequence of ConditionalMeasure, optional
+        One invariant update for every block, including the root, in block
+        order. Required for `BlockGibbs`, but not for density evaluation.
+    blockNames : sequence of str, optional
+        Names in the same order as the non-root blocks followed by the root.
     """
 
     def __init__(
         self,
         conditionals: List[ConditionalMeasure],
         root: AbsolutelyContinuousProbabilityMeasure,
+        updates: Optional[Sequence[ConditionalMeasure]] = None,
+        blockNames: Optional[Sequence[str]] = None,
     ):
-        self._conditionals = conditionals
+        self._factors = tuple(conditionals)
         self._root = root
+        self._updates = (
+            tuple(updates) if updates is not None
+            else (None,) * (len(self._factors) + 1)
+        )
+        if len(self._updates) != self.nBlocks:
+            raise ValueError(
+                f"Expected {self.nBlocks} block updates, got "
+                f"{len(self._updates)}."
+            )
+        if blockNames is not None:
+            if len(blockNames) != self.nBlocks:
+                raise ValueError(
+                    f"Expected {self.nBlocks} block names, got "
+                    f"{len(blockNames)}."
+                )
+            if len(set(blockNames)) != len(blockNames):
+                raise ValueError("Block names must be unique.")
+        self._blockNames = (
+            tuple(blockNames) if blockNames is not None else None
+        )
 
     @property
     def domainType(self):
@@ -78,35 +102,82 @@ class HierarchicalBayes(DensityInterface):
 
     @property
     def domainDimension(self) -> int:
-        return (sum(c.blockDimension for c in self._conditionals)
+        return (sum(c.blockDimension for c in self._factors)
                 + self._root.density.domainDimension)
 
     @property
     def nBlocks(self) -> int:
-        return len(self._conditionals)
+        return len(self._factors) + 1
+
+    @property
+    def blockDimensions(self) -> tuple[int, ...]:
+        return tuple(
+            factor.blockDimension for factor in self._factors
+        ) + (self._root.density.domainDimension,)
+
+    @property
+    def blockNames(self) -> Optional[tuple[str, ...]]:
+        return self._blockNames
+
+    @property
+    def hasCompleteUpdates(self) -> bool:
+        return all(update is not None for update in self._updates)
 
     @property
     def root(self) -> AbsolutelyContinuousProbabilityMeasure:
         return self._root
 
     def conditional(self, idx: int, state) -> ConditionalMeasure:
-        """Condition the idx-th block measure on `state` and return it."""
-        self._conditionals[idx].condition_on(state)
-        return self._conditionals[idx]
+        """Return the independently conditioned update for block ``idx``."""
+        if not 0 <= idx < self.nBlocks:
+            raise IndexError(f"Block index {idx} is out of range.")
+        update = self._updates[idx]
+        if update is None:
+            raise RuntimeError(
+                f"No invariant update is configured for block {idx}."
+            )
+        return update.condition(state)
+
+    def validate_state(self, state) -> None:
+        """Validate block count, dimensions, and configured name ordering."""
+        from styne.parameter.block import BlockParameter
+
+        if not isinstance(state, BlockParameter):
+            raise TypeError("Hierarchical state must be a BlockParameter.")
+        if state.nBlocks != self.nBlocks:
+            raise ValueError(
+                f"Expected {self.nBlocks} state blocks, got {state.nBlocks}."
+            )
+        dimensions = tuple(
+            state.block(index).dimension for index in range(state.nBlocks)
+        )
+        if dimensions != self.blockDimensions:
+            raise ValueError(
+                f"Expected block dimensions {self.blockDimensions}, got "
+                f"{dimensions}."
+            )
+        if self._blockNames is not None:
+            expectedNames = {
+                name: index for index, name in enumerate(self._blockNames)
+            }
+            if state.names != expectedNames:
+                raise ValueError(
+                    f"Expected block names {expectedNames}, got {state.names}."
+                )
 
     def evaluate_log(self, state) -> float:
         """
         Unnormalised full joint log-density.
 
-        Sums each conditional's unnormalised log-density at its block and
-        the root log-density. Correct when each conditional contributes a
-        distinct non-overlapping factor — the standard 2-block case.
+        Sums each non-root factor's unnormalised log-density at its block and
+        the root log-density. Sampling updates do not contribute here.
         """
-        rootBlock = state.block(state.nBlocks - 1)
+        self.validate_state(state)
+        rootBlock = state.block(self.nBlocks - 1)
         logp = self._root.density.evaluate_log(rootBlock)
-        for i, cond in enumerate(self._conditionals):
-            cond.condition_on(state)
-            logp += cond.density.evaluate_log(state.block(i))
+        for i, factor in enumerate(self._factors):
+            conditioned = factor.condition(state)
+            logp += conditioned.density.evaluate_log(state.block(i))
         return logp
 
 
@@ -114,24 +185,37 @@ class HierarchicalBayesModelBuilder:
     """
     Fluent builder for `HierarchicalBayes` models.
 
-    Chain `set_root` and `add_conditional` calls, then `build` to construct
-    the model.
+    Use `set_root` and `add_conditional` to define the joint factorisation.
+    Add one invariant update per block with `add_update` when the model will
+    be sampled by `BlockGibbs`, then call `build`.
     """
 
     def __init__(self):
-        self._conditionals = []
+        self._factors = []
+        self._updates = []
+        self._blockNames = []
         self._root = None
+        self._rootName = None
 
     def set_root(
-        self, root: AbsolutelyContinuousProbabilityMeasure
+        self, root: AbsolutelyContinuousProbabilityMeasure, name: str = None
     ) -> "HierarchicalBayesModelBuilder":
         self._root = root
+        self._rootName = name
         return self
 
     def add_conditional(
-        self, conditional: ConditionalMeasure
+        self, conditional: ConditionalMeasure, name: str = None
     ) -> "HierarchicalBayesModelBuilder":
-        self._conditionals.append(conditional)
+        self._factors.append(conditional)
+        self._blockNames.append(name)
+        return self
+
+    def add_update(
+        self, update: ConditionalMeasure
+    ) -> "HierarchicalBayesModelBuilder":
+        """Append one invariant block update in block order."""
+        self._updates.append(update)
         return self
 
     def build(self) -> HierarchicalBayes:
@@ -145,4 +229,13 @@ class HierarchicalBayesModelBuilder:
         """
         if self._root is None:
             raise ValueError("Root measure not set.")
-        return HierarchicalBayes(list(self._conditionals), self._root)
+        names = [*self._blockNames, self._rootName]
+        blockNames = None if all(name is None for name in names) else names
+        if blockNames is not None and any(name is None for name in names):
+            raise ValueError("Either name every block or leave all unnamed.")
+        return HierarchicalBayes(
+            list(self._factors),
+            self._root,
+            updates=list(self._updates) if self._updates else None,
+            blockNames=blockNames,
+        )

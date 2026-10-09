@@ -8,7 +8,7 @@ from scipy.stats import multivariate_normal
 from scipy.integrate import solve_ivp
 
 from styne.parameter.vector import Vector
-from styne.model.model import Model
+from styne.model.forwardmap import ForwardMap
 from styne.statistics.interface import DensityInterface
 from styne.statistics.data import Data
 
@@ -113,7 +113,7 @@ class LotkaVolterraParameter(Vector):
         return np.exp(self.coordinate)
 
 
-class LotkaVolterraSolver(Model):
+class LotkaVolterraSolver(ForwardMap):
 
     def __init__(self, design, config):
 
@@ -126,7 +126,6 @@ class LotkaVolterraSolver(Model):
         self._solverMethod = config['solver']
         self._solverRTol = config['rtol']
 
-        self._param = [None, None]
         self._status = EvaluationStatus.NONE
 
     @property
@@ -158,19 +157,18 @@ class LotkaVolterraSolver(Model):
         return [alpha * x[0] - beta * x[0] * x[1],
                 delta * x[0] * x[1] - gamma * x[1]]
 
-    def _interpolate(self, parameter):
-
+    def _prepare(self, parameter):
         paramEval = parameter.evaluate()
-        self._param = [paramEval[0], paramEval[1]]
+        return paramEval[0], paramEval[1]
 
-    def _evaluate(self):
+    def _evaluate(self, preparedState):
 
         self._status = EvaluationStatus.SUCCESS
 
         alpha = self._fixedParam[0]
-        beta = self._param[0]
+        beta = preparedState[0]
         gamma = self._fixedParam[1]
-        delta = self._param[1]
+        delta = preparedState[1]
 
         evaluation = np.zeros(self._dataShape)
 
@@ -193,7 +191,7 @@ class LotkaVolterraSolver(Model):
 
             evaluation[n, :] = odeResult.y[:, -1]
 
-        self._evaluation = evaluation
+        return evaluation
 
     def full_solution(self, parameter, y0):
 
@@ -221,13 +219,12 @@ def generate_synthetic_data(parameter, solver, noiseVar, rng=None):
 
     sig = np.sqrt(noiseVar)
 
-    solver.interpolate(parameter)
-    solver.evaluate()
+    evaluation = solver(parameter)
 
     if rng is None:
         rng = np.random.default_rng()
 
-    measurement = solver.evaluation + sig * rng.standard_normal(solver.dataShape)
+    measurement = evaluation + sig * rng.standard_normal(solver.dataShape)
 
     data = Data(solver.dataDim, solver.x_)
     data.measurement = measurement

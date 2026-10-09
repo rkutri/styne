@@ -4,7 +4,7 @@ from styne.gp.gaussianprocess import GaussianProcess
 from styne.model.sglmm import SGLMM
 from styne.statistics.stationary import MaternCovariance1D
 from styne.statistics.response import PoissonResponse
-from styne.statistics.likelihood import SGLMMLikelihood
+from styne.statistics.likelihood import RegressionLikelihood
 from styne.statistics.data import Data
 from styne.statistics.hierarchical import SGLMMHyperConditional
 from styne.parameter.vector import Vector
@@ -28,7 +28,7 @@ class TestHierarchicalLogic(unittest.TestCase):
         response = PoissonResponse()
         data = Data(1, sites.to_array())
         data.measurement = np.ones((100, 1))
-        likelihood = SGLMMLikelihood(data, predictor, response)
+        likelihood = RegressionLikelihood(data, predictor, response)
         
         from styne.statistics.pc import JointMaternPCPrior
         pcPrior = JointMaternPCPrior(0.5, 0.05, 3.0, 0.05)
@@ -36,7 +36,7 @@ class TestHierarchicalLogic(unittest.TestCase):
         hyperCond = SGLMMHyperConditional(pcPrior, gp, predictor, likelihood, hyperIdx=1)
         
         # State: [latent, log-hyper]
-        latent = Vector(np.zeros(gp.parameter.dimension))
+        latent = Vector(np.zeros(gp.parameterDimension))
         hyper = Vector(np.log([0.3, 1.2])) # log(rho), log(sigma)
         state = BlockParameter([latent, hyper])
         
@@ -54,10 +54,9 @@ class TestHierarchicalLogic(unittest.TestCase):
         self.assertIsInstance(gp.measure.covariance, IIDCovarianceMatrix)
         self.assertEqual(gp.measure.covariance.scaling, 1.0)
 
-    def test_hyper_conditional_cache_invalidation(self):
+    def test_hyper_conditional_recomputes_for_new_parameters(self):
         """
-        Verify that sequential evaluations with different hyperparameters 
-        correctly clear the predictor cache.
+        Sequential evaluations use their supplied hyperparameters.
         """
         axis = np.linspace(0, 1, 100)
         from styne.utility.grid import UniformGrid
@@ -71,29 +70,30 @@ class TestHierarchicalLogic(unittest.TestCase):
         response = PoissonResponse()
         data = Data(1, sites.to_array())
         data.measurement = np.ones((100, 1))
-        likelihood = SGLMMLikelihood(data, predictor, response)
+        likelihood = RegressionLikelihood(data, predictor, response)
         
         from styne.statistics.pc import JointMaternPCPrior
         pcPrior = JointMaternPCPrior(0.5, 0.05, 3.0, 0.05)
         
         hyperCond = SGLMMHyperConditional(pcPrior, gp, predictor, likelihood, hyperIdx=1)
         
-        latent = Vector(np.ones(gp.parameter.dimension))
+        latent = Vector(np.ones(gp.parameterDimension))
         hyper1 = Vector(np.log([0.2, 1.0])) # log(rho), log(sigma)
         hyper2 = Vector(np.log([0.2, 10000.0])) # significantly different variance
         state1 = BlockParameter([latent, hyper1])
         
         hyperCond.condition_on(state1)
         density = hyperCond.density
+        self.assertFalse(hasattr(density, "_cachedProposalParams"))
         
         logp1 = density.evaluate_log(hyper1)
-        eval1 = predictor.evaluation.copy()
+        eval1 = predictor(latent).copy()
         
         logp2 = density.evaluate_log(hyper2)
-        eval2 = predictor.evaluation.copy()
+        eval2 = predictor(latent).copy()
         
         self.assertNotEqual(logp1, logp2)
-        self.assertFalse(np.allclose(eval1, eval2))
+        self.assertTrue(np.allclose(eval1, eval2))
 
 if __name__ == '__main__':
     unittest.main()

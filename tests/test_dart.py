@@ -6,6 +6,26 @@ from styne.statistics.covariance import IIDCovarianceMatrix
 from styne.mcmc.method.dart import DARTFactory, DART
 from styne.mcmc.method.mrw import MRWFactory
 from styne.mcmc.diagnostics import DummyDiagnostics
+from styne.mcmc.transition import TransitionData
+
+
+@pytest.mark.parametrize(
+    ("root", "invalid_setting", "valid_setting"),
+    [
+        ("pcn", "proposalCovariance", "beta"),
+        ("mrw", "beta", "proposalCovariance"),
+        ("mala", "beta", "stepSize"),
+        ("pmala", "proposalCovariance", "beta"),
+    ],
+)
+def test_dart_root_rejects_unsupported_settings(
+        root, invalid_setting, valid_setting):
+    """Root factories must not silently accept settings for other methods."""
+    factory = DARTFactory(root=root)
+
+    with pytest.raises(AttributeError, match=valid_setting):
+        setattr(factory.root, invalid_setting, 1.0)
+
 
 def test_dart_factory_minimal():
     """Verify that DARTFactory builds a valid 1-level sampler."""
@@ -89,8 +109,81 @@ def test_dart_factory_inconsistent_lengths():
         factory.create()
 
 
+@pytest.mark.parametrize(
+    ('estimatorType', 'nChain', 'burnin', 'thinning'),
+    (
+        ('cumulant', 1, 0, 1),
+        ('cumulant', 4, 4, 1),
+        ('cumulant', 3, 0, 3),
+        ('is', 3, 3, 1),
+        ('bridge', 3, 3, 1),
+    ),
+)
+def test_dart_factory_rejects_insufficient_retained_samples(
+        estimatorType, nChain, burnin, thinning):
+    target = GaussianDensity(
+        IIDCovarianceMatrix(1, 1.0), Vector([0.0])
+    )
+    factory = DARTFactory(root='mrw')
+    factory.target = target
+    factory.surrogate = [target]
+    factory.regularisation = [1.0]
+    factory.nChain = [nChain]
+    factory.burnin = burnin
+    factory.thinning = thinning
+    factory.correctionType = estimatorType
+    factory.root.proposalCovariance = IIDCovarianceMatrix(1, 0.1)
+
+    with pytest.raises(ValueError, match="retains"):
+        factory.create()
+
+
+@pytest.mark.parametrize('estimatorType', ('is', 'bridge', 'cumulant'))
+def test_dart_factory_supports_explicit_zero_subchain(estimatorType):
+    target = GaussianDensity(
+        IIDCovarianceMatrix(1, 1.0), Vector([0.0])
+    )
+    factory = DARTFactory(root='mrw')
+    factory.target = target
+    factory.surrogate = [target]
+    factory.regularisation = [1.0]
+    factory.nChain = [0]
+    factory.correctionType = estimatorType
+    factory.root.proposalCovariance = IIDCovarianceMatrix(1, 0.1)
+
+    sampler = factory.create()
+    current = sampler.initial_state(Vector([0.4]))
+    nextState, transition, _ = sampler.step(
+        current, np.random.default_rng(8)
+    )
+
+    np.testing.assert_array_equal(
+        transition.proposed.parameter.coordinate, current.parameter.coordinate
+    )
+    np.testing.assert_array_equal(
+        nextState.parameter.coordinate, current.parameter.coordinate
+    )
+
+
+def test_multilevel_factory_validates_inner_cumulant_trajectory():
+    target = GaussianDensity(
+        IIDCovarianceMatrix(1, 1.0), Vector([0.0])
+    )
+    factory = DARTFactory(root='mrw')
+    factory.target = target
+    factory.surrogate = [target, target]
+    factory.regularisation = [1.0, 1.0]
+    factory.nChain = [1, 5]
+    factory.burnin = 0
+    factory.correctionType = 'is'
+    factory.root.proposalCovariance = IIDCovarianceMatrix(1, 0.1)
+
+    with pytest.raises(ValueError, match="level 0"):
+        factory.create()
+
+
 def test_partitioned_dart_acceptance_invariant():
-    """Assert partitioned DART _log_mh_ratio equals target + correction invariant."""
+    """Partitioned DART's ratio is the target ratio plus both block corrections."""
     from styne.gp.gaussianprocess import GaussianProcess
     from styne.gp.dnautility import DNACoarseFinePartition
     from styne.statistics.stationary import MaternCovariance1D
@@ -115,34 +208,47 @@ def test_partitioned_dart_acceptance_invariant():
     factory.root.proposalCovariance = IIDCovarianceMatrix(coarseDim, 0.1)
 
     sampler = factory.create()
-    rng = np.random.default_rng(42)
-    state = gp.parameter.clone()
-    sampler._proposalMethod.state = state
-    trans = sampler._proposalMethod.generate_proposal(rng)
+    state = gp.measure.generate_realisation(seed=42)
+    proposal = sampler.proposal
+    trans, _ = proposal.propose(state, np.random.default_rng(42))
+    proposed = trans.proposed.parameter
 
     rule = partition.rule
-    stateC = Vector(rule.extract(0, trans.state.coordinate))
-    proposalC = Vector(rule.extract(0, trans.proposal.coordinate))
-    stateF = Vector(rule.extract(1, trans.state.coordinate))
-    proposalF = Vector(rule.extract(1, trans.proposal.coordinate))
+    stateC = Vector(rule.extract(0, state.coordinate))
+    proposalC = Vector(rule.extract(0, proposed.coordinate))
+    stateF = Vector(rule.extract(1, state.coordinate))
+    proposalF = Vector(rule.extract(1, proposed.coordinate))
 
-    surrDens = sampler._proposalMethod.density
+    # The coarse root chain consumes the random state first, so the same
+    # seed reproduces its trajectory.
+    coarseProposal = proposal._coarseProposal
+    _, _, trajectory, _ = coarseProposal.measure.transition_trajectory(
+        stateC, np.random.default_rng(42)
+    )
+    logRatioEst = coarseProposal.correction.log_ratio_estimate(
+        stateC, proposalC, trajectory
+    )
+    assert logRatioEst != 0.0
+    surrDens = proposal.density
     logDiffSurr = (surrDens.evaluate_log_surrogate(proposalC)
                    - surrDens.evaluate_log_surrogate(stateC))
-    ratioEst = sampler._proposalMethod._coarseProposal.correction
-    logRatioEst = ratioEst.log_ratio_estimate(stateC, proposalC)
-    print(f"Computed logRatioEst: {logRatioEst}")
-    assert logRatioEst != 0.0
     coarseCorrection = -logDiffSurr - logRatioEst
 
     logDiffFinePrior = (fineDens.evaluate_log(proposalF)
                         - fineDens.evaluate_log(stateF))
     fineCorrection = -logDiffFinePrior
 
-    logDiffTarget = (target.evaluate_log(trans.proposal)
-                     - target.evaluate_log(trans.state))
+    logDiffTarget = (target.evaluate_log(proposed)
+                     - target.evaluate_log(state))
     expected = logDiffTarget + coarseCorrection + fineCorrection
-    assert np.isclose(sampler._log_mh_ratio(trans), expected)
+    evaluatedTransition = TransitionData(
+        current=sampler.initial_state(state),
+        proposed=sampler.initial_state(proposed),
+        auxiliary=trans.auxiliary,
+    )
+    assert np.isclose(
+        sampler._log_mh_ratio(evaluatedTransition, sampler.proposal.reference), expected
+    )
 
 
 def test_partitioned_dart_pcn_fine_edge_case():
@@ -159,14 +265,12 @@ def test_partitioned_dart_pcn_fine_edge_case():
     assert np.all(finePrior.mean.coordinate == 0.0)
 
     kernel = PCNProposal(finePrior, 1.0)
-    kernel.state = finePrior.generate_realisation(seed=1)
+    kernelState = finePrior.generate_realisation(seed=1)
 
     rngKernel = np.random.default_rng(42)
     rngPrior = np.random.default_rng(42)
 
-    prop = kernel.generate_proposal(rngKernel).proposal
+    prop = kernel.propose(kernelState, rngKernel)[0].proposal
     draw = finePrior.generate_realisation(rng=rngPrior)
 
     np.testing.assert_array_equal(prop.coordinate, draw.coordinate)
-
-

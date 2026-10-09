@@ -3,13 +3,11 @@ import importlib
 
 _SYMBOL_TO_MODULE = {
     "DensityInterface": "styne.statistics.interface",
+    "RadonNikodymInterface": "styne.statistics.interface",
     "LikelihoodInterface": "styne.statistics.interface",
     "CovarianceFunctionInterface": "styne.statistics.interface",
     "CovarianceOperatorInterface": "styne.statistics.interface",
     "BayesianModelInterface": "styne.statistics.interface",
-    "Predictor": "styne.statistics.interface",
-    "DifferentiableDensity": "styne.statistics.interface",
-    "TwiceDifferentiableDensity": "styne.statistics.interface",
     "ProbabilityMeasure": "styne.statistics.measure",
     "AbsolutelyContinuousProbabilityMeasure": "styne.statistics.measure",
     "ConditionalMeasure": "styne.statistics.measure",
@@ -31,7 +29,6 @@ _SYMBOL_TO_MODULE = {
     "PoissonResponse": "styne.statistics.response",
     "BinomialResponse": "styne.statistics.response",
     "RegressionLikelihood": "styne.statistics.likelihood",
-    "SGLMMLikelihood": "styne.statistics.likelihood",
     "MetropolisWithinGibbsConditional": "styne.statistics.conditional",
     "UnnormalisedPosterior": "styne.statistics.bayes",
     "HierarchicalBayes": "styne.statistics.bayes",

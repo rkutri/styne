@@ -26,17 +26,12 @@ class DummyParameter(Parameter):
     def coordinate(self):
         return self._coord
 
-    @coordinate.setter
-    def coordinate(self, val):
-        self._coord = val
-
     @property
     def dimension(self):
         return len(self._coord)
 
-    def clone(self):
-        v = DummyParameter(self.coordinate.copy())
-        return v
+    def with_coordinate(self, coordinate):
+        return DummyParameter(coordinate)
 
 
 class DummySampler(MCMCSampler):
@@ -83,8 +78,11 @@ def test_gibbs_seam():
         nBlocks = 2
         def conditional(self, idx, state):
             class Conditional:
-                def generate_realisation(self, rng=None):
-                    return DummyParameter(state.block(idx).coordinate + 1.0)
+                def sample(self, randomState):
+                    return (
+                        DummyParameter(state.block(idx).coordinate + 1.0),
+                        randomState,
+                    )
             return Conditional()
 
     builder = GibbsBuilder()
@@ -119,6 +117,7 @@ def test_subsampler_reset():
     factory.target = targetDensity
     factory.surrogate = [surrogateDensity1, surrogateDensity2]
     factory.nChain = [2, 2]
+    factory.burnin = 0
     factory.regularisation = [0.1, 0.1]
     factory.subDiagnostics = PersistentAcceptanceRateDiagnostics
     factory.root.proposalCovariance = IIDCovarianceMatrix(2, 1.0)
@@ -128,12 +127,16 @@ def test_subsampler_reset():
     
     initialState = Vector(np.zeros(2))
     mainChain.run(5, initialState)
-    
+
     for subsampler in mainChain.subsamplers:
-        assert len(subsampler.diagnostics._recent) > 0 or subsampler.diagnostics._total > 0
-        
+        assert subsampler.diagnostics._total == 0
+        subsampler.diagnostics.process(TransitionData(
+            initialState, initialState, outcome=TransitionData.ACCEPTED
+        ))
+        assert subsampler.diagnostics._total == 1
+
     mainChain.clear()
-    
+
     for subsampler in mainChain.subsamplers:
         assert len(subsampler.diagnostics._recent) == 0
         assert subsampler.diagnostics._total == 0
@@ -196,6 +199,7 @@ def test_manuscript_pattern_smoke_test():
     latentFactory.target = targetDensity
     latentFactory.surrogate = [surrogateDensity]
     latentFactory.nChain = [2]
+    latentFactory.burnin = 0
     latentFactory.regularisation = [0.1]
     latentFactory.subDiagnostics = PersistentAcceptanceRateDiagnostics
     latentFactory.root.proposalCovariance = IIDCovarianceMatrix(dimension, 1.0)
@@ -218,7 +222,9 @@ def test_manuscript_pattern_smoke_test():
     )
     
     hierarchicalBayes = HierarchicalBayes(
-        [latentTransition, hyperTransition], root=targetDensity.reference
+        [latentTransition],
+        root=hyperMeasure,
+        updates=[latentTransition, hyperTransition],
     )
     
     builder = GibbsBuilder()
@@ -246,6 +252,7 @@ def test_default_path_regression():
     factory.target = targetDensity
     factory.surrogate = [surrogateDensity]
     factory.nChain = [2]
+    factory.burnin = 0
     factory.regularisation = [0.1]
     factory.root.proposalCovariance = IIDCovarianceMatrix(2, 1.0)
     

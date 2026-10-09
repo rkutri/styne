@@ -1,8 +1,7 @@
 import os
 import numpy as np
-import pytest
 
-from styne.gp.dna import DNAFourierEngine
+from styne.gp.gaussianprocess import GaussianProcess
 from styne.statistics.stationary import matern_fourier
 
 
@@ -23,35 +22,30 @@ Q, D, ALPHA = 16, 2, 1.0
 ELL = 0.2
 
 
-def _outputs():
+def outputs():
     """Deterministic outputs for a fixed square configuration. No RNG."""
-    eng = DNAFourierEngine(Q, D, ALPHA)
     cov = StubFourierCov(ELL)
-    eng.build_covariance(cov)                      # sets eng.spectralWeights
-    weights = np.asarray(eng.spectralWeights)
+    gp = GaussianProcess.dna(cov, Q, D, ALPHA)
+    weights = np.asarray(gp.expansion.spectralWeights)
 
-    real = eng.build_realisation()
-    real.spectralWeights = eng.spectralWeights
+    expansion = gp.expansion
     coeff = np.linspace(-1.0, 1.0, weights.size)   # fixed, not random
-    real.coefficient = coeff
-    native = real.evaluate_native()
+    native = expansion.evaluate_native(coeff)
 
-    mult = eng.compute_log_length_multiplier(nu=1.5, lengthScale=ELL)
-    return {"weights": weights, "native": np.asarray(native), "mult": np.asarray(mult)}
+    return {"weights": weights, "native": np.asarray(native)}
 
 
 def make_snapshot():
-    np.savez(SNAP, **_outputs())
+    np.savez(SNAP, **outputs())
 
 
 def test_scalar_path_unchanged():
-    if not os.path.exists(SNAP):
-        make_snapshot()
+    assert os.path.exists(SNAP), f"Missing committed DNA snapshot: {SNAP}"
     ref = np.load(SNAP)
-    out = _outputs()
-    for key in ref.files:
+    out = outputs()
+    for key, value in out.items():
         np.testing.assert_allclose(
-            out[key], ref[key], rtol=0, atol=1e-12,
+            value, ref[key], rtol=0, atol=1e-12,
             err_msg=f"scalar regression broken in '{key}'")
 
 

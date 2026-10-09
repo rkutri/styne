@@ -1,10 +1,10 @@
-import numpy as np
-
-from styne.model.model import Model
+from styne.model.representation.expansion import backend_constant
+from styne.model.forwardmap import ForwardMap
+from styne.parameter.parameter import as_coordinate
 from styne.parameter.vector import Vector
 
 
-class LinearModel(Model):
+class LinearForwardMap(ForwardMap):
     """
     Base class for linear models. The model response is the linear predictor,
         eta = X @ beta
@@ -12,70 +12,39 @@ class LinearModel(Model):
 
     Parameters
     ----------
-    features : ndarray, shape (N, p)
-        Design matrix for fixed effects.
+    features : array-like, shape (N, p)
+        Backend-native design matrix for fixed effects.
     """
 
-    def __init__(self, features: np.ndarray):
-        
+    def __init__(self, features):
         super().__init__()
 
-        self._features = np.asarray(features)
+        self._features = as_coordinate(features)
 
         if not self._features.ndim == 2:
             raise ValueError("features must be a 2D array")
 
-        self._beta = None
-
-
     @property
     def pType(self):
         return Vector
-    
+
     @property
     def pDim(self):
         return self._features.shape[1]
-    
-    def _interpolate(self, parameter: Vector) -> None:
-        self._beta = parameter.coordinate
 
-    def _evaluate(self) -> None:
-        self._evaluation = self._features @ self._beta
+    def _prepare(self, parameter: Vector):
+        return parameter.coordinate
 
-    def directional_derivative(self, parameter: Vector) -> Vector:
-        """
-        Apply the model's Jacobian to a parameter direction.
+    def _evaluate(self, preparedState):
+        features = backend_constant(self._features, preparedState)
+        return preparedState @ features.T
 
-        For a linear model the Jacobian is the design matrix itself, constant
-        in the parameter, so this is `features @ parameter.coordinate`.
+    def directional_derivative(self, parameter, direction):
+        features = backend_constant(
+            self._features, direction.coordinate
+        )
+        return direction.coordinate @ features.T
 
-        Parameters
-        ----------
-        parameter : Vector
-            Direction in parameter space.
-
-        Returns
-        -------
-        Vector
-        """
-
-        v = parameter.clone()
-        v.coordinate = self._features @ parameter.coordinate
-        return v
-
-    def adjoint_directional_derivative(self, w: np.ndarray) -> np.ndarray:
-        """
-        Apply the adjoint of the model's Jacobian, `features.T @ w`.
-
-        Parameters
-        ----------
-        w : np.ndarray
-            Vector in observation space.
-
-        Returns
-        -------
-        np.ndarray
-        """
-        return self._features.T @ np.asarray(w).ravel()
-
-        
+    def adjoint_derivative(self, parameter, cotangent):
+        features = backend_constant(self._features, cotangent)
+        return cotangent @ features
