@@ -7,9 +7,8 @@ from styne.mcmc.method.mala import (
     MALAProposal,
     MetropolisAdjustedLangevinAlgorithm,
 )
-from styne.mcmc.method.mrw import RobbinsMonroMRW
-from styne.mcmc.proposal import ProposalMethod
-from styne.mcmc.transition import EvaluatedState, TransitionData
+from styne.mcmc.proposal import ProposalMethod, zero_correction
+from styne.mcmc.transition import EvaluatedState
 from styne.parameter.scalar import Scalar
 from styne.parameter.vector import Vector
 from styne.statistics.covariance import IIDCovarianceMatrix
@@ -36,18 +35,13 @@ class FixedOffsetProposal(ProposalMethod):
 
     def propose(self, state, rng):
         proposal = state.with_coordinate(state.coordinate + 10.)
-        return TransitionData(state, proposal), rng
+        return self.record(state, proposal, zero_correction(state)), rng
 
-
-class SymmetricMetropolisHastings(MetropolisHastings):
-
-    def _log_mh_ratio(self, transition):
-        return transition.proposed.logDensity - transition.current.logDensity
 
 
 def test_step_reuses_current_log_density_after_rejection():
     density = QuadraticDensity()
-    sampler = SymmetricMetropolisHastings(
+    sampler = MetropolisHastings(
         density, FixedOffsetProposal(), DummyDiagnostics(),
         rng=np.random.default_rng(4),
     )
@@ -65,7 +59,7 @@ def test_step_reuses_current_log_density_after_rejection():
 
 def test_runner_initializes_current_density_once():
     density = QuadraticDensity()
-    sampler = SymmetricMetropolisHastings(
+    sampler = MetropolisHastings(
         density, FixedOffsetProposal(), DummyDiagnostics(),
         rng=np.random.default_rng(5),
     )
@@ -77,7 +71,7 @@ def test_runner_initializes_current_density_once():
 
 def test_runner_reuses_evaluated_state_when_continued():
     density = QuadraticDensity()
-    sampler = SymmetricMetropolisHastings(
+    sampler = MetropolisHastings(
         density, FixedOffsetProposal(), DummyDiagnostics(),
         rng=np.random.default_rng(6),
     )
@@ -95,7 +89,7 @@ def test_step_compiles_with_jax():
 
     get_backend("jax")
     density = GraphQuadraticDensity()
-    sampler = SymmetricMetropolisHastings(
+    sampler = MetropolisHastings(
         density, FixedOffsetProposal(), DummyDiagnostics(),
     )
     current = EvaluatedState(Vector(jnp.array([0.])), jnp.array(0.))
@@ -114,7 +108,7 @@ def test_runner_preserves_jax_chain_arrays():
     from styne.backend import get_backend
 
     backend = get_backend("jax")
-    sampler = SymmetricMetropolisHastings(
+    sampler = MetropolisHastings(
         GraphQuadraticDensity(), FixedOffsetProposal(), DummyDiagnostics(),
         rng=jax.random.key(5),
     )
@@ -130,7 +124,7 @@ def test_runner_preserves_pytorch_chain_arrays():
     from styne.backend import get_backend
 
     backend = get_backend("pytorch")
-    sampler = SymmetricMetropolisHastings(
+    sampler = MetropolisHastings(
         GraphQuadraticDensity(), FixedOffsetProposal(), DummyDiagnostics(),
         rng=backend.random_state(5),
     )
@@ -145,15 +139,15 @@ def test_transformed_trajectory_compiles_with_jax():
     jax = pytest.importorskip("jax")
     jnp = pytest.importorskip("jax.numpy")
 
-    sampler = SymmetricMetropolisHastings(
+    sampler = MetropolisHastings(
         GraphQuadraticDensity(), FixedOffsetProposal(), DummyDiagnostics(),
     )
-    finalState, coordinates, _ = sampler.transformed_trajectory(
+    result = sampler.transformed_trajectory(
         2, Vector(jnp.array([0.])), jax.random.key(9)
     )
 
-    np.testing.assert_allclose(coordinates, [[0.], [0.]])
-    np.testing.assert_allclose(finalState.coordinate, [0.])
+    np.testing.assert_allclose(result.coordinates, [[0.], [0.]])
+    np.testing.assert_allclose(result.final.coordinate, [0.])
 
 
 def test_transformed_trajectory_rejects_pytorch_generator_compilation():
@@ -161,7 +155,7 @@ def test_transformed_trajectory_rejects_pytorch_generator_compilation():
     from styne.backend import get_backend
 
     backend = get_backend("pytorch")
-    sampler = SymmetricMetropolisHastings(
+    sampler = MetropolisHastings(
         GraphQuadraticDensity(), FixedOffsetProposal(), DummyDiagnostics(),
     )
 
@@ -169,34 +163,6 @@ def test_transformed_trajectory_rejects_pytorch_generator_compilation():
         sampler.transformed_trajectory(
             2, Vector(torch.tensor([0.])), backend.random_state(9)
         )
-
-
-def test_adaptive_mrw_carries_its_scale_in_the_transition_state():
-    sampler = RobbinsMonroMRW(
-        GraphQuadraticDensity(), IIDCovarianceMatrix(1, 1.),
-        DummyDiagnostics(), rng=np.random.default_rng(4),
-        adaptOffset=0, adaptDecay=1.,
-    )
-    initialState = sampler.initial_state(Vector(np.array([0.])))
-    nextState, _, _ = sampler.step(initialState, sampler._rng)
-
-    assert nextState.stepCount == 1
-    assert nextState.logVariance != initialState.logVariance
-
-
-def test_adaptive_mrw_step_compiles_with_jax():
-    jax = pytest.importorskip("jax")
-    jnp = pytest.importorskip("jax.numpy")
-    from styne.backend import get_backend
-
-    sampler = RobbinsMonroMRW(
-        GraphQuadraticDensity(), IIDCovarianceMatrix(1, 1.),
-        DummyDiagnostics(), adaptOffset=0, adaptDecay=1.,
-    )
-    state = sampler.initial_state(Vector(jnp.array([0.])))
-    nextState, _, _ = jax.jit(sampler.step)(state, jax.random.key(4))
-
-    assert get_backend("jax").is_array(nextState.logVariance)
 
 
 def test_batched_mala_step_uses_jax_autodiff():
@@ -306,3 +272,60 @@ def test_mala_drift_retains_pytorch_gradient_connectivity():
     gradient, = torch.autograd.grad(drift.sum(), coordinate)
 
     torch.testing.assert_close(gradient, torch.tensor([0.98]))
+
+
+def radon_nikodym_target():
+    from styne.statistics.gaussian import Gaussian
+    from styne.statistics.radonnikodym import RadonNikodym
+
+    reference = Gaussian(IIDCovarianceMatrix(2, 1.0), Vector(np.zeros(2)))
+    likelihood = GaussianDensity(
+        IIDCovarianceMatrix(2, 0.3), Vector(np.array([1.0, -0.5]))
+    )
+    return RadonNikodym(reference, likelihood)
+
+
+
+def test_radon_nikodym_target_is_stored_relative_to_its_reference():
+    from styne.mcmc.method.mrw import MetropolisedRandomWalk
+
+    target = radon_nikodym_target()
+    sampler = MetropolisedRandomWalk(
+        target, IIDCovarianceMatrix(2, 0.5), DummyDiagnostics()
+    )
+    current = sampler.initial_state(Vector(np.array([0.3, 0.1])))
+
+    _, transition, _ = sampler.step(current, np.random.default_rng(3))
+    x, y = transition.current.parameter, transition.proposed.parameter
+
+    np.testing.assert_allclose(
+        current.logDensity, target.derivative.evaluate_log(x)
+    )
+    np.testing.assert_allclose(
+        sampler._log_mh_ratio(transition, sampler.proposal.reference),
+        target.evaluate_log(y) - target.evaluate_log(x),
+    )
+
+
+def test_target_ratio_changes_reference_to_that_of_the_proposal():
+    from styne.mcmc.method.pcn import PCNProposal
+    from styne.statistics.gaussian import Gaussian
+
+    target = radon_nikodym_target()
+    proposalReference = Gaussian(
+        IIDCovarianceMatrix(2, 2.0), Vector(np.array([0.5, 0.0]))
+    )
+    sampler = MetropolisHastings(
+        target, PCNProposal(proposalReference, 0.6), DummyDiagnostics()
+    )
+    current = sampler.initial_state(Vector(np.array([0.3, 0.1])))
+
+    _, transition, _ = sampler.step(current, np.random.default_rng(5))
+    x, y = transition.current.parameter, transition.proposed.parameter
+    referenceDensity = proposalReference.density
+
+    np.testing.assert_allclose(
+        sampler._log_mh_ratio(transition, sampler.proposal.reference),
+        target.evaluate_log(y) - target.evaluate_log(x)
+        - referenceDensity.evaluate_log(y) + referenceDensity.evaluate_log(x),
+    )

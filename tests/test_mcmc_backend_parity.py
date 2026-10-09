@@ -4,8 +4,7 @@ import pytest
 from styne.backend import BackendUnavailableError, get_backend, infer_backend
 from styne.mcmc.diagnostics import DummyDiagnostics
 from styne.mcmc.metropolishastings import MetropolisHastings
-from styne.mcmc.proposal import ProposalMethod
-from styne.mcmc.transition import TransitionData
+from styne.mcmc.proposal import ProposalMethod, zero_correction
 from styne.parameter import Vector
 from styne.statistics.covariance import IIDCovarianceMatrix
 from styne.statistics.gaussian import GaussianDensity
@@ -34,13 +33,8 @@ class FixedOffsetProposal(ProposalMethod):
 
     def propose(self, state, rng):
         proposal = state.with_coordinate(state.coordinate + 1.0)
-        return TransitionData(state, proposal), rng
+        return self.record(state, proposal, zero_correction(state)), rng
 
-
-class SymmetricMetropolisHastings(MetropolisHastings):
-
-    def _log_mh_ratio(self, transition):
-        return transition.proposed.logDensity - transition.current.logDensity
 
 
 def make_sampler(backend):
@@ -49,7 +43,7 @@ def make_sampler(backend):
         IIDCovarianceMatrix(1, variance),
         Vector(backend.zeros(1, dtype='float32')),
     ))
-    sampler = SymmetricMetropolisHastings(
+    sampler = MetropolisHastings(
         target, FixedOffsetProposal(), DummyDiagnostics(),
     )
     return sampler, target

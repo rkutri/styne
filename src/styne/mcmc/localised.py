@@ -126,6 +126,24 @@ class LocalisedSurrogateDensity(RadonNikodym):
         return self._surrogateComponent.evaluate_log(y)
 
     @property
+    def surrogateReference(self):
+        """Measure the stored tempered surrogate refers to, None for Lebesgue.
+
+        A root chain stores this density through its derivative, which is the
+        tempered surrogate relative to this measure plus `log_localisation`.
+        """
+        if isinstance(self._surrogateDensity, RadonNikodym):
+            return self._reference
+        return None
+
+    def log_localisation(self, parameter: Parameter):
+        """Localisation term contained in the stored derivative."""
+        if isinstance(self._surrogateDensity, RadonNikodym):
+            return self._regGaussian.density.evaluate_log(parameter)
+        # Without a surrogate reference, the localisation is the reference.
+        return 0.0
+
+    @property
     def location(self) -> Parameter:
         return self._regGaussian.mean
 

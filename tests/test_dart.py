@@ -183,7 +183,7 @@ def test_multilevel_factory_validates_inner_cumulant_trajectory():
 
 
 def test_partitioned_dart_acceptance_invariant():
-    """Assert partitioned DART _log_mh_ratio equals target + correction invariant."""
+    """Partitioned DART's ratio is the target ratio plus both block corrections."""
     from styne.gp.gaussianprocess import GaussianProcess
     from styne.gp.dnautility import DNACoarseFinePartition
     from styne.statistics.stationary import MaternCovariance1D
@@ -208,43 +208,47 @@ def test_partitioned_dart_acceptance_invariant():
     factory.root.proposalCovariance = IIDCovarianceMatrix(coarseDim, 0.1)
 
     sampler = factory.create()
-    rng = np.random.default_rng(42)
     state = gp.measure.generate_realisation(seed=42)
-    trans, _ = sampler._proposalMethod.propose(state, rng)
+    proposal = sampler.proposal
+    trans, _ = proposal.propose(state, np.random.default_rng(42))
+    proposed = trans.proposed.parameter
 
     rule = partition.rule
-    stateC = Vector(rule.extract(0, trans.state.coordinate))
-    proposalC = Vector(rule.extract(0, trans.proposal.coordinate))
-    stateF = Vector(rule.extract(1, trans.state.coordinate))
-    proposalF = Vector(rule.extract(1, trans.proposal.coordinate))
+    stateC = Vector(rule.extract(0, state.coordinate))
+    proposalC = Vector(rule.extract(0, proposed.coordinate))
+    stateF = Vector(rule.extract(1, state.coordinate))
+    proposalF = Vector(rule.extract(1, proposed.coordinate))
 
-    surrDens = sampler._proposalMethod.density
+    # The coarse root chain consumes the random state first, so the same
+    # seed reproduces its trajectory.
+    coarseProposal = proposal._coarseProposal
+    _, _, trajectory, _ = coarseProposal.measure.transition_trajectory(
+        stateC, np.random.default_rng(42)
+    )
+    logRatioEst = coarseProposal.correction.log_ratio_estimate(
+        stateC, proposalC, trajectory
+    )
+    assert logRatioEst != 0.0
+    surrDens = proposal.density
     logDiffSurr = (surrDens.evaluate_log_surrogate(proposalC)
                    - surrDens.evaluate_log_surrogate(stateC))
-    ratioEst = sampler._proposalMethod._coarseProposal.correction
-    logRatioEst = ratioEst.log_ratio_estimate(
-        stateC,
-        proposalC,
-        trans.auxiliary["surrogateTrajectory"],
-        trans.auxiliary["proposalTrajectory"],
-    )
-    print(f"Computed logRatioEst: {logRatioEst}")
-    assert logRatioEst != 0.0
     coarseCorrection = -logDiffSurr - logRatioEst
 
     logDiffFinePrior = (fineDens.evaluate_log(proposalF)
                         - fineDens.evaluate_log(stateF))
     fineCorrection = -logDiffFinePrior
 
-    logDiffTarget = (target.evaluate_log(trans.proposal)
-                     - target.evaluate_log(trans.state))
+    logDiffTarget = (target.evaluate_log(proposed)
+                     - target.evaluate_log(state))
     expected = logDiffTarget + coarseCorrection + fineCorrection
     evaluatedTransition = TransitionData(
-        current=sampler.evaluate_state(trans.state),
-        proposed=sampler.evaluate_state(trans.proposal),
+        current=sampler.initial_state(state),
+        proposed=sampler.initial_state(proposed),
         auxiliary=trans.auxiliary,
     )
-    assert np.isclose(sampler._log_mh_ratio(evaluatedTransition), expected)
+    assert np.isclose(
+        sampler._log_mh_ratio(evaluatedTransition, sampler.proposal.reference), expected
+    )
 
 
 def test_partitioned_dart_pcn_fine_edge_case():

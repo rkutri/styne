@@ -2,8 +2,7 @@ import numpy as np
 
 from styne.mcmc.diagnostics import DummyDiagnostics
 from styne.mcmc.metropolishastings import MetropolisHastings
-from styne.mcmc.proposal import ProposalMethod
-from styne.mcmc.transition import TransitionData
+from styne.mcmc.proposal import ProposalMethod, zero_correction
 from styne.parameter.vector import Vector
 from styne.statistics.covariance import IIDCovarianceMatrix
 from styne.statistics.gaussian import GaussianDensity
@@ -19,19 +18,14 @@ class FixedUniformState:
 
 class FixedOffsetProposal(ProposalMethod):
     def propose(self, state, rng):
-        return TransitionData(state, state.with_coordinate(
-            state.coordinate + 1.0
-        )), rng
+        proposal = state.with_coordinate(state.coordinate + 1.0)
+        return self.record(state, proposal, zero_correction(state)), rng
 
-
-class SymmetricMetropolisHastings(MetropolisHastings):
-    def _log_mh_ratio(self, transition):
-        return transition.proposed.logDensity - transition.current.logDensity
 
 
 def make_sampler():
     target = GaussianDensity(IIDCovarianceMatrix(1, 1.0), Vector([0.0]))
-    return SymmetricMetropolisHastings(
+    return MetropolisHastings(
         target, FixedOffsetProposal(), DummyDiagnostics()
     )
 

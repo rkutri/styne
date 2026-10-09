@@ -71,3 +71,14 @@ def compute_log_length_multiplier(q, alpha, d, nu, lengthScale):
             multipliers.append(0.5 * (d - factor * ratio))
 
     return np.asarray(multipliers)
+
+
+class FixedNormalRng:
+    """NumPy random state whose standard normal draw is fixed noise."""
+
+    def __init__(self, noise):
+        self._noise = np.asarray(noise)
+
+    def standard_normal(self, size):
+        assert tuple(np.atleast_1d(size)) == self._noise.shape
+        return self._noise

@@ -135,7 +135,7 @@ def test_samples(kappa, h):
     )
 
     for loc in locations:
-        _, subchain, rng = surrogateMeasure.transition_trajectory(loc, rng)
+        _, _, subchain, rng = surrogateMeasure.transition_trajectory(loc, rng)
         subchain = np.asarray(subchain)
         density = surrogateMeasure.density.with_location(loc)
 

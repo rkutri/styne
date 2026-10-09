@@ -7,6 +7,11 @@ from styne.parameter.parameter import Parameter
 MISSING = object()
 
 
+def parameter_of(state):
+    """The parameter of a numerical chain state."""
+    return getattr(state, "parameter", state)
+
+
 @dataclass(frozen=True)
 class EvaluatedState:
     """A parameter and its backend-native log-density value.
@@ -18,19 +23,6 @@ class EvaluatedState:
 
     parameter: Parameter
     logDensity: Any = None
-
-
-@dataclass(frozen=True)
-class RobbinsMonroState:
-    """Evaluated MRW state together with its adaptive proposal scale."""
-
-    evaluatedState: EvaluatedState
-    logVariance: Any
-    stepCount: Any
-
-    @property
-    def parameter(self):
-        return self.evaluatedState.parameter
 
 
 @dataclass(frozen=True, init=False)
