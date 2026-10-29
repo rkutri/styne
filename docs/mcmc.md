@@ -132,12 +132,10 @@ After every ten transitions, set each proposal variance to its empirical
 estimate plus a positive `nugget`. Between updates, retain the current settings.
 The nugget keeps every proposal variance positive, even after repeated rejections.
 
-The [complete example](../examples/adaptation.py) implements this rule as a
-`CovarianceAdaptation` strategy:
+The [complete example](../examples/05_adaptation.py) defines a
+`CovarianceAdaptation` strategy and uses it as follows:
 
 ```python
-from examples.adaptation import CovarianceAdaptation
-
 sampler = MetropolisedRandomWalk(
     target, initialCovariance, diagnostics,
     adaptation=CovarianceAdaptation(interval=10, nugget=0.01),

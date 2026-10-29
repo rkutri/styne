@@ -1,10 +1,10 @@
 import copy
+from importlib import import_module
 from typing import Any, NamedTuple
 
 import numpy as np
 import pytest
 
-from examples.adaptation import CovarianceAdaptation
 from styne.backend import get_backend, infer_backend
 from styne.mcmc import Adaptation, NoAdaptation
 from styne.mcmc import MetropolisedRandomWalk, PreconditionedCrankNicolson
@@ -18,6 +18,9 @@ from styne.statistics import DiagonalCovarianceMatrix, Gaussian, IIDCovarianceMa
 from styne.statistics.radonnikodym import RadonNikodym
 from styne.statistics.interface import DensityInterface
 from styne.utility import RobbinsMonroAdaptation
+
+
+CovarianceAdaptation = import_module('examples.05_adaptation').CovarianceAdaptation
 
 
 def random_walk(backend, variance=0.2, **settings):

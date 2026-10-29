@@ -99,8 +99,8 @@ explicit random states, and parameter updates use `with_*` methods.
 
 The [MCMC extension guide](docs/mcmc.md) describes proposal corrections,
 warm-up adaptation, compiled trajectories and migration within 0.3.0.
-Run `python examples/adaptation.py --backend numpy --smoke` for a small
-warm-up followed by sampling with a fixed proposal scale.
+Run `python examples/05_adaptation.py --backend numpy --smoke` for a small
+warm-up followed by sampling with a fixed diagonal proposal covariance.
 
 `HierarchicalBayes` keeps the factors used to evaluate the joint density
 separate from the invariant updates used by `BlockGibbs`. Add each non-root
