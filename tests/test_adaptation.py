@@ -85,9 +85,16 @@ def test_eager_continuation_preserves_state_and_updates_visible_proposal(backend
     assert sampler.chain.length == 9
     np.testing.assert_allclose(np.asarray(sampler.lastState.coordinate),
                                np.asarray(expected.parameter.coordinate), atol=1e-6)
+    np.testing.assert_array_equal(
+        np.asarray(sampler.currentState.adaptationState.logScale),
+        np.asarray(expected.adaptationState.logScale),
+    )
+    variance = np.asarray(sampler.proposalCovariance.marginalVariance)
+    # Backend exp and the covariance's sqrt/square round trip introduce roundoff.
     np.testing.assert_allclose(
-        np.asarray(sampler.proposalCovariance.marginalVariance),
+        variance,
         np.exp(np.asarray(expected.adaptationState.logScale)),
+        rtol=4 * np.finfo(variance.dtype).eps,
     )
     frozen = sampler.freeze_adaptation()
     assert frozen.chain.length == 0
