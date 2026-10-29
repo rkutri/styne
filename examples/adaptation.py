@@ -22,14 +22,20 @@ def run(backendName, smoke=False):
         target.density, IIDCovarianceMatrix(2, backend.asarray(0.01)),
         AcceptanceRateDiagnostics(), rng=backend.random_state(7),
     )
-    warmup = RobbinsMonroAdaptation(sampler)
-    state, rng = warmup.run(
-        32 if smoke else 2000, warmup.initial_state(start), backend.random_state(11)
-    )
-    frozen = warmup.freeze(state, rng)
-    frozen.run(32 if smoke else 2000, state.parameter)
-    assert frozen.chain.length == (33 if smoke else 2001)
-    assert sampler.chain.length == 0
+    sampler.adaptation = RobbinsMonroAdaptation()
+    nSteps = 32 if smoke else 2000
+    if backend.capabilities.transformedLoops:
+        execute = sampler.compiled_trajectory(nSteps)
+        result = execute(start, backend.random_state(11))
+        state = result.finalState
+        frozen = sampler.freeze_adaptation(state, result.rng)
+    else:
+        sampler.run(nSteps, start)
+        state = sampler.currentState
+        frozen = sampler.freeze_adaptation()
+    frozen.run(nSteps, state.parameter)
+    assert frozen.chain.length == nSteps + 1
+    assert isinstance(frozen, MetropolisedRandomWalk)
     return frozen.diagnostics.global_acceptance_rate()
 
 

@@ -60,7 +60,7 @@ def register_parameter_containers():
 
     jax.tree_util.register_pytree_node(
         EvaluatedState,
-        lambda state: ((state.parameter, state.logDensity), None),
+        lambda state: ((state.parameter, state.logDensity, state.adaptationState), None),
         lambda metadata, children: EvaluatedState(*children),
     )
     jax.tree_util.register_pytree_node(

@@ -5,6 +5,8 @@
 import importlib
 
 _SYMBOL_TO_MODULE = {
+    "Adaptation": "styne.mcmc.adaptation",
+    "NoAdaptation": "styne.mcmc.adaptation",
     "MetropolisHastings": "styne.mcmc.metropolishastings",
     "Trajectory": "styne.mcmc.sampler",
     "MCMCSampler": "styne.mcmc.sampler",

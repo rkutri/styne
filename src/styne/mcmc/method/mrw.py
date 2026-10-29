@@ -82,21 +82,22 @@ class MetropolisedRandomWalk(MetropolisHastings):
             proposalCov: CovarianceMatrix,
             diagnostics: ChainDiagnostics,
             acceptance: AcceptanceProbability = None,
-            rng: Optional[Generator] = None):
+            rng: Optional[Generator] = None, *, adaptation=None):
 
         proposalMethod = MRWProposal(proposalCov)
         super().__init__(target, proposalMethod, diagnostics,
-                         acceptance=acceptance, rng=rng)
+                         acceptance=acceptance, rng=rng, adaptation=adaptation)
 
     @property
     def proposalCovariance(self) -> CovarianceMatrix:
         """Current proposal covariance."""
-        return self._proposalMethod.covariance
+        return self.proposal.covariance
 
     @proposalCovariance.setter
     def proposalCovariance(self, cov: CovarianceMatrix):
         """Replace the proposal covariance."""
         self._proposalMethod.covariance = cov
+        self.clear()
 
 
 class MRWFactory(MHFactory):

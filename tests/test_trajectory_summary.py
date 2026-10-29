@@ -58,7 +58,7 @@ def test_chunks_reuse_compilation_and_equal_one_trajectory():
     run = sampler.compiled_trajectory(6, thinning=3, readout=readout)
     first = run(start, key)
     firstTraces = len(traces)
-    second = run(first.final, first.rng)
+    second = run(first.finalState, first.rng)
     assert firstTraces > 0 and len(traces) == firstTraces
     whole = sampler.transformed_trajectory(12, start, key, thinning=3, readout=readout)
 

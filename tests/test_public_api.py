@@ -54,6 +54,7 @@ EXPECTED_EXPORTS = {
         "WelfordAccumulator",
     },
     "styne.mcmc": {
+        "Adaptation", "NoAdaptation",
         "MetropolisHastings", "MCMCSampler", "Trajectory", "ProposalMethod", "MHFactory",
         "Annotator", "AcceptanceProbability", "ChainDiagnostics", "Chain",
         "GibbsChain", "EvaluatedState", "TransitionData", "DART",

@@ -27,7 +27,7 @@ class MALAProposal(ProposalMethod):
     ----------
     dim : int
         Dimension of the state space.
-    stepSize : float
+    stepSize : float or backend scalar
         Step size h, interpreted as the standard deviation of the
         isotropic noise.
     logGradientCallable : callable
@@ -45,13 +45,13 @@ class MALAProposal(ProposalMethod):
             raise TypeError(
                 "MALA requires a log density or explicit gradient."
             )
-        self._h = float(stepSize)
+        self._h = stepSize
         self._h2 = self._h * self._h
         self._logGradient = logGradientCallable
         self._logDensity = logDensityCallable
 
     @property
-    def stepSize(self) -> float:
+    def stepSize(self):
         return self._h
 
     def for_target(self, target, previous):
@@ -123,7 +123,7 @@ class MetropolisAdjustedLangevinAlgorithm(MetropolisHastings):
 
     def __init__(self, targetDensity, stepSize, diagnostics,
                  acceptance: AcceptanceProbability = None,
-                 rng: Optional[Generator] = None, gradient=None):
+                 rng: Optional[Generator] = None, gradient=None, *, adaptation=None):
 
         proposalMethod = MALAProposal(
             targetDensity.domainDimension,
@@ -132,7 +132,7 @@ class MetropolisAdjustedLangevinAlgorithm(MetropolisHastings):
             targetDensity.evaluate_log,
         )
         super().__init__(targetDensity, proposalMethod, diagnostics,
-                         acceptance=acceptance, rng=rng)
+                         acceptance=acceptance, rng=rng, adaptation=adaptation)
 
 
 class MALAFactory(MHFactory):

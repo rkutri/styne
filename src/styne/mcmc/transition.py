@@ -17,12 +17,15 @@ class EvaluatedState:
     """A parameter and its backend-native log-density value.
 
     ``logDensity`` is ``None`` for a proposal that has not yet been evaluated.
+    ``adaptationState`` holds the current numerical adaptation history, or
+    ``None`` for an ordinary fixed proposal.
     This permits proposal construction to remain independent of the target
     density while making evaluated values explicit once available.
     """
 
     parameter: Parameter
     logDensity: Any = None
+    adaptationState: Any = None
 
 
 @dataclass(frozen=True, init=False)

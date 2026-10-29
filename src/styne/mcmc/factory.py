@@ -2,6 +2,7 @@ from abc import ABC, abstractmethod
 from typing import Optional
 from numpy.random import Generator
 
+from styne.mcmc.adaptation import Adaptation, NoAdaptation
 from styne.mcmc.diagnostics import AcceptanceRateDiagnostics, ChainDiagnostics
 from styne.statistics.interface import DensityInterface
 from styne.mcmc.metropolishastings import MetropolisHastings
@@ -43,6 +44,7 @@ class MHFactory(ABC):
         self._target: DensityInterface = None
         self._diagnostics: ChainDiagnostics = None
         self._rng: Optional[Generator] = None
+        self._adaptation = NoAdaptation()
 
     @property
     def target(self) -> DensityInterface:
@@ -69,6 +71,16 @@ class MHFactory(ABC):
         self._rng = r
 
 
+    @property
+    def adaptation(self) -> Adaptation:
+        return self._adaptation
+
+    @adaptation.setter
+    def adaptation(self, strategy: Adaptation):
+        if not isinstance(strategy, Adaptation):
+            raise TypeError("adaptation must implement Adaptation.")
+        self._adaptation = strategy
+
     def _validate(self):
         if self._target is None:
             raise ValueError("Target not set.")
@@ -85,4 +97,6 @@ class MHFactory(ABC):
         self._validate()
         if self._diagnostics is None:
             self._diagnostics = AcceptanceRateDiagnostics()
-        return self._create_sampler()
+        sampler = self._create_sampler()
+        sampler.adaptation = self._adaptation
+        return sampler

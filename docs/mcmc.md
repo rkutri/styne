@@ -1,118 +1,122 @@
-# Extending MCMC transitions
+# MCMC proposals and adaptation
 
-A proposal owns how a candidate is drawn and how its forward and reverse
-densities differ. `MetropolisHastings` owns the acceptance rule. Keeping these
-responsibilities separate lets a new proposal use the same acceptance,
-batching, diagnostics and random-state handling as the existing methods.
+A Metropolis-Hastings transition has two parts: a proposal draws a candidate,
+and an acceptance rule determines whether to retain it. `ProposalMethod`
+defines the proposal; `MetropolisHastings` combines it with the target and
+acceptance rule. MRW, pCN, MALA, MLDA and DART use this common interface.
 
-Start with `MRWProposal` and `MetropolisedRandomWalk` in
-[`mrw.py`](../src/styne/mcmc/method/mrw.py), then read
-[`ProposalMethod`](../src/styne/mcmc/proposal.py),
-[`MetropolisHastings`](../src/styne/mcmc/metropolishastings.py) and
-[`MCMCSampler`](../src/styne/mcmc/sampler.py).
+## Proposals
 
-## Proposal contract
+`propose(parameter, rng)` returns a `TransitionData` and the next random state.
+The transition contains the current and proposed parameters and a correction
+`log q_y(x) - log q_x(y)`. Both densities are taken relative to
+`proposal.reference`; `None` denotes Lebesgue measure. A symmetric random walk
+has zero correction relative to Lebesgue measure. For pCN, the correction is
+zero relative to its Gaussian reference measure.
 
-`propose(state, rng)` returns a `TransitionData` and the next random state.
-Use `ProposalMethod.record(current, proposed, logCorrection)` to construct
-the record. The correction is `log q_y(x) - log q_x(y)`, with both proposal
-densities taken relative to `proposal.reference`. `None` denotes Lebesgue
-measure. A symmetric random walk has zero correction relative to Lebesgue;
-pCN has zero correction relative to the Gaussian measure it preserves.
+MH adds the target ratio relative to the same measure. An `EvaluatedState`
+caches the parameter and its log density. For a Radon-Nikodym target, the cached
+value is the log derivative relative to the target's reference measure.
 
-The sampler combines that correction with the target ratio relative to the
-same measure. Radon–Nikodym targets store their derivative, avoiding reference
-evaluations when the proposal preserves that reference. Langevin, MLDA and
-DART proposals supply their own corrections through this same contract.
+Use `ProposalMethod.record(current, proposed, logCorrection)` to construct a
+transition. The [MRW implementation](../src/styne/mcmc/method/mrw.py) gives a
+minimal example. `condition(parameter)` prepares a proposal before each draw;
+state-dependent proposal densities still require their full correction.
+`for_target(target, previous)` updates settings inherited from a replaced target.
 
-`condition(state)` is called once before drawing a proposal. A conditioned
-proposal may depend on held coordinates, which are identical in the forward
-and reverse moves. It is not a licence to omit the correction for arbitrary
-state-dependent parameters. `for_target(target, previous)` reconstructs
-settings taken from the old target; explicitly supplied settings stay fixed.
+`sampler.with_target(...)` and `sampler.with_proposal(...)` return a sampler
+with fresh history. Unchanged nested proposal components may be shared.
 
-`with_target` and `with_proposal` create fresh outer runner history and
-diagnostics. They can share unchanged nested proposal components. Construct
-separate nested samplers when their stateful diagnostics must be independent.
+## Adaptation
 
-Block proposals propagate the random state from one block to the next. Their
-corrections are converted to Lebesgue before summation, since the blocks may
-use different reference measures. Partition rules preserve backend arrays and
-batch axes when extracting and merging coordinates.
+Adaptation adjusts proposal settings from completed transitions. It belongs
+in MH because MH knows the acceptance decision and the retained state, including
+repetitions after rejection. An `Adaptation` strategy specifies the adjustment
+rule. MH prepares the proposal, completes the transition with those settings,
+then updates the adaptation state for the next step.
 
-## Warm-up and production
+The sampler and proposal keep their classes: an adaptive MRW is still a
+`MetropolisedRandomWalk` with an `MRWProposal`. The default `NoAdaptation`
+leaves the proposal unchanged.
 
-`RobbinsMonroAdaptation` in `styne.utility` wraps an existing sampler. Its
-numerical state contains the evaluated chain state, log scale and step count.
-It delegates each transition to the ordinary sampler, then adjusts the scale.
-This avoids a second implementation of acceptance inside an adaptive sampler.
+### Writing an adaptation
 
-The supported scales are an IID random-walk variance, including its covariance
-scaling, and a pCN step size. A batch shares one scale, updated from its mean
-acceptance; individual chains retain independent acceptance decisions.
-Unsupported proposals raise an error rather than silently doing no adaptation.
+Subclass [`Adaptation`](../src/styne/mcmc/adaptation.py) and implement:
+
+| Method | Role |
+| --- | --- |
+| `initial_state(parameter, proposalMethod)` | Validate and initialise numerical state. |
+| `prepare_proposal(proposalMethod, state)` | Configure the next transition's proposal. |
+| `update_state(state, nextState, transitionData)` | Return the updated numerical state. |
+
+Keep fixed configuration on the strategy and evolving quantities in a small
+immutable container, such as `RobbinsMonroState`. MH carries this container in
+`EvaluatedState.adaptationState`. `nextState` is the retained chain state;
+`transitionData` supplies both endpoints, the outcome and log acceptance
+probability. The strategy defines any aggregation across batched chains.
+
+For JAX compilation, use backend arrays and preserve the state's structure,
+shapes and dtypes. Return new values without mutating the strategy, proposal
+template or input state. Avoid Python branching and scalar conversions on
+changing arrays. Proposal constructors must preserve these arrays too.
+
+This interface updates proposal settings within the existing MH transition.
+Algorithms that change its structure require their own sampler. In particular,
+adapting a nested inner chain needs a separate correctness argument.
+
+### Running an adaptive sampler
+
+Assign the strategy to `sampler.adaptation` or `factory.adaptation`.
+`RobbinsMonroAdaptation` in `styne.utility` adjusts IID MRW variance or pCN beta
+from the mean acceptance across a batch. `stopAfter=1000` fixes the scale after
+1000 transitions; omitting it permits continued adaptation. Other strategies
+may update periodically or conditionally. Convergence requires conditions on
+the chosen rule; stabilising settings alone do not establish it.
+
+`run` starts a fresh chain; `continue_run` preserves its numerical state and
+RNG. Warm-up remains in the stored chain and must be discarded when analysing
+samples. `freeze_adaptation()` returns an optional fixed-proposal copy with
+fresh history. For explicit execution, pass its final state and RNG as
+`freeze_adaptation(state, rng)`.
+
+`currentState` exposes the eager runner's full state; `lastState` is its
+parameter. `sampler.proposal` gives the effective proposal after an eager run;
+`proposal_at(state)` gives it for an explicit state. Treat adapted proposals as
+snapshots. Replacing `sampler.adaptation` or assigning `proposalCovariance` on
+MRW clears eager history. Reinitialise numerical state and rebuild compiled
+functions after changing static configuration.
+
+## Compiled execution
+
+JAX can compile a trajectory once and reuse it across chunks:
 
 ```python
-from styne.utility import RobbinsMonroAdaptation
-
-warmup = RobbinsMonroAdaptation(sampler, targetAcceptance=0.3)
-state = warmup.initial_state(initialParameter)
-state, rng = warmup.run(1000, state, rng)
-production = warmup.freeze(state, rng)
-production.run(5000, state.parameter)
+execute = sampler.compiled_trajectory(1000)
+first = execute(initialParameter, rng)
+second = execute(first.finalState, first.rng)
 ```
 
-Pass the returned random state into `freeze` when continuing through `run`.
-For explicit transitions, use `production.step(state.chainState, rng)`.
-Warm-up does not populate the production chain. Freezing fixes the proposal;
-it does not establish convergence or remove the need to assess mixing.
-The complete example is [`examples/adaptation.py`](../examples/adaptation.py).
+`finalState` preserves cached evaluations and adaptation state. `final` contains
+only the parameter; passing it back starts fresh adaptation. Keep the sampler's
+configuration fixed while using `execute`. This path leaves the eager runner,
+stored chain and diagnostics untouched.
 
-For a new adaptation method, keep its numerical history in its warm-up state
-and return a fixed sampler for production. `Chain` and `Annotator` remain
-runner storage and observation interfaces. They are not implicit history
-inputs to a pure `step` or to a compiled trajectory.
-
-## Compiled trajectories
-
-`transformed_trajectory(nSteps, initialParameter, rng, thinning=1, readout=None)`
-returns a `Trajectory` with `final`, `coordinates`, `readouts`, `sums` and `rng`.
-Coordinates are retained every `thinning` transitions; thinning must divide
-`nSteps`. An optional array-valued readout runs after every transition, and
-the accepted-transition sums count every transition, separately per chain.
-The stateful runner, stored chain and diagnostics are untouched.
-
-For several chunks, create `run = sampler.compiled_trajectory(nSteps, ...)`
-once and call it with each preceding result's `final` and `rng`. Compatible
-input shapes and dtypes reuse compilation. Keep the sampler's configuration
-fixed for the function's lifetime. The
-[`trajectory benchmark`](../benchmarks/trajectory.py) compares this with
-compiling a fresh function per chunk.
-
-JAX supports this compiled path. NumPy and PyTorch use the eager runner;
-explicit PyTorch generator state remains unsupported in transformed loops.
-
-This is not a general speedup for eager execution. Constructing warm-up
-proposals and converting between reference measures add work. In particular,
-an RN target used with a Lebesgue proposal evaluates the reference at both
-ends of a transition. The tradeoff buys one acceptance implementation and
-explicit measure conversions; benchmark inexpensive targets before choosing
-an execution path.
+The result also contains `coordinates`, `readouts`, `sums` and `rng`. Optional
+`thinning` retains every specified number of transitions and must divide the
+trajectory length. A `readout` maps each retained chain state to an array on
+every transition; `sums` counts acceptances per chain. NumPy and PyTorch use
+the eager runner. See the [trajectory benchmark](../benchmarks/trajectory.py)
+for compilation reuse.
 
 ## Migration within 0.3.0
 
-- Custom proposals must return `logCorrection`; sampler subclasses no longer
-  implement method-specific `_log_mh_ratio` calculations.
-- Replace `RobbinsMonroMRW` and `RobbinsMonroMRWFactory` with an ordinary
-  `MetropolisedRandomWalk` or `MRWFactory` sampler and `RobbinsMonroAdaptation`.
-  The former `adaptOffset` and `adaptDecay` settings become `offset` and `decay`.
-- Replace three-value unpacking of `transformed_trajectory` with named access
-  to `result.final`, `result.coordinates` and `result.rng`.
-- `SurrogateTransitionMeasure.transition_trajectory` now returns the first and
-  last evaluated states, coordinates and random state. An RN state's cached
-  `logDensity` is its log derivative; use the target's `evaluate_log` when the
-  full density is needed.
-- Existing MLDA/DART factories retain `nChain`, `regularisation`, root tuning
-  and partition configuration. Nested adaptation, mixture selection and a new
-  Gibbs composition are outside this interface update. Their own acceptance
-  statistics and scale-selection policies need a separate design decision.
+- Custom proposals supply `logCorrection` through `TransitionData`.
+- Replace the Robbins-Monro wrapper or adaptive MRW subclass with an ordinary
+  sampler and its `adaptation` member. Factories also accept this member.
+  `adaptOffset` and `adaptDecay` become `offset` and `decay`.
+- Use `sampler.freeze_adaptation(state, rng)` in place of the wrapper's `freeze`.
+- Access trajectory results by name. `finalState` is the new continuation
+  state; positional unpacking must account for the added field.
+- `SurrogateTransitionMeasure.transition_trajectory` returns the first and last
+  evaluated states, coordinates and RNG. For an RN target, use its
+  `evaluate_log` when the full density is needed rather than the cached derivative.

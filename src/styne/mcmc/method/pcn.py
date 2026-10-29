@@ -131,13 +131,13 @@ class PreconditionedCrankNicolson(MetropolisHastings):
 
     def __init__(self, target, beta, diagnostics,
                  acceptance: AcceptanceProbability = None,
-                 rng: Optional[Generator] = None):
+                 rng: Optional[Generator] = None, *, adaptation=None):
 
         validate_pcn_target(target)
 
         proposalMethod = PCNProposal(target.reference, beta)
         super().__init__(target, proposalMethod, diagnostics,
-                         acceptance=acceptance, rng=rng)
+                         acceptance=acceptance, rng=rng, adaptation=adaptation)
 
     def _proposal_for_target(self, targetDensity):
         # The legacy hook condition_on can change the reference of the same

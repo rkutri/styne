@@ -30,9 +30,9 @@ def run_chunks(reuse, nChunks=10, nSteps=100):
         result = run(state, rng) if reuse else sampler.transformed_trajectory(
             nSteps, state, rng
         )
-        state, rng = result.final, result.rng
-        state.coordinate.block_until_ready()
-    return perf_counter() - started, np.asarray(state.coordinate)
+        state, rng = result.finalState, result.rng
+        state.parameter.coordinate.block_until_ready()
+    return perf_counter() - started, np.asarray(state.parameter.coordinate)
 
 
 if __name__ == '__main__':

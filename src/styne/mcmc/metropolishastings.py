@@ -1,4 +1,5 @@
 import copy
+from dataclasses import replace
 from typing import Optional
 
 from numpy.random import Generator
@@ -12,6 +13,7 @@ from styne.mcmc.proposal import ProposalMethod, log_reference_ratio
 from styne.mcmc.chain import Chain
 from styne.mcmc.annotator import Annotator
 from styne.mcmc.diagnostics import ChainDiagnostics
+from styne.mcmc.adaptation import Adaptation, NoAdaptation
 from styne.mcmc.acceptance import AcceptanceProbability, StandardAcceptance
 
 
@@ -38,6 +40,8 @@ class MetropolisHastings(MCMCSampler):
     acceptance : AcceptanceProbability, optional
         Defaults to `StandardAcceptance` if not given.
     rng : Generator, optional
+    adaptation : Adaptation, optional
+        Proposal-update strategy; defaults to NoAdaptation.
     """
 
     def __init__(
@@ -47,6 +51,7 @@ class MetropolisHastings(MCMCSampler):
         diagnostics: ChainDiagnostics,
         acceptance: Optional[AcceptanceProbability] = None,
         rng: Optional[Generator] = None,
+        *, adaptation: Optional[Adaptation] = None,
     ) -> None:
 
         super().__init__(rng=rng)
@@ -58,6 +63,7 @@ class MetropolisHastings(MCMCSampler):
 
         self._chain = Chain()
         self._annotator: Optional[Annotator] = None
+        self.adaptation = adaptation if adaptation is not None else NoAdaptation()
 
     @property
     def chain(self):
@@ -109,7 +115,45 @@ class MetropolisHastings(MCMCSampler):
 
     @property
     def proposal(self):
+        """Effective proposal after an eager run, otherwise the initial template."""
+        if self._runnerState is not None:
+            return self.proposal_at(self._runnerState)
         return self._proposalMethod
+
+    def proposal_at(self, state: EvaluatedState) -> ProposalMethod:
+        """Return the proposal settings carried by an explicit numerical state."""
+        return self._adaptation.prepare_proposal(
+            self._proposalMethod, state.adaptationState
+        )
+
+    @property
+    def adaptation(self) -> Adaptation:
+        return self._adaptation
+
+    @adaptation.setter
+    def adaptation(self, strategy: Adaptation):
+        """Replace the static rule and discard this runner's history.
+
+        Rebuild compiled functions after changing configuration.
+        """
+        if not isinstance(strategy, Adaptation):
+            raise TypeError("adaptation must implement Adaptation.")
+        self._adaptation = strategy
+        MCMCSampler.clear(self)
+        self._chain.clear()
+
+    def freeze_adaptation(self, state=None, rng=None):
+        """Return the same sampler class with fixed settings and fresh history.
+
+        With explicit transitions, pass their final state and RNG. Otherwise use
+        the eager runner's current state and RNG. This operation is optional.
+        """
+        state = self._runnerState if state is None else state
+        if state is None:
+            raise RuntimeError("No numerical state available to freeze.")
+        result = self.with_proposal(self.proposal_at(state), rng=rng)
+        result.adaptation = NoAdaptation()
+        return result
 
     @property
     def acceptance(self) -> AcceptanceProbability:
@@ -171,7 +215,10 @@ class MetropolisHastings(MCMCSampler):
 
     def initial_state(self, parameter: Parameter) -> EvaluatedState:
         """Evaluate the target density once for a parameter state."""
-        return EvaluatedState(parameter, self._evaluate_log_density(parameter))
+        return EvaluatedState(
+            parameter, self._evaluate_log_density(parameter),
+            self._adaptation.initial_state(parameter, self._proposalMethod),
+        )
 
     evaluate_state = initial_state
 
@@ -198,12 +245,13 @@ class MetropolisHastings(MCMCSampler):
 
     def step(self, currentState: EvaluatedState, rng):
         """Construct and accept or reject one transition without mutation."""
-        proposal = self._proposalMethod.condition(currentState.parameter)
+        proposal = self.proposal_at(currentState).condition(currentState.parameter)
         proposedTransition, proposalRng = proposal.propose(
             currentState.parameter, rng
         )
-        proposedState = self.initial_state(
-            proposedTransition.proposed.parameter
+        proposedParameter = proposedTransition.proposed.parameter
+        proposedState = EvaluatedState(
+            proposedParameter, self._evaluate_log_density(proposedParameter)
         )
         logMHRatio = self._log_mh_ratio(
             TransitionData(
@@ -247,7 +295,10 @@ class MetropolisHastings(MCMCSampler):
             currentState.parameter.with_coordinate(nextCoordinate),
             nextLogDensity,
         )
-        return nextState, transition, nextRng
+        adaptationState = self._adaptation.update_state(
+            currentState.adaptationState, nextState, transition
+        )
+        return replace(nextState, adaptationState=adaptationState), transition, nextRng
 
     def _evaluate_log_density(self, parameter: Parameter):
         # A Radon-Nikodym target is stored relative to its reference, so a

@@ -18,7 +18,8 @@ class Trajectory(NamedTuple):
 
     'coordinates' holds the coordinates after every 'thinning'-th transition,
     'readouts' the caller's read-out after every transition or None, and
-    'sums' the running sums of the transition records.
+    'sums' the running sums of the transition records. 'final' is the final
+    parameter; 'finalState' retains cached evaluations and adaptation for resuming.
     """
 
     final: Parameter
@@ -26,6 +27,7 @@ class Trajectory(NamedTuple):
     readouts: Any
     sums: Any
     rng: Any
+    finalState: Any = None
 
 
 class MCMCSampler(ABC):
@@ -67,6 +69,11 @@ class MCMCSampler(ABC):
     def lastState(self) -> Parameter:
         """Most recently produced state."""
         return self._lastState
+
+    @property
+    def currentState(self):
+        """Complete numerical state of the eager runner, including adaptation."""
+        return self._runnerState
 
     @property
     @abstractmethod
@@ -148,10 +155,10 @@ class MCMCSampler(ABC):
     def compiled_trajectory(self, nSteps, thinning=1, readout=None):
         """Return 'transformed_trajectory' as a function compiled once.
 
-        The function maps an initial parameter and random state to a
-        Trajectory. Compilation is reused for chunks with compatible input
-        shapes and dtypes. Keep the sampler configuration fixed while using
-        this function; changing its target or proposal requires a new one.
+        Accept a parameter for a fresh chain or a previous 'finalState' to
+        resume with cached evaluations and adaptation history intact. Compilation
+        is reused for compatible state shapes and dtypes. Changing the target,
+        proposal or adaptation strategy requires a new compiled function.
         """
         if not self._uses_pure_step():
             raise RuntimeError("Transformed trajectories require a sampler with step().")
@@ -165,8 +172,11 @@ class MCMCSampler(ABC):
         compiled = {}
 
         def run(initialState, rng=None) -> Trajectory:
-            self._validate_initial(initialState)
-            backend = infer_backend(initialState.coordinate)
+            parameter = parameter_of(initialState)
+            self._validate_initial(parameter)
+            state = self.initial_state(initialState) \
+                if isinstance(initialState, Parameter) else initialState
+            backend = infer_backend(parameter.coordinate)
             if not backend.capabilities.transformedLoops:
                 raise RuntimeError(
                     f"Backend {backend.name!r} does not support transformed loops."
@@ -177,11 +187,11 @@ class MCMCSampler(ABC):
                 )
             randomState = self._rng if rng is None else rng
             (finalState, nextRng, sums), (coordinates, readouts) = \
-                compiled[backend.name](initialState, randomState)
+                compiled[backend.name](state, randomState)
             if readouts is not None:
                 readouts = readouts.reshape((nSteps,) + tuple(readouts.shape[2:]))
             return Trajectory(
-                parameter_of(finalState), coordinates, readouts, sums, nextRng
+                parameter_of(finalState), coordinates, readouts, sums, nextRng, finalState
             )
         return run
 
@@ -197,8 +207,7 @@ class MCMCSampler(ABC):
             carry, outputs = backend.scan(advance, carry, None, length=thinning)
             return carry, (parameter_of(carry[0]).coordinate, outputs)
 
-        def execute(parameter, currentRng):
-            state = self.initial_state(parameter)
+        def execute(state, currentRng):
             return backend.scan(
                 advance_block, (state, currentRng, self.zero_sums(state)), None,
                 length=nSteps // thinning,
