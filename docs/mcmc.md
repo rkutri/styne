@@ -120,3 +120,35 @@ for compilation reuse.
 - `SurrogateTransitionMeasure.transition_trajectory` returns the first and last
   evaluated states, coordinates and RNG. For an RN target, use its
   `evaluate_log` when the full density is needed rather than the cached derivative.
+
+## Example: adapting an MRW covariance
+
+Suppose a diagonal MRW proposal should follow the chain's marginal variances.
+After every ten transitions, set each proposal variance to its empirical
+estimate plus a positive `nugget`. Between updates, retain the current settings.
+The nugget keeps every proposal variance positive, even after repeated rejections.
+
+The [complete example](../examples/adaptation.py) implements this rule as a
+`CovarianceAdaptation` strategy:
+
+```python
+from examples.adaptation import CovarianceAdaptation
+
+sampler = MetropolisedRandomWalk(
+    target, initialCovariance, diagnostics,
+    adaptation=CovarianceAdaptation(interval=10, nugget=0.01),
+)
+sampler.run(1000, initialParameter)
+sampler.continue_run(5000)
+```
+
+Internally, `WelfordAccumulator` accumulates marginal moments from every retained
+state, including repetitions after rejection. Its pure record operations allow
+these moments to pass through JAX loops; its ordinary eager interface uses the
+same recurrence. The strategy prepares an `MRWProposal` with the existing
+`DiagonalCovarianceMatrix`, which uses componentwise square roots. Storage and
+updates are linear in dimension; no dense factorisation is needed.
+
+The example handles one chain and learns coordinate scales, without estimating
+correlations. It continues adapting and illustrates the interface rather than
+establishing convergence of this rule.

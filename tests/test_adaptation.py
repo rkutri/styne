@@ -4,10 +4,11 @@ from typing import Any, NamedTuple
 import numpy as np
 import pytest
 
+from examples.adaptation import CovarianceAdaptation
 from styne.backend import get_backend, infer_backend
 from styne.mcmc import Adaptation, NoAdaptation
 from styne.mcmc import MetropolisedRandomWalk, PreconditionedCrankNicolson
-from styne.mcmc.acceptance import BarkerAcceptance
+from styne.mcmc.acceptance import AcceptanceProbability, BarkerAcceptance
 from styne.mcmc.annotator import Annotator
 from styne.mcmc.diagnostics import AcceptanceRateDiagnostics, DummyDiagnostics
 from styne.mcmc.method.mala import MALAProposal, MetropolisAdjustedLangevinAlgorithm
@@ -282,3 +283,68 @@ def test_compiled_continuation_matches_eager_and_respects_stopping(stopAfter):
         8 if stopAfter is None else stopAfter)
     assert sampler.currentState is None
     assert sampler.chain.length == 0
+
+
+@pytest.mark.parametrize('backendName', ['numpy', 'jax'])
+@pytest.mark.parametrize('interval', [1, 5])
+def test_covariance_example_uses_retained_states_and_periodic_updates(
+        backendName, interval):
+    if backendName == 'jax':
+        pytest.importorskip('jax')
+    backend = get_backend(backendName)
+    start = Vector(backend.asarray([0.4, -0.2], dtype='float32'))
+    target = Gaussian(IIDCovarianceMatrix(2, backend.asarray(1.0)),
+                      Vector(backend.zeros(2)))
+    sampler = MetropolisedRandomWalk(
+        target.density,
+        DiagonalCovarianceMatrix(backend.asarray([0.1, 0.2]), scaling=3.0),
+        DummyDiagnostics(),
+        adaptation=CovarianceAdaptation(interval=interval, nugget=0.02),
+    )
+    state = sampler.initial_state(start)
+    initial = state
+    rng = backend.random_state(10)
+    retained = []
+    previousVariance = np.asarray(state.adaptationState.marginalVariance)
+    np.testing.assert_allclose(previousVariance, [0.3, 0.6])
+    for i in range(1, 16):
+        state, _, rng = sampler.step(state, rng)
+        retained.append(np.asarray(state.parameter.coordinate))
+        variance = np.asarray(state.adaptationState.marginalVariance)
+        if i >= 2 and i % interval == 0:
+            expected = np.var(retained, axis=0, ddof=1) + 0.02
+            np.testing.assert_allclose(variance, expected, atol=1e-6)
+        else:
+            np.testing.assert_array_equal(variance, previousVariance)
+        previousVariance = variance
+    assert type(sampler) is MetropolisedRandomWalk
+    assert isinstance(sampler.proposal_at(state), MRWProposal)
+    assert isinstance(sampler.proposal_at(state).covariance, DiagonalCovarianceMatrix)
+    assert initial.adaptationState.moments.nData == 0
+    if backendName == 'jax':
+        execute = sampler.compiled_trajectory(5)
+        result = execute(start, backend.random_state(10))
+        for _ in range(2):
+            result = execute(result.finalState, result.rng)
+        np.testing.assert_allclose(result.finalState.adaptationState.marginalVariance,
+                                   state.adaptationState.marginalVariance, atol=1e-6)
+        assert result.finalState.adaptationState.moments.nData == 15
+
+
+def test_welford_adaptation_counts_repeated_states_after_rejection():
+    class AlwaysReject(AcceptanceProbability):
+        def log_probability(self, logMHRatio):
+            return np.full_like(logMHRatio, -np.inf)
+
+    start = Vector(np.array([1.0, 2.0]))
+    target = Gaussian(IIDCovarianceMatrix(2, 1.0), Vector(np.zeros(2)))
+    sampler = MetropolisedRandomWalk(
+        target.density, IIDCovarianceMatrix(2, 0.1), DummyDiagnostics(),
+        acceptance=AlwaysReject(), adaptation=CovarianceAdaptation(interval=2),
+    )
+    sampler.run(6, start)
+    record = sampler.currentState.adaptationState
+    assert record.moments.nData == 6
+    np.testing.assert_allclose(record.moments.mean, start.coordinate)
+    np.testing.assert_array_equal(record.moments.m2, 0)
+    np.testing.assert_allclose(sampler.proposalCovariance.marginalVariance, 0.01)
