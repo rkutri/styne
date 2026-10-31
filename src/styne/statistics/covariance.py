@@ -181,8 +181,34 @@ class DenseCovarianceMatrix(CovarianceMatrix):
                 "Covariance matrix is not positive definite."
             ) from error
 
+    @classmethod
+    def from_cholesky(cls, cholFactor, scaling=1.0):
+        """Build from a finite lower factor with positive diagonal, without factoring.
+
+        The covariance is 'scaling * L @ L.T'. NumPy factors are validated;
+        other backends must supply a valid factor, including during tracing.
+        """
+        backend, cholFactor = backend_array(cholFactor)
+        if cholFactor.ndim < 2 or cholFactor.shape[-2] != cholFactor.shape[-1]:
+            raise ValueError(
+                "Cholesky factor must be square over its final two axes."
+            )
+        if backend.name == "numpy":
+            if not np.all(np.isfinite(cholFactor)):
+                raise ValueError("Cholesky factor must be finite.")
+            if np.any(np.triu(cholFactor, k=1) != 0):
+                raise ValueError("Cholesky factor must be lower triangular.")
+            if np.any(np.diagonal(cholFactor, axis1=-2, axis2=-1) <= 0):
+                raise ValueError("Cholesky factor must have a positive diagonal.")
+        # Isolate mutable inputs without detaching their autodiff graph.
+        factor = cholFactor * 1.0
+        result = cls.__new__(cls)
+        CovarianceMatrix.__init__(result, backend, factor, scaling)
+        result._cholFactor = factor
+        return result
+
     def with_scaling(self, scaling):
-        return DenseCovarianceMatrix(self.to_dense(), scaling)
+        return DenseCovarianceMatrix.from_cholesky(self._cholFactor, scaling)
 
     @property
     def dimension(self):

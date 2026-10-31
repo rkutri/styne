@@ -188,3 +188,7 @@ joblib_caches/
 
 # reproducibility figures
 reproducibility/figures/
+
+# local working files
+/agent.md
+/jonas_local/
