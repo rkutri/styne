@@ -20,7 +20,7 @@ def backend(request):
     return get_backend(request.param)
 
 
-def random_walk(backend, interval=10, **settings):
+def random_walk(backend, interval=10, nugget=0.02, **settings):
     start = Vector(backend.asarray([0.2, -0.3], dtype='float32'))
     target = Gaussian(
         DiagonalCovarianceMatrix(backend.asarray([1.0, 2.0], dtype='float32')),
@@ -31,7 +31,7 @@ def random_walk(backend, interval=10, **settings):
         DiagonalCovarianceMatrix(backend.asarray([0.1, 0.2], dtype='float32'),
                                  scaling=3.0),
         DummyDiagnostics(), rng=backend.random_state(11),
-        adaptation=FullCovarianceAdaptation(interval=interval, nugget=0.02),
+        adaptation=FullCovarianceAdaptation(interval=interval, nugget=nugget),
         **settings,
     )
     return sampler, start
@@ -139,19 +139,22 @@ def test_compiled_jax_executes_only_scheduled_factorisations(monkeypatch):
     np.testing.assert_allclose(factor @ factor.T, expected, atol=1e-6)
 
 
-def test_rejections_are_repeated_observations():
+@pytest.mark.parametrize('nugget', [0.02, 0.1])
+def test_rejections_are_repeated_observations(backend, nugget):
     class AlwaysReject(AcceptanceProbability):
         def log_probability(self, logMHRatio):
-            return np.full_like(logMHRatio, -np.inf)
+            metadata = backend.metadata(logMHRatio)
+            return backend.full(logMHRatio.shape, -np.inf, dtype=metadata.dtype,
+                                device=metadata.device)
 
-    sampler, start = random_walk(get_backend('numpy'), interval=2,
+    sampler, start = random_walk(backend, interval=2, nugget=nugget,
                                  acceptance=AlwaysReject())
     sampler.run(6, start)
     record = sampler.currentState.adaptationState
     assert record.moments.nData == 6
     np.testing.assert_array_equal(record.moments.mean, start.coordinate)
     np.testing.assert_array_equal(record.moments.m2, 0)
-    np.testing.assert_allclose(record.cholFactor, np.sqrt(0.02) * np.eye(2), atol=1e-6)
+    np.testing.assert_allclose(record.cholFactor, np.sqrt(nugget) * np.eye(2), atol=1e-6)
 
 
 @pytest.mark.parametrize('settings', [
