@@ -136,10 +136,12 @@ class FullCovarianceAdaptation(Adaptation):
         )
         backend = infer_backend(state.cholFactor)
         metadata = backend.metadata(state.cholFactor)
+        nugget = backend.asarray(self._nugget, dtype=metadata.dtype,
+                                 device=metadata.device)
         due = (moments.nData >= 2) & (moments.nData % self._interval == 0)
 
         def refactor(operand):
-            nData, m2, previousFactor = operand
+            nData, m2, previousFactor, nugget = operand
             denominator = backend.asarray(
                 nData - 1,
                 dtype=metadata.dtype, device=metadata.device,
@@ -147,13 +149,13 @@ class FullCovarianceAdaptation(Adaptation):
             covariance = m2 / denominator
             identity = backend.eye(previousFactor.shape[-1], dtype=metadata.dtype,
                                    device=metadata.device)
-            factor = backend.cholesky(covariance + self._nugget * identity)
+            factor = backend.cholesky(covariance + nugget * identity)
             return factor.reshape((-1,)).reshape(factor.shape)
 
         # A conditional keeps Cholesky inside the scheduled branch under JAX.
         # Tensor-only operands and fresh outputs also support PyTorch's cond.
         factor = backend.cond(
             due, refactor, lambda operand: operand[2] * 1.0,
-            (moments.nData, moments.m2, state.cholFactor),
+            (moments.nData, moments.m2, state.cholFactor, nugget),
         )
         return FullCovarianceAdaptationState(moments, factor)
