@@ -117,7 +117,7 @@ class CovarianceScaleAdaptation(Adaptation):
         )
 
 
-cif __name__ == '__main__':
+if __name__ == '__main__':
     if __package__:
         from .runtime import as_numpy, configure_backend, parse_arguments
     else:
