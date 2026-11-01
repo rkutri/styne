@@ -1,4 +1,4 @@
-"""Robbins-Monro proposal-scale adaptation for Metropolis-Hastings."""
+"""Proposal-scale and full covariance adaptation for Metropolis-Hastings."""
 from typing import Any, NamedTuple
 
 import numpy as np
@@ -7,7 +7,8 @@ from styne.backend import infer_backend
 from styne.mcmc.adaptation import Adaptation
 from styne.mcmc.method.mrw import MRWProposal
 from styne.mcmc.method.pcn import PCNProposal
-from styne.statistics.covariance import IIDCovarianceMatrix
+from styne.statistics.covariance import DenseCovarianceMatrix, IIDCovarianceMatrix
+from styne.statistics.welford import FullCovarianceAccumulator
 
 
 class RobbinsMonroState(NamedTuple):
@@ -88,3 +89,73 @@ class RobbinsMonroAdaptation(Adaptation):
             logScale = namespace.where(active, logScale, state.logScale)
             stepCount = namespace.where(active, stepCount, state.stepCount)
         return RobbinsMonroState(logScale, stepCount, state.maxLogScale)
+
+
+class FullCovarianceAdaptationState(NamedTuple):
+    """Empirical moments and the retained proposal's lower Cholesky factor."""
+
+    moments: Any
+    cholFactor: Any
+
+
+class FullCovarianceAdaptation(Adaptation):
+    """Learn one MRW chain's covariance, factorising only at scheduled updates.
+
+    Every retained position updates the moments, including rejection repeats.
+    After at least two observations, every 'interval'-th transition replaces
+    the proposal covariance by the sample covariance plus 'nugget * I'.
+    Adaptation continues until the sampler's optional 'freeze_adaptation'.
+    """
+
+    def __init__(self, interval=10, nugget=0.01):
+        if isinstance(interval, bool) or not isinstance(interval, int) or interval < 1:
+            raise ValueError("interval must be a positive integer.")
+        if not np.isfinite(nugget) or nugget <= 0:
+            raise ValueError("nugget must be finite and positive.")
+        self._interval = interval
+        self._nugget = nugget
+
+    def initial_state(self, parameter, proposalMethod):
+        if not isinstance(proposalMethod, MRWProposal):
+            raise TypeError("Full covariance adaptation requires an MRW proposal.")
+        moments = FullCovarianceAccumulator.initial_record(parameter.coordinate)
+        factor = proposalMethod.covariance.to_cholesky()
+        backend = infer_backend(parameter.coordinate, factor)
+        metadata = backend.metadata(parameter.coordinate)
+        factor = backend.asarray(factor, dtype=metadata.dtype, device=metadata.device)
+        # PyTorch conditional branches also require matching array layouts.
+        factor = factor.reshape((-1,)).reshape(factor.shape)
+        return FullCovarianceAdaptationState(moments, factor)
+
+    def prepare_proposal(self, proposalMethod, state):
+        return MRWProposal(DenseCovarianceMatrix.from_cholesky(state.cholFactor))
+
+    def update_state(self, state, nextState, transitionData):
+        moments = FullCovarianceAccumulator.update_record(
+            state.moments, nextState.parameter.coordinate,
+        )
+        backend = infer_backend(state.cholFactor)
+        metadata = backend.metadata(state.cholFactor)
+        nugget = backend.asarray(self._nugget, dtype=metadata.dtype,
+                                 device=metadata.device)
+        due = (moments.nData >= 2) & (moments.nData % self._interval == 0)
+
+        def refactor(operand):
+            nData, m2, previousFactor, nugget = operand
+            denominator = backend.asarray(
+                nData - 1,
+                dtype=metadata.dtype, device=metadata.device,
+            )
+            covariance = m2 / denominator
+            identity = backend.eye(previousFactor.shape[-1], dtype=metadata.dtype,
+                                   device=metadata.device)
+            factor = backend.cholesky(covariance + nugget * identity)
+            return factor.reshape((-1,)).reshape(factor.shape)
+
+        # A conditional keeps Cholesky inside the scheduled branch under JAX.
+        # Tensor-only operands and fresh outputs also support PyTorch's cond.
+        factor = backend.cond(
+            due, refactor, lambda operand: operand[2] * 1.0,
+            (moments.nData, moments.m2, state.cholFactor, nugget),
+        )
+        return FullCovarianceAdaptationState(moments, factor)

@@ -154,3 +154,73 @@ updates are linear in dimension; no dense factorisation is needed.
 The example handles one chain and learns coordinate scales, without estimating
 correlations. It continues adapting and illustrates the interface rather than
 establishing convergence of this rule.
+
+### Full covariance moments
+
+`FullCovarianceAccumulator` also accumulates cross-coordinate moments for
+one-dimensional real observation vectors. Its eager interface is:
+
+```python
+from styne.statistics import FullCovarianceAccumulator
+
+accumulator = FullCovarianceAccumulator()
+for coordinate in samples:
+    accumulator.update(coordinate)
+mean = accumulator.mean()
+covariance = accumulator.covariance()
+```
+
+`covariance()` returns the sample covariance with denominator `nData - 1`
+after at least two observations; `marginal_variance()` returns its diagonal.
+`reset()` discards the accumulated moments. For adaptation or compiled loops,
+use the pure `initial_record` and `update_record` methods instead. These carry
+the count, mean vector and dense centred second-moment matrix without mutating
+their inputs. Initialisation does not count the supplied vector as a sample.
+
+The accumulator adds no regularisation. When constructing an `MRWProposal`,
+add a positive nugget times the identity to the covariance and pass it to
+`DenseCovarianceMatrix`. Full moment storage and updates require quadratic
+space and work in the dimension; the dense proposal also needs a Cholesky
+factorisation when its covariance changes.
+
+### Periodic full covariance adaptation
+
+`FullCovarianceAdaptation` in `styne.utility` updates the full proposal
+covariance of a single MRW chain:
+
+```python
+from styne.utility import FullCovarianceAdaptation
+
+sampler = MetropolisedRandomWalk(
+    target, initialCovariance, diagnostics,
+    adaptation=FullCovarianceAdaptation(interval=10, nugget=0.01),
+)
+sampler.run(1000, initialParameter)
+sampler.continue_run(1000)
+fixed = sampler.freeze_adaptation()
+fixed.run(1000, sampler.lastState)
+```
+
+Every retained position updates the empirical moments. At transitions 10, 20,
+30 and so on, the rule computes the sample covariance plus `nugget * I` and
+its Cholesky factor. The new factor is used from the next transition. With
+`interval=1`, updates start at the second observation. Both settings must be
+positive, and the nugget must be finite.
+
+The numerical adaptation state carries the moments and the current factor.
+`prepare_proposal` wraps that factor with
+`DenseCovarianceMatrix.from_cholesky`, which stores a supplied lower factor
+without reconstructing or factorising the covariance. `with_scaling` also
+reuses the existing factor. Supplied factors must be finite, lower triangular
+and have a positive diagonal; NumPy checks these values eagerly.
+
+The scheduled factorisation is inside `backend.cond`, which maps to
+`jax.lax.cond` for JAX. With the scalar update flag, only the selected branch
+executes at runtime. Array structure, shapes and dtypes remain fixed, and
+continuation carries the factor and moments forward. The rule continues
+adapting until optionally frozen; it does not establish convergence by itself.
+As with other JAX conditionals, mapping over separate predicates with `vmap`
+can turn branch selection into evaluation of both branches.
+
+See [the full covariance example](../examples/06_fullcovariance.py). Run a
+short check with `python examples/06_fullcovariance.py --backend jax --smoke`.

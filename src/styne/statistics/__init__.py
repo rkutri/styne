@@ -40,6 +40,7 @@ _SYMBOL_TO_MODULE = {
     "MaternSigmaPCPrior": "styne.statistics.pc",
     "JointMaternPCPrior": "styne.statistics.pc",
     "WelfordAccumulator": "styne.statistics.welford",
+    "FullCovarianceAccumulator": "styne.statistics.welford",
 }
 
 __all__ = list(_SYMBOL_TO_MODULE.keys())
