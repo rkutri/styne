@@ -34,14 +34,44 @@ def matrix_apply(matrix, vector):
     return (matrix @ vector[..., None])[..., 0]
 
 
+def nugget_array(backend, reference, nugget):
+    metadata = backend.metadata(reference)
+    # Integer covariance inputs still need floating-point regularisation.
+    unit = backend.asarray(1, dtype=metadata.dtype, device=metadata.device) * 1.0
+    value = scaling_array(backend, unit, nugget)
+    value = backend.asarray(value, dtype=backend.metadata(unit).dtype,
+                            device=metadata.device)
+    if value.ndim != 0:
+        raise ValueError('Nugget must be a scalar.')
+    backend.check_positive_definite(
+        backend.namespace.isfinite(value) & (value >= 0),
+        'Nugget must be finite and non-negative.',
+    )
+    return value
+
+
+def factorisation_message(backend, reference, nugget):
+    dtype = backend.metadata(reference).dtype
+    value = nugget if isinstance(nugget, (int, float)) else 'array-valued'
+    return (
+        f'Covariance factorisation failed (dtype={dtype}, nugget={value}). '
+        'The regularised covariance must admit a finite Cholesky factor '
+        'with positive diagonal. '
+        'Check the covariance, increase the nugget explicitly, or use higher precision.'
+    )
+
+
 class CovarianceMatrix(CovarianceOperatorInterface):
     """Abstract base class for immutable backend-native covariance matrices."""
 
     def __init__(self, backend, reference, scaling=1.0):
         self._backend = backend
         self._scaling = scaling_array(backend, reference, scaling) * 1.0
-        if backend.name == "numpy" and np.any(self._scaling <= 0.0):
-            raise ValueError(f"Scaling must be positive. Got {scaling}.")
+        namespace = backend.namespace
+        backend.check_positive_definite(
+            namespace.all(namespace.isfinite(self._scaling) & (self._scaling > 0)),
+            'Scaling must be finite and positive.',
+        )
 
     @property
     @abstractmethod
@@ -95,20 +125,23 @@ class CovarianceMatrix(CovarianceOperatorInterface):
 
 
 class DiagonalCovarianceMatrix(CovarianceMatrix):
-    """Covariance matrix of independent random variables."""
+    """Independent variances; 'nugget' is added before applying 'scaling'."""
     _factorName = "_sqrtMV"
 
-    def __init__(self, marginalVariance, scaling=1.0):
+    def __init__(self, marginalVariance, scaling=1.0, *, nugget=0.0):
         backend, marginalVariance = backend_array(marginalVariance)
         if marginalVariance.ndim != 1:
             raise ValueError("Marginal variances must be one-dimensional.")
-        if backend.name == "numpy" and np.any(marginalVariance <= 0.0):
-            raise ValueError(
-                "All marginal variances must be strictly positive."
-            )
-
+        regularisation = nugget_array(backend, marginalVariance, nugget)
+        marginalVariance = marginalVariance + regularisation
+        namespace = backend.namespace
+        message = factorisation_message(backend, marginalVariance, nugget)
+        backend.check_positive_definite(
+            namespace.all(namespace.isfinite(marginalVariance) & (marginalVariance > 0)),
+            message,
+        )
         super().__init__(backend, marginalVariance, scaling)
-        self._sqrtMV = backend.namespace.sqrt(marginalVariance)
+        self._sqrtMV = namespace.sqrt(marginalVariance)
 
     @property
     def marginalVariance(self):
@@ -157,19 +190,19 @@ class DiagonalCovarianceMatrix(CovarianceMatrix):
 class IIDCovarianceMatrix(DiagonalCovarianceMatrix):
     """Covariance matrix with one marginal variance repeated by dimension."""
 
-    def __init__(self, dimension, variance, scaling=1.0):
+    def __init__(self, dimension, variance, scaling=1.0, *, nugget=0.0):
         backend, variance = backend_array(variance)
         metadata = backend.metadata(variance)
         marginalVariance = backend.ones(
             dimension, dtype=metadata.dtype, device=metadata.device
         ) * variance
-        super().__init__(marginalVariance, scaling)
+        super().__init__(marginalVariance, scaling, nugget=nugget)
 
 class DenseCovarianceMatrix(CovarianceMatrix):
-    """Dense symmetric positive-definite covariance matrix."""
+    """Dense covariance; 'nugget * I' is added before applying 'scaling'."""
     _factorName = "_cholFactor"
 
-    def __init__(self, denseCovMat, scaling=1.0):
+    def __init__(self, denseCovMat, scaling=1.0, *, nugget=0.0):
         backend, denseCovMat = backend_array(denseCovMat)
         if (
                 denseCovMat.ndim < 2
@@ -177,39 +210,57 @@ class DenseCovarianceMatrix(CovarianceMatrix):
             raise ValueError(
                 "Covariance matrix must be square over its final two axes."
             )
+        regularisation = nugget_array(backend, denseCovMat, nugget)
+        message = factorisation_message(backend, denseCovMat, nugget)
+        namespace = backend.namespace
+        backend.check_positive_definite(
+            namespace.all(namespace.isfinite(denseCovMat)), message,
+        )
         if backend.name == "numpy" and not np.allclose(
                 denseCovMat,
                 np.swapaxes(denseCovMat, -1, -2)):
             raise ValueError("Covariance matrix must be symmetric.")
 
+        if not isinstance(nugget, (int, float)) or nugget != 0:
+            metadata = backend.metadata(denseCovMat)
+            denseCovMat = denseCovMat + regularisation * backend.eye(
+                denseCovMat.shape[-1], dtype=metadata.dtype, device=metadata.device,
+            )
         super().__init__(backend, denseCovMat, scaling)
-        try:
-            self._cholFactor = backend.cholesky(denseCovMat)
-        except np.linalg.LinAlgError as error:
-            from styne.utility.exceptions import NotPositiveDefinite
-            raise NotPositiveDefinite(
-                "Covariance matrix is not positive definite."
-            ) from error
+        self._cholFactor = backend.checked_cholesky(denseCovMat, message)
+        backend.check_positive_definite(
+            namespace.all(namespace.isfinite(self._cholFactor)) &
+            namespace.all(namespace.diagonal(self._cholFactor) > 0),
+            message,
+        )
 
     @classmethod
     def from_cholesky(cls, cholFactor, scaling=1.0):
         """Build from a finite lower factor with positive diagonal, without factoring.
 
-        The covariance is 'scaling * L @ L.T'. NumPy factors are validated;
-        other backends must supply a valid factor, including during tracing.
+        The covariance is 'scaling * L @ L.T'. External factors are validated
+        and copied once; compiled checks use the backend's checked boundary.
         """
         backend, cholFactor = backend_array(cholFactor)
         if cholFactor.ndim < 2 or cholFactor.shape[-2] != cholFactor.shape[-1]:
             raise ValueError(
                 "Cholesky factor must be square over its final two axes."
             )
-        if backend.name == "numpy":
-            if not np.all(np.isfinite(cholFactor)):
-                raise ValueError("Cholesky factor must be finite.")
-            if np.any(np.triu(cholFactor, k=1) != 0):
-                raise ValueError("Cholesky factor must be lower triangular.")
-            if np.any(np.diagonal(cholFactor, axis1=-2, axis2=-1) <= 0):
-                raise ValueError("Cholesky factor must have a positive diagonal.")
+        namespace = backend.namespace
+        backend.check_positive_definite(
+            namespace.all(namespace.isfinite(cholFactor)),
+            'Cholesky factor must be finite.',
+        )
+        indices = backend.arange(cholFactor.shape[-1],
+                                  device=backend.metadata(cholFactor).device)
+        upper = namespace.where(indices[:, None] < indices[None, :], cholFactor, 0)
+        backend.check_positive_definite(
+            namespace.all(upper == 0), 'Cholesky factor must be lower triangular.',
+        )
+        backend.check_positive_definite(
+            namespace.all(namespace.diagonal(cholFactor) > 0),
+            'Cholesky factor must have a positive diagonal.',
+        )
         # Isolate mutable inputs without detaching their autodiff graph.
         factor = cholFactor * 1.0
         result = cls.__new__(cls)

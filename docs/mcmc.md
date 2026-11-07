@@ -178,8 +178,8 @@ the count, mean vector and dense centred second-moment matrix without mutating
 their inputs. Initialisation does not count the supplied vector as a sample.
 
 The accumulator adds no regularisation. When constructing an `MRWProposal`,
-add a positive nugget times the identity to the covariance and pass it to
-`DenseCovarianceMatrix`. Full moment storage and updates require quadratic
+pass its estimate to `DenseCovarianceMatrix(estimate, nugget=0.01)` to add the
+chosen nugget times the identity. Full moment storage and updates require quadratic
 space and work in the dimension; the dense proposal also needs a Cholesky
 factorisation when its covariance changes.
 
@@ -212,7 +212,7 @@ object. `prepare_proposal` retains that object without copying or validating
 its factor again. The compatibility property `state.cholFactor` still returns
 the current scaled factor. `with_scaling` shares a matrix's owned factor while
 replacing its scalar scale. Public constructors isolate external arrays;
-`DenseCovarianceMatrix.from_cholesky` validates supplied NumPy factors once.
+`DenseCovarianceMatrix.from_cholesky` validates supplied factors once.
 They must be finite, lower triangular and have a positive diagonal.
 
 The scheduled factorisation is inside `backend.cond`, which maps to
@@ -225,3 +225,27 @@ can turn branch selection into evaluation of both branches.
 
 See [the full covariance example](../examples/06_fullcovariance.py). Run a
 short check with `python examples/06_fullcovariance.py --backend jax --smoke`.
+
+### Matrix validation and nuggets
+
+`DenseCovarianceMatrix`, `DiagonalCovarianceMatrix` and `IIDCovarianceMatrix`
+accept the keyword `nugget`, defaulting to zero. It must be finite, scalar and
+non-negative. It is added before `scaling`, in the covariance's floating-point
+dtype. Diagonal and IID matrices retain their structure.
+
+The supplied nugget is never increased automatically. A small value can round
+away, particularly in float32. There is no heuristic minimum or warning: a
+successful factorisation is accepted. Actual factorisation failures and
+nonfinite or invalid factors raise `styne.utility.NotPositiveDefinite`. Dense
+construction reports the dtype and nugget context, with guidance to check the
+covariance, explicitly increase regularisation, or use higher precision.
+The exception also remains a `ValueError` through NumPy's `LinAlgError`.
+
+Recovery belongs to the caller, including during adaptation. The library does
+not silently keep an old covariance or retry with another nugget. For JAX,
+`compiled_trajectory` collects numerical checks automatically and raises at
+the Python call boundary. This does not stop the device loop at the exact
+failing iteration. For custom compiled functions, use `backend.compile` as
+the outer boundary. Bare `jax.jit` does not collect these checks; low-level
+JAX transformations need an outer checked call or explicit
+[`checkify`](https://docs.jax.dev/en/latest/debugging/checkify_guide.html).

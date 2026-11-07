@@ -213,6 +213,24 @@ class Backend(ABC):
     def cholesky(self, matrix):
         raise NotImplementedError
 
+    @property
+    def factorisationErrors(self):
+        return ()
+
+    def checked_cholesky(self, matrix, message):
+        """Normalise native factorisation failures without changing the matrix."""
+        try:
+            return self.cholesky(matrix)
+        except self.factorisationErrors as error:
+            from styne.utility.exceptions import NotPositiveDefinite
+            raise NotPositiveDefinite(message) from error
+
+    def check_positive_definite(self, predicate, message):
+        """Raise on an invalid covariance; transformed backends defer the check."""
+        if not predicate:
+            from styne.utility.exceptions import NotPositiveDefinite
+            raise NotPositiveDefinite(message)
+
     def solve(self, matrix, rightHandSide):
         raise NotImplementedError
 

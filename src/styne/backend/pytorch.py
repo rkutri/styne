@@ -1,3 +1,5 @@
+from functools import wraps
+
 import torch
 from torch.utils import _pytree
 
@@ -373,7 +375,19 @@ class PyTorchBackend(Backend):
         return torch.func.vjp(function, *primals)
 
     def compile(self, function, **options):
-        return torch.compile(function, **options)
+        compiled = torch.compile(function, **options)
+
+        @wraps(function)
+        def checked(*args, **kwargs):
+            try:
+                return compiled(*args, **kwargs)
+            except RuntimeError as error:
+                marker = 'NotPositiveDefinite: '
+                if marker in str(error):
+                    from styne.utility.exceptions import NotPositiveDefinite
+                    raise NotPositiveDefinite(str(error).split(marker, 1)[1]) from error
+                raise
+        return checked
 
     def vectorize(self, function, *, inAxes=0, outAxes=0):
         return torch.vmap(function, in_dims=inAxes, out_dims=outAxes)
@@ -413,6 +427,21 @@ class PyTorchBackend(Backend):
 
     def cholesky(self, matrix):
         return torch.linalg.cholesky(matrix)
+
+    @property
+    def factorisationErrors(self):
+        return (torch.linalg.LinAlgError,)
+
+    def checked_cholesky(self, matrix, message):
+        factor, info = torch.linalg.cholesky_ex(matrix, check_errors=False)
+        self.check_positive_definite(torch.all(info == 0), message)
+        return factor
+
+    def check_positive_definite(self, predicate, message):
+        if torch.compiler.is_compiling():
+            torch._assert_async(predicate, f'NotPositiveDefinite: {message}')
+        else:
+            super().check_positive_definite(predicate, message)
 
     def solve(self, matrix, rightHandSide):
         return torch.linalg.solve(matrix, rightHandSide)

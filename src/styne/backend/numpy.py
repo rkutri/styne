@@ -190,6 +190,10 @@ class NumPyBackend(Backend):
     def cholesky(self, matrix):
         return np.linalg.cholesky(matrix)
 
+    @property
+    def factorisationErrors(self):
+        return (np.linalg.LinAlgError,)
+
     def solve(self, matrix, rightHandSide):
         return np.linalg.solve(matrix, rightHandSide)
 

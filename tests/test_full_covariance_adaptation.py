@@ -174,3 +174,30 @@ def test_non_mrw_proposals_and_batched_observations_are_rejected():
     with pytest.raises(ValueError, match='one-dimensional observation'):
         strategy.initial_state(Vector(backend.zeros((3, 2))),
                                MRWProposal(IIDCovarianceMatrix(2, 0.1)))
+
+
+def test_compiled_trajectory_reports_failed_adaptation_at_call_boundary():
+    pytest.importorskip('jax')
+    from dataclasses import replace
+    from styne.statistics import FullCovarianceAccumulator
+    from styne.utility import NotPositiveDefinite
+    backend = get_backend('jax')
+
+    class AlwaysReject(AcceptanceProbability):
+        def log_probability(self, logMHRatio):
+            return backend.full(logMHRatio.shape, -np.inf, dtype='float32')
+
+    sampler, _ = random_walk(backend, interval=2, nugget=0.01,
+                              acceptance=AlwaysReject())
+    start = Vector(backend.full(2, 1000.0, dtype='float32'))
+    state = sampler.initial_state(start)
+    moments = FullCovarianceAccumulator.update_record(
+        state.adaptationState.moments, backend.zeros(2, dtype='float32'),
+    )
+    state = replace(
+        state, adaptationState=state.adaptationState._replace(moments=moments),
+    )
+    execute = sampler.compiled_trajectory(2)
+    with pytest.raises(NotPositiveDefinite, match='nugget=0.01'):
+        execute(state, backend.random_state(11))
+    assert state.adaptationState.moments.nData == 1

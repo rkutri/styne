@@ -139,24 +139,20 @@ class FullCovarianceAdaptation(Adaptation):
         )
         backend = infer_backend(moments.m2)
         metadata = backend.metadata(moments.m2)
-        nugget = backend.asarray(self._nugget, dtype=metadata.dtype,
-                                 device=metadata.device)
         due = (moments.nData >= 2) & (moments.nData % self._interval == 0)
 
         def refactor(operand):
-            nData, m2, previousCovariance, nugget = operand
+            nData, m2, _ = operand
             denominator = backend.asarray(
                 nData - 1,
                 dtype=metadata.dtype, device=metadata.device,
             )
             covariance = m2 / denominator
-            identity = backend.eye(previousCovariance.dimension, dtype=metadata.dtype,
-                                   device=metadata.device)
-            return DenseCovarianceMatrix(covariance + nugget * identity)
+            return DenseCovarianceMatrix(covariance, nugget=self._nugget)
 
         # A conditional keeps Cholesky inside the scheduled branch under JAX.
         covariance = backend.cond(
             due, refactor, lambda operand: operand[2],
-            (moments.nData, moments.m2, state.covariance, nugget),
+            (moments.nData, moments.m2, state.covariance),
         )
         return FullCovarianceAdaptationState(moments, covariance)
