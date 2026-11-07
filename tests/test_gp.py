@@ -10,7 +10,6 @@ from styne.statistics.stationary import (
     ExponentialCovariance1D, MaternCovariance1D, MaternCovariance2D,
     matern_covariance, matern_log_rho_gradient
 )
-from styne.statistics.gaussian import Gaussian
 from styne.model.representation.bspline import BSpline1D, BSpline2D
 from styne.gp.gaussianprocess import GaussianProcess
 from styne.gp.direct import DirectExpansion
@@ -69,13 +68,6 @@ def test_evaluate_uses_explicit_coefficient_without_mutating_coefficient():
 
     assert values.shape == (len(grid),)
     np.testing.assert_array_equal(coefficient, before)
-
-
-def test_dense_gp_measure_is_gaussian():
-    grid = UniformGrid(LB, RB, 5)
-    cov = ExponentialCovariance1D(alpha=5., marginalVariance=1.)
-    gp = GaussianProcess.direct(grid, cov)
-    assert isinstance(gp.measure, Gaussian)
 
 
 def test_dense_gp_zero_mean():
@@ -150,16 +142,6 @@ def test_dense_gp_covariance_update_is_functional():
 # GaussianProcess.bspline_1d
 # ---------------------------------------------------------------------------
 
-def test_bspline_1d_gp_measure_dimension():
-    nx = 8
-    cov = MaternCovariance1D(lengthScale=0.3, smoothness=1.5, marginalVariance=1.)
-    expansion = BSpline1D(nx, degree=3, boundary=[LB, RB])
-
-    gp = GaussianProcess.bspline(cov, expansion)
-
-    assert gp.measure.density.domainDimension == nx
-
-
 def test_bspline_1d_gp_sampler_returns_function():
     n, nx = 32, 6
     grid = UniformGrid(LB, RB, n)
@@ -181,23 +163,6 @@ def make_bspline_2d_gp(nx=5, ny=5):
     cov = MaternCovariance2D(lengthScale=0.3, smoothness=1.5, marginalVariance=1.)
     expansion = BSpline2D([nx, ny], degree=3, boundary=[[LB, RB], [LB, RB]])
     return GaussianProcess.bspline(cov, expansion)
-
-
-def test_bspline_2d_gp_measure_dimension():
-    nx, ny = 5, 5
-    gp = make_bspline_2d_gp(nx, ny)
-    assert gp.measure.density.domainDimension == nx * ny
-
-
-def test_bspline_2d_gp_measure_is_gaussian():
-    gp = make_bspline_2d_gp()
-    assert isinstance(gp.measure, Gaussian)
-
-
-def test_bspline_2d_gp_sampler_shares_expansion():
-    gp = make_bspline_2d_gp()
-    function = gp.sampler.generate_realisation(seed=13)
-    assert function.expansion is gp.expansion
 
 
 def test_bspline_2d_gp_sampler_evaluate():

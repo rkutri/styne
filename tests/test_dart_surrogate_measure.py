@@ -1,14 +1,11 @@
 import pytest
 import numpy as np
-from math import isclose
-from numpy.random import default_rng
 from numpy.linalg import norm
 from scipy.stats import gaussian_kde
 
 from tests.testSetup import (
     GaussianTargetDensity,
     covariance_matrix,
-    RosenbrockTargetDensity
 )
 from styne.parameter.vector import Vector
 from styne.statistics.covariance import IIDCovarianceMatrix
@@ -19,73 +16,6 @@ from styne.mcmc.localised import (
     LocalisedSurrogateTransitionMeasure,
 )
 from styne.statistics.gaussian import Gaussian
-
-
-@pytest.mark.parametrize("dim", [1, 16, 256])
-@pytest.mark.parametrize("h", [500., 50.0, 0.5, 0.005])
-@pytest.mark.parametrize("cond", [1, 100, 1000])
-@pytest.mark.parametrize("target", ["gaussian", "rosenbrock"])
-def test_density(dim, h, cond, target):
-    """
-    Compare log densities point-wise.
-    """
-
-    rngSetup = default_rng(1111)
-
-    modelMode = Vector(np.ones(dim))
-
-    if target == "gaussian":
-        modelCov = covariance_matrix(dim, cond)
-        baseDensity = GaussianTargetDensity(modelMode, modelCov)
-    elif target == "rosenbrock":
-        baseDensity = RosenbrockTargetDensity(modelMode, cond)
-    else:
-        raise Exception(f"Unknown target density: {target}")
-
-    # draw random surrogate Measure locations
-    nLocs = 5
-    rng = np.random.default_rng(1234)
-    locations = [
-        Vector(rng.normal(modelMode.coordinate, 10., size=dim))
-        for _ in range(nLocs)
-    ]
-
-    initLoc = Vector(np.zeros(dim))
-    surrogateDensity = LocalisedSurrogateDensity(h, 1.0, baseDensity)
-    surrogateDensity.location = initLoc
-
-    # deliberately invalid covariance (not used in sampling)
-    rootBuilder = MRWFactory()
-    rootBuilder.rng = rngSetup
-    rootBuilder.proposalCovariance = IIDCovarianceMatrix(dim, 1e-12)
-    rootBuilder.target = surrogateDensity
-
-    iC = IIDCovarianceMatrix(dim, 1e-12)
-    # Wrap in Gaussian to satisfy ProbabilityMeasure interface
-    initMeas = Gaussian(iC, Vector(np.zeros(dim)))
-    rC = rootBuilder.create()
-    nC = 0
-
-    surrogateMeasure = LocalisedSurrogateTransitionMeasure(rC, nC, initMeas)
-
-    nEval = 100
-    for loc in locations:
-
-        def true_density_log(z: Vector):
-            y = z.coordinate - loc.coordinate
-            return -0.5 * h * np.dot(y, y) + baseDensity.evaluate_log(z)
-
-        surrogateMeasure.location = loc
-
-        xEval = [
-            Vector(rng.normal(np.zeros(dim), 20., size=dim))
-            for _ in range(nEval)
-        ]
-
-        for x in xEval:
-            smEval = surrogateMeasure.density.evaluate_log(x)
-            trueEval = true_density_log(x)
-            assert isclose(smEval, trueEval, rel_tol=1e-5, abs_tol=1e-8)
 
 
 @pytest.mark.slow

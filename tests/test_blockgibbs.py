@@ -283,16 +283,14 @@ class TestBlockGibbsInvariantMeasure:
         traj1 = np.array(sampler.chain.block(1).trajectory)[self.BURNIN:, 0]
         self.samples = np.column_stack([traj0, traj1])
 
-    def test_mean_near_zero(self):
+    def test_invariant_moments(self):
         mean = self.samples.mean(axis=0)
         assert np.abs(mean[0]) < 0.05
         assert np.abs(mean[1]) < 0.05
 
-    def test_marginal_variance(self):
         var = self.samples.var(axis=0)
         assert abs(var[0] - 1.0) < 0.1
         assert abs(var[1] - 1.0) < 0.1
 
-    def test_cross_covariance(self):
         cov = np.cov(self.samples, rowvar=False)
         assert abs(cov[0, 1] - self.RHO) < 0.1

@@ -1,9 +1,5 @@
 import numpy as np
 
-from enum import Enum
-from sys import exit
-
-
 from scipy.stats import multivariate_normal
 from scipy.integrate import solve_ivp
 
@@ -11,12 +7,6 @@ from styne.parameter.vector import Vector
 from styne.model.forwardmap import ForwardMap
 from styne.statistics.interface import DensityInterface
 from styne.statistics.data import Data
-
-
-class EvaluationStatus(Enum):
-    NONE = 0
-    SUCCESS = 1
-    FAILURE = 2
 
 
 def covariance_matrix(dim, kappa):
@@ -102,10 +92,6 @@ class GaussianTargetDensity(DensityInterface):
 class LotkaVolterraParameter(Vector):
 
     @classmethod
-    def from_coefficient(cls, coefficient):
-        return cls(coefficient)
-
-    @classmethod
     def from_interpolation(cls, value):
         return cls(np.log(value))
 
@@ -126,8 +112,6 @@ class LotkaVolterraSolver(ForwardMap):
         self._solverMethod = config['solver']
         self._solverRTol = config['rtol']
 
-        self._status = EvaluationStatus.NONE
-
     @property
     def pType(self):
         return LotkaVolterraParameter
@@ -135,10 +119,6 @@ class LotkaVolterraSolver(ForwardMap):
     @property
     def pDim(self):
         return self._dataShape[1]
-
-    @property
-    def status(self):
-        return self._status
 
     @property
     def dataShape(self):
@@ -163,8 +143,6 @@ class LotkaVolterraSolver(ForwardMap):
 
     def _evaluate(self, preparedState):
 
-        self._status = EvaluationStatus.SUCCESS
-
         alpha = self._fixedParam[0]
         beta = preparedState[0]
         gamma = self._fixedParam[1]
@@ -185,34 +163,12 @@ class LotkaVolterraSolver(ForwardMap):
                 print("forward map evaluation failed. Reason: \n"
                       + odeResult.message)
 
-                self._status = EvaluationStatus.FAILURE
                 raise RuntimeError(
                     "ODE solver failed: " + odeResult.message)
 
             evaluation[n, :] = odeResult.y[:, -1]
 
         return evaluation
-
-    def full_solution(self, parameter, y0):
-
-        paramEval = parameter.evaluate()
-
-        beta = paramEval[0]
-        delta = paramEval[1]
-
-        alpha = self._fixedParam[0]
-        gamma = self._fixedParam[1]
-
-        def odeFlow(t, x): return self._flow(t, x, alpha, beta, gamma, delta)
-        odeResult = solve_ivp(odeFlow, self.tBoundary_, y0, method='LSODA')
-
-        if odeResult.status != 0:
-
-            print("forward map evaluation failed. aborting program.")
-            print(odeResult.message)
-            exit()
-
-        return (odeResult.t, odeResult.y)
 
 
 def generate_synthetic_data(parameter, solver, noiseVar, rng=None):
