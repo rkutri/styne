@@ -8,7 +8,9 @@ from styne.backend import infer_backend
 from styne.mcmc.sampler import MCMCSampler
 from styne.parameter.parameter import Parameter
 from styne.statistics.interface import DensityInterface, RadonNikodymInterface
-from styne.mcmc.transition import EvaluatedState, TransitionData
+from styne.mcmc.transition import (
+    EvaluatedState, TransitionData, parameter_of, stored_log_density,
+)
 from styne.mcmc.proposal import ProposalMethod, log_reference_ratio
 from styne.mcmc.chain import Chain
 from styne.mcmc.annotator import Annotator
@@ -221,6 +223,13 @@ class MetropolisHastings(MCMCSampler):
         )
 
     evaluate_state = initial_state
+
+    def state_at(self, current, saved):
+        """Reuse the current target value while retaining this chain's adaptation."""
+        return replace(
+            saved, parameter=parameter_of(current),
+            logDensity=stored_log_density(self.target, current),
+        )
 
     def zero_sums(self, state):
         """Accepted-transition counts, one per chain."""

@@ -8,6 +8,7 @@ _SYMBOL_TO_MODULE = {
     "Adaptation": "styne.mcmc.adaptation",
     "NoAdaptation": "styne.mcmc.adaptation",
     "MetropolisHastings": "styne.mcmc.metropolishastings",
+    "Mixture": "styne.mcmc.mixture",
     "Trajectory": "styne.mcmc.sampler",
     "MCMCSampler": "styne.mcmc.sampler",
     "ProposalMethod": "styne.mcmc.proposal",
