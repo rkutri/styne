@@ -375,8 +375,8 @@ def test_conditioned_dart_rebinds_coarse_and_fine_proposals():
     assert coarseProposal.density is conditionedTarget.localisedDensity
     assert coarseProposal.density.surrogateDensity.reference \
         is conditionedTarget.coarseGP.measure
-    assert coarseProposal.correction._surrogateMeasure \
-        is coarseProposal.measure
+    assert coarseProposal.correction is sampler.proposal._coarseProposal.correction
+    assert not hasattr(coarseProposal.correction, '_surrogateMeasure')
     assert sampler.target is wrapper
     assert sampler.proposal._pFinePrior is finePrior
 

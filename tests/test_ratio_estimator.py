@@ -117,6 +117,7 @@ def test_bridge_accepts_one_retained_state_in_each_trajectory():
         Vector(np.array([0.0])),
         Vector(np.array([1.0])),
         proposalTrajectory=proposalTrajectory,
+        trajectory=stateTrajectory,
     )
 
     assert np.isfinite(estimate)
@@ -196,14 +197,15 @@ def test_deterministic_estimator_algebra():
 
     isEstimate = RatioEstimator(
         measure, 0, 1, 'is'
-    ).log_ratio_estimate(state, proposal)
+    ).log_ratio_estimate(state, proposal, trajectory=measure.chain.trajectory)
     cumulantEstimate = RatioEstimator(
         measure, 0, 1, 'cumulant'
-    ).log_ratio_estimate(state, proposal)
+    ).log_ratio_estimate(state, proposal, trajectory=measure.chain.trajectory)
     bridgeEstimate = RatioEstimator(
         measure, 0, 1, 'bridge'
     ).log_ratio_estimate(
-        state, proposal, proposalTrajectory=proposalTrajectory
+        state, proposal, proposalTrajectory=proposalTrajectory,
+        trajectory=measure.chain.trajectory,
     )
 
     np.testing.assert_allclose(
@@ -269,7 +271,9 @@ def test_cumulant_ratio_preserves_jax_scalar():
     trajectory = jnp.array([[0.], [1.], [1.]])
     estimate = RatioEstimator(
         StubMeasure(trajectory, 1.), 0, 1, 'cumulant'
-    ).log_ratio_estimate(Vector(jnp.array([0.])), Vector(jnp.array([1.])))
+    ).log_ratio_estimate(
+        Vector(jnp.array([0.])), Vector(jnp.array([1.])), trajectory=trajectory
+    )
 
     assert isinstance(estimate, type(jnp.array(0.)))
 
@@ -280,7 +284,9 @@ def test_cumulant_ratio_preserves_pytorch_scalar():
     trajectory = torch.tensor([[0.], [1.], [1.]])
     estimate = RatioEstimator(
         StubMeasure(trajectory, 1.), 0, 1, 'cumulant'
-    ).log_ratio_estimate(Vector(torch.tensor([0.])), Vector(torch.tensor([1.])))
+    ).log_ratio_estimate(
+        Vector(torch.tensor([0.])), Vector(torch.tensor([1.])), trajectory=trajectory
+    )
 
     assert isinstance(estimate, torch.Tensor)
 
@@ -375,7 +381,9 @@ class TestISCorrectionAccuracy:
         surrogate = make_surrogate(self.GAMMA, samplesX=samplesX)
 
         est = RatioEstimator(surrogate, burnin=0, thinning=1, type='is')
-        result = est.log_ratio_estimate(Vector(x), Vector(z))
+        result = est.log_ratio_estimate(
+            Vector(x), Vector(z), trajectory=surrogate.chain.trajectory
+        )
         truth = analytical_log_ratio(x, z, mu, self.GAMMA, self.THETA)
         return result, truth
 
@@ -422,7 +430,8 @@ class TestGeometricBridgeCorrectionAccuracy:
             [samplesZ, samplesZ[-1:]], axis=0
         )
         result = est.log_ratio_estimate(
-            Vector(x), Vector(z), proposalTrajectory=proposalTrajectory
+            Vector(x), Vector(z), proposalTrajectory=proposalTrajectory,
+            trajectory=surrogate.chain.trajectory,
         )
         truth = analytical_log_ratio(x, z, mu, self.GAMMA, self.THETA)
         return result, truth
@@ -470,7 +479,9 @@ class TestGeometricBridgeVarianceReduction:
             surrogateIS = make_surrogate(self.GAMMA, samplesX=samplesX)
             estIS = RatioEstimator(surrogateIS, burnin=0,
                                    thinning=1, type='is')
-            isEsts.append(estIS.log_ratio_estimate(stateParam, propParam))
+            isEsts.append(estIS.log_ratio_estimate(
+                stateParam, propParam, trajectory=surrogateIS.chain.trajectory
+            ))
 
             surrogateBr = make_surrogate(
                 self.GAMMA, samplesX=samplesX, samplesZ=samplesZ)
@@ -483,6 +494,7 @@ class TestGeometricBridgeVarianceReduction:
                 stateParam,
                 propParam,
                 proposalTrajectory=proposalTrajectory,
+                trajectory=surrogateBr.chain.trajectory,
             ))
 
         return float(np.std(isEsts)), float(np.std(bridgeEsts))
@@ -523,7 +535,9 @@ class TestCumulantCorrectionAccuracy:
         surrogate = make_surrogate(self.GAMMA, samplesX=samplesX)
 
         est = RatioEstimator(surrogate, burnin=0, thinning=1, type='cumulant')
-        result = est.log_ratio_estimate(Vector(x), Vector(z))
+        result = est.log_ratio_estimate(
+            Vector(x), Vector(z), trajectory=surrogate.chain.trajectory
+        )
         truth = analytical_log_ratio(x, z, mu, self.GAMMA, self.THETA)
         return result, truth
 
@@ -554,8 +568,12 @@ class TestCumulantCorrectionAccuracy:
         est_is = RatioEstimator(surrogate, burnin=0, thinning=1, type='is')
         est_cum = RatioEstimator(surrogate, burnin=0, thinning=1, type='cumulant')
         
-        res_is = est_is.log_ratio_estimate(Vector(x), Vector(z))
-        res_cum = est_cum.log_ratio_estimate(Vector(x), Vector(z))
+        res_is = est_is.log_ratio_estimate(
+            Vector(x), Vector(z), trajectory=surrogate.chain.trajectory
+        )
+        res_cum = est_cum.log_ratio_estimate(
+            Vector(x), Vector(z), trajectory=surrogate.chain.trajectory
+        )
         
         assert abs(res_is - res_cum) < 1e-12
 
@@ -573,7 +591,9 @@ class TestCumulantCorrectionAccuracy:
         
         est = RatioEstimator(surrogate, burnin=0, thinning=1, type='cumulant')
         with pytest.raises(ValueError, match="at least 2 retained"):
-            est.log_ratio_estimate(Vector(x), Vector(z))
+            est.log_ratio_estimate(
+                Vector(x), Vector(z), trajectory=surrogate.chain.trajectory
+            )
 
     def test_variance_regime_check(self):
         # Regime check, NOT an invariant. Cumulant and IS share their
@@ -587,8 +607,12 @@ class TestCumulantCorrectionAccuracy:
             traj = list(v.reshape(-1, 1)) + [np.array([0.0])]
             meas = StubMeasure(traj, gamma=1.0)
             x, z = State(np.array([0.5])), State(np.array([-0.5]))
-            cum.append(RatioEstimator(meas, 0, 1, 'cumulant').log_ratio_estimate(x, z))
-            isv.append(RatioEstimator(meas, 0, 1, 'is').log_ratio_estimate(x, z))
+            cum.append(RatioEstimator(meas, 0, 1, 'cumulant').log_ratio_estimate(
+                x, z, trajectory=meas.chain.trajectory
+            ))
+            isv.append(RatioEstimator(meas, 0, 1, 'is').log_ratio_estimate(
+                x, z, trajectory=meas.chain.trajectory
+            ))
         vc, vi = float(np.var(cum, ddof=1)), float(np.var(isv, ddof=1))
         assert vc <= 1.3 * vi
 
@@ -606,8 +630,12 @@ class TestCumulantCorrectionAccuracy:
         def bias(delta):
             x = State(np.array([0.5 * delta]))
             z = State(np.array([-0.5 * delta]))
-            cum = RatioEstimator(meas, 0, 1, 'cumulant').log_ratio_estimate(x, z)
-            isv = RatioEstimator(meas, 0, 1, 'is').log_ratio_estimate(x, z)
+            cum = RatioEstimator(meas, 0, 1, 'cumulant').log_ratio_estimate(
+                x, z, trajectory=meas.chain.trajectory
+            )
+            isv = RatioEstimator(meas, 0, 1, 'is').log_ratio_estimate(
+                x, z, trajectory=meas.chain.trajectory
+            )
             return cum - isv
 
         b = [bias(d) for d in (0.4, 0.2, 0.1)]

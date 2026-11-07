@@ -226,7 +226,8 @@ def test_partitioned_dart_acceptance_invariant():
         stateC, np.random.default_rng(42)
     )
     logRatioEst = coarseProposal.correction.log_ratio_estimate(
-        stateC, proposalC, trajectory
+        stateC, proposalC, trajectory,
+        penaltyMetric=coarseProposal.density.penaltyMetric,
     )
     assert logRatioEst != 0.0
     surrDens = proposal.density

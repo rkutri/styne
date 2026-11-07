@@ -1,10 +1,8 @@
 import copy
 import numpy as np
-from typing import List, Optional
-from logging import getLogger
+from typing import Optional
 from numpy.random import Generator
 
-from styne.mcmc.metropolishastings import MetropolisHastings
 from styne.mcmc.factory import MHFactory
 from styne.mcmc.acceptance import AcceptanceProbability
 from styne.mcmc.proposal import (
@@ -15,22 +13,14 @@ from styne.mcmc.localised import (
     LocalisedSurrogateDensity,
     LocalisedSurrogateTransitionMeasure
 )
-from styne.mcmc.method.mrw import MRWFactory
-from styne.statistics.covariance import IIDCovarianceMatrix
-from styne.mcmc.method.pcn import PCNFactory, PCNProposal
-from styne.mcmc.method.mala import MALAFactory
-from styne.mcmc.method.pmala import PMALAFactory
-from styne.mcmc.diagnostics import (
-    ChainDiagnostics, DummyDiagnostics, AcceptanceRateDiagnostics
-)
-from styne.mcmc.method.ratio import RatioEstimator
-from styne.mcmc.acceptance import StandardAcceptance
+from styne.mcmc.method.pcn import PCNProposal
+from styne.mcmc.diagnostics import ChainDiagnostics
+from styne.mcmc.method.ratio import NormalisingRatioEstimator, RatioEstimator
+from styne.mcmc.method.mlda import MLDAFactory, MultilevelDelayedAcceptanceMCMC
+from styne.statistics.covariance import CovarianceMatrix
+from styne.statistics.gaussian import Gaussian
 from styne.statistics.interface import DensityInterface
-from styne.statistics.measure import AbsolutelyContinuousProbabilityMeasure
 from styne.parameter.parameter import Parameter
-from styne.parameter.vector import Vector
-from styne.utility.partition import Partition, IndependentPartitionDensity
-import styne.utility.tuning as tuning
 
 
 class LocalisedSurrogateTransition(ProposalMethod):
@@ -61,9 +51,7 @@ class LocalisedSurrogateTransition(ProposalMethod):
         self._thinning = thinning
 
         if correction is None:
-            self._correction = RatioEstimator(
-                surrogateMeasure, burnin, thinning, 'cumulant'
-            )
+            self._correction = NormalisingRatioEstimator(burnin, thinning, 'gaussian')
         else:
             self._correction = correction
 
@@ -102,18 +90,20 @@ class LocalisedSurrogateTransition(ProposalMethod):
         # Root states store the tempered surrogate together with the
         # localisation at the current state, which vanishes at that state.
         localised = measure.density.with_location(state)
-        logCurrent = start.logDensity \
-            if isinstance(measure.initialMeasure, DiracMeasure) \
-            else localised.derivative.evaluate_log(state)
-        logProposed = end.logDensity - localised.log_localisation(proposal)
+        logCurrent = localised.log_surrogate_from_stored(
+            start.logDensity if isinstance(measure.initialMeasure, DiracMeasure)
+            else localised.derivative.evaluate_log(state), state
+        )
+        logProposed = localised.log_surrogate_from_stored(end.logDensity, proposal)
         logRatioEstimate = self._correction.log_ratio_estimate(
-            state, proposal, trajectory, proposalTrajectory
+            state, proposal, trajectory, proposalTrajectory,
+            penaltyMetric=measure.penaltyMetric,
         )
         logCorrection = logCurrent - logProposed - logRatioEstimate
         return self.record(state, proposal, logCorrection), nextRng
 
 
-class DART(MetropolisHastings):
+class DART(MultilevelDelayedAcceptanceMCMC):
     """Metropolis-Hastings chain driven by a localised surrogate.
 
     Parameters
@@ -137,7 +127,7 @@ class DART(MetropolisHastings):
         target: DensityInterface,
         surrogateMeasure: LocalisedSurrogateTransitionMeasure,
         diagnostics: ChainDiagnostics,
-        burnin: int = 5,
+        burnin: Optional[int] = None,
         thinning: int = 1,
         correction: Optional[RatioEstimator] = None,
         acceptance: Optional[AcceptanceProbability] = None,
@@ -151,18 +141,22 @@ class DART(MetropolisHastings):
                 "LocalisedSurrogateTransitionMeasure instance."
             )
 
+        if burnin is None:
+            burnin = NormalisingRatioEstimator.default_burnin(
+                surrogateMeasure.subchainLength
+            )
         if proposal is None:
             proposal = LocalisedSurrogateTransition(
                 surrogateMeasure, burnin, thinning, correction
             )
 
-        super().__init__(target, proposal, diagnostics,
-                         acceptance=acceptance, rng=rng)
+        super().__init__(target, surrogateMeasure, diagnostics,
+                         acceptance=acceptance, rng=rng, proposal=proposal)
 
     @staticmethod
     def _with_localised_density(proposal, density):
         measure = proposal.measure.with_density(density)
-        correction = proposal.correction.with_surrogate_measure(measure)
+        correction = proposal.correction
         return LocalisedSurrogateTransition(
             measure, proposal._burnin, proposal._thinning, correction
         )
@@ -192,167 +186,102 @@ class DART(MetropolisHastings):
         return copy.copy(proposal)
 
 
-class DARTFactory(MHFactory):
-    """Factory for constructing DART chains.
+class GaussianDARTProposal(ProposalMethod):
+    """Ideal DART proposal for a Gaussian tempered surrogate posterior N(m, C).
 
-    Required configuration before 'create()', set via the matching setters,
-    'surrogate' (list of surrogate densities, coarsest first), 'regularisation'
-    (one gamma per level), and 'nChain' (one subchain length per level). The
-    three lists must be equal length. 'create()' raises if any is unset or the
-    lengths disagree.
+    It draws the local law N(mu_x, S^-1) exactly, where S = C^-1 + B and
+    S mu_x = C^-1 m + B x. Since S does not depend on x, the ratio of the
+    reverse and forward proposal densities is the correction relative to the
+    Lebesgue measure,
 
-    When a partition and fine prior are set, the root chain operates on
-    the coarse subspace only; fine modes are proposed from the prior.
-    Without partition, all behaviour is identical to the original.
+        W(y) - W(x) + log Z_x - log Z_y,
 
-    Configure the selected root chain through ``root``. The proposal parameter
-    is ``root.proposalCovariance`` for ``"mrw"``, ``root.beta`` for ``"pcn"``
-    and ``"pmala"``, and ``root.stepSize`` for ``"mala"``. If it is not set,
-    DART tunes the corresponding parameter automatically during ``create()``.
+    with W(v) = (v - m)^T C^-1 (v - m)/2 and
+    log Z_x = -(m^T C^-1 m + x^T B x - mu_x^T S mu_x)/2.
+
+    Parameters
+    ----------
+    approximation : Gaussian
+        The tempered surrogate posterior N(m, C).
+    penaltyMetric : CovarianceMatrix or float
+        Metric B of the penalty, or a positive number gamma for gamma I.
     """
 
-    def __init__(self, root: str = "pcn"):
-        super().__init__()
+    def __init__(self, approximation: Gaussian, penaltyMetric):
+        # Localised with itself as the approximation, the surrogate posterior
+        # leaves a zero derivative, so the root reference is the local law.
+        self._localised = LocalisedSurrogateDensity(
+            penaltyMetric=penaltyMetric, tempering=1.0,
+            surrogateDensity=approximation.density,
+            approximation=approximation,
+        )
 
-        if root == "mrw":
-            self._rootFactory = MRWFactory()
-        elif root == "pcn":
-            self._rootFactory = PCNFactory()
-        elif root == "mala":
-            self._rootFactory = MALAFactory()
-        elif root == "pmala":
-            self._rootFactory = PMALAFactory()
-        else:
-            raise ValueError(f"Invalid root chain: {root}.")
+    def propose(self, state: Parameter, rng):
+        forward = self._localised.with_location(state).reference
+        draw, nextRng = forward.sample(rng)
+        proposal = state.with_coordinate(draw.coordinate)
+        reverse = self._localised.with_location(proposal).reference
+        logCorrection = (
+            reverse.density.evaluate_log(state)
+            - forward.density.evaluate_log(proposal)
+        )
+        return self.record(state, proposal, logCorrection), nextRng
 
-        self._surrogate = None
+
+class DARTFactory(MLDAFactory):
+    """MLDA construction with localised levels and explicit ratio estimation.
+
+    `regularisation` and `nChain` preserve the legacy scalar API. New code may
+    supply `penaltyMetric` and `rootLength`; one metric/length serves each level.
+    Setting `components` constructs a Mixture of complete DART samplers.
+    """
+
+    _minimumRootLength = 0
+    _temperFullSurrogate = True
+
+    def __init__(self, root='pcn'):
+        super().__init__(root)
         self._gammaList = None
-        self._thetaList = None
-        self._nChain = None
-        self._burnin = 5
+        self._penaltyMetric = None
+        self._spectralWeights = None
+        self._approximation = None
+        self._penaltyReference = None
+        self._burnin = None
         self._thinning = 1
-        self._crankUpSteps = 0
-        self._crankUpProposalVariance = None
-        self._crankUpInitialState = None
-        self._crankedState = None
         self._correction = None
         self._correctionType = None
-        self._acceptance = None
-        self._partition: Optional[Partition] = None
-        self._finePrior: Optional[AbsolutelyContinuousProbabilityMeasure] = None
         self._finePCNStep = 1.0
-        self._spectralWeights = None
         self._localisedDensity = None
-
-        self._surrogateDensity = None
-        self._nSurrogate = None
-        self._logger = getLogger(__name__)
-        self._subDiagnostics = DummyDiagnostics
+        self._components = None
+        self._weights = None
+        self._geometryCache = None
 
     @property
-    def root(self) -> MHFactory:
-        return self._rootFactory
-
-    @root.setter
-    def root(self, factory: MHFactory):
-        self._rootFactory = factory
-
-    @property
-    def surrogate(self) -> List[DensityInterface]:
-        return self._surrogate
-
-    @surrogate.setter
-    def surrogate(self, modelList: List[DensityInterface]):
-        self._surrogate = modelList
-
-    @property
-    def regularisation(self) -> List[float]:
-        return self._gammaList
+    def regularisation(self):
+        if self._gammaList is not None or self._penaltyMetric is None:
+            return self._gammaList
+        if all(isinstance(value, (int, float, np.number))
+               for value in self._penaltyMetric):
+            return self._penaltyMetric
+        raise ValueError("A general penaltyMetric has no scalar regularisation.")
 
     @regularisation.setter
-    def regularisation(self, gammaValues: List[float]):
-        self._gammaList = gammaValues
+    def regularisation(self, values):
+        self._gammaList, self._penaltyMetric = values, None
 
     @property
-    def tempering(self) -> List[float]:
-        return self._thetaList
+    def penaltyMetric(self):
+        if self._gammaList is None:
+            return self._penaltyMetric
+        if self._spectralWeights is None:
+            return self._gammaList
+        from styne.statistics.covariance import DiagonalCovarianceMatrix
+        return [DiagonalCovarianceMatrix(gamma * self._spectralWeights ** 2)
+                for gamma in self._gammaList]
 
-    @tempering.setter
-    def tempering(self, thetaValues: List[float]):
-        self._thetaList = thetaValues
-
-    @property
-    def nChain(self) -> List[int]:
-        return self._nChain
-
-    @nChain.setter
-    def nChain(self, nValues: List[int]):
-        self._nChain = nValues
-
-    @property
-    def burnin(self) -> int:
-        return self._burnin
-
-    @burnin.setter
-    def burnin(self, value: int):
-        if not isinstance(value, int) or value < 0:
-            raise ValueError(
-                f"burnin must be a non-negative integer. Got {value}.")
-        self._burnin = value
-
-    @property
-    def thinning(self) -> int:
-        return self._thinning
-
-    @thinning.setter
-    def thinning(self, value: int):
-        if not isinstance(value, int) or value < 1:
-            raise ValueError(
-                f"thinning must be a positive integer. Got {value}.")
-        self._thinning = value
-
-    @property
-    def acceptance(self) -> AcceptanceProbability:
-        return self._acceptance
-
-    @acceptance.setter
-    def acceptance(self, strategy: AcceptanceProbability):
-        if not isinstance(strategy, AcceptanceProbability):
-            raise TypeError(
-                "acceptance must be an AcceptanceProbability instance.")
-        self._acceptance = strategy
-
-    @property
-    def correction(self) -> RatioEstimator:
-        return self._correction
-
-    @correction.setter
-    def correction(self, strategy: RatioEstimator):
-        if not isinstance(strategy, RatioEstimator):
-            raise TypeError("correction must be a RatioEstimator instance.")
-        self._correction = strategy
-
-    @property
-    def correctionType(self) -> Optional[str]:
-        return self._correctionType
-
-    @correctionType.setter
-    def correctionType(self, value: str):
-        if value not in ('is', 'bridge', 'cumulant'):
-            raise ValueError(
-                f"correctionType must be 'is', 'bridge', or 'cumulant', got '{value}'.")
-        self._correctionType = value
-
-    @property
-    def crankUpSteps(self) -> int:
-        return self._crankUpSteps
-
-    @crankUpSteps.setter
-    def crankUpSteps(self, steps: int):
-        if not isinstance(steps, int) or steps < 0:
-            raise ValueError(
-                f"crankUpSteps must be a non-negative integer. Got {steps}.")
-        self._crankUpSteps = steps
+    @penaltyMetric.setter
+    def penaltyMetric(self, values):
+        self._penaltyMetric, self._gammaList = values, None
 
     @property
     def spectralWeights(self):
@@ -363,331 +292,234 @@ class DARTFactory(MHFactory):
         self._spectralWeights = value
 
     @property
-    def localisedDensity(self):
-        """The innermost LocalisedSurrogateDensity, available after create()."""
-        return self._localisedDensity
+    def approximation(self):
+        return self._approximation
+
+    @approximation.setter
+    def approximation(self, value):
+        self._approximation = value
 
     @property
-    def crankUpInitialState(self) -> Optional[Parameter]:
-        return self._crankUpInitialState
+    def penaltyReference(self):
+        return self._penaltyReference
 
-    @crankUpInitialState.setter
-    def crankUpInitialState(self, value: Optional[Parameter]):
-        self._crankUpInitialState = value
-
-    @property
-    def crankedState(self) -> Optional[Parameter]:
-        return self._crankedState
+    @penaltyReference.setter
+    def penaltyReference(self, value):
+        if value is not None and not isinstance(value, bool):
+            raise TypeError("penaltyReference must be a bool or None.")
+        self._penaltyReference = value
 
     @property
-    def crankUpProposalVariance(self) -> Optional[float]:
-        return self._crankUpProposalVariance
+    def burnin(self):
+        return self._burnin
 
-    @crankUpProposalVariance.setter
-    def crankUpProposalVariance(self, value: float):
-        if value is not None and value <= 0:
-            raise ValueError("crankUpProposalVariance must be positive.")
-        self._crankUpProposalVariance = value
+    @burnin.setter
+    def burnin(self, value):
+        counts = value if isinstance(value, list) else [value]
+        if value is not None and not all(
+                isinstance(count, int) and not isinstance(count, bool) and count >= 0
+                for count in counts):
+            raise ValueError("burnin must be non-negative counts or None.")
+        self._burnin = value
 
-    @property
-    def partition(self) -> Optional[Partition]:
-        return self._partition
-
-    @partition.setter
-    def partition(self, value: Partition):
-        self._partition = value
-
-    @property
-    def finePrior(
-        self,
-    ) -> Optional[AbsolutelyContinuousProbabilityMeasure]:
-        return self._finePrior
-
-    @finePrior.setter
-    def finePrior(self, value: AbsolutelyContinuousProbabilityMeasure):
-        self._finePrior = value
+    def level_burnin(self, level):
+        if self._burnin is None:
+            return self._nChain[level] // 4
+        return self._burnin[level] if isinstance(self._burnin, list) else self._burnin
 
     @property
-    def subDiagnostics(self):
-        return self._subDiagnostics
+    def thinning(self):
+        return self._thinning
 
-    @subDiagnostics.setter
-    def subDiagnostics(self, factory):
-        if not callable(factory):
-            raise TypeError(
-                "subDiagnostics must be a zero-argument callable returning "
-                "a ChainDiagnostics."
-            )
-        self._subDiagnostics = factory
+    @thinning.setter
+    def thinning(self, value):
+        if not isinstance(value, int) or isinstance(value, bool) or value < 1:
+            raise ValueError("thinning must be a positive integer.")
+        self._thinning = value
 
     @property
-    def finePCNStep(self) -> float:
-        """pCN step size on fine block. Requires Gaussian fine prior."""
+    def correction(self):
+        return self._correction
+
+    @correction.setter
+    def correction(self, value):
+        if not isinstance(value, NormalisingRatioEstimator):
+            raise TypeError("correction must be a NormalisingRatioEstimator.")
+        self._correction = value
+
+    @property
+    def correctionType(self):
+        return self._correctionType
+
+    @correctionType.setter
+    def correctionType(self, value):
+        value = {'is': 'importance', 'cumulant': 'gaussian'}.get(value, value)
+        if value not in ('importance', 'gaussian', 'bridge'):
+            raise ValueError("correctionType must be importance, gaussian or bridge.")
+        self._correctionType = value
+
+    @property
+    def finePCNStep(self):
         return self._finePCNStep
 
     @finePCNStep.setter
-    def finePCNStep(self, value: float):
+    def finePCNStep(self, value):
         self._finePCNStep = value
 
-    def _validate(self) -> None:
+    @property
+    def localisedDensity(self):
+        """Innermost density after a single build; None after a mixture build."""
+        return self._localisedDensity
+
+    @property
+    def components(self):
+        return self._components
+
+    @components.setter
+    def components(self, value):
+        self._components = value
+
+    @property
+    def weights(self):
+        return self._weights
+
+    @weights.setter
+    def weights(self, value):
+        self._weights = value
+
+    def _validate(self):
         super()._validate()
-
-        requiredParams = {
-            "surrogate": self._surrogate,
-            "regularisation": self._gammaList,
-            "nChain": self._nChain
-        }
-        missingParams = [
-            key for key, value in requiredParams.items() if value is None]
-        if missingParams:
-            raise ValueError(
-                f"Missing parameters: {', '.join(missingParams)}")
-
-        if not isinstance(self._surrogate, list) or not all(
-                isinstance(m, DensityInterface) for m in self._surrogate):
+        if isinstance(self._burnin, list) and len(self._burnin) != self._nSurr:
+            raise ValueError("burnin needs one count per surrogate level.")
+        if self._approximation is not None and (
+                not isinstance(self._approximation, list)
+                or len(self._approximation) != self._nSurr
+                or not all(value is None or isinstance(value, Gaussian)
+                           for value in self._approximation)):
+            raise ValueError("approximation needs a Gaussian or None per level.")
+        if self._components is not None:
+            if self._nSurr != 1 or not isinstance(self._components, list) or not all(
+                    isinstance(component, dict) for component in self._components):
+                raise ValueError("components needs a list of settings for one level.")
+            return
+        metrics = self._gammaList if self._gammaList is not None else self._penaltyMetric
+        if metrics is None:
+            raise ValueError("Missing parameters: regularisation or penaltyMetric")
+        if not isinstance(metrics, list) or not all(
+                isinstance(metric, (int, float, np.number, CovarianceMatrix))
+                and not isinstance(metric, bool) for metric in metrics):
             raise TypeError(
-                "surrogate must be a list of DensityInterface instances.")
-
-        if not isinstance(
-                self._gammaList, list) or not all(
-                np.isscalar(x) for x in self._gammaList):
-            raise TypeError("regularisation must be a list of scalars.")
-
-        if not isinstance(
-                self._nChain, list) or not all(
-                isinstance(n, int) for n in self._nChain):
-            raise TypeError("nChain must be a list of integers.")
-
-        listLengths = [
-            len(self._surrogate),
-            len(self._gammaList),
-            len(self._nChain)]
-        if len(set(listLengths)) != 1:
-            raise ValueError(
-                f"Inconsistent parameter lengths: {listLengths}")
-
-        self._nSurrogate = listLengths[0]
-
-        if self._nSurrogate < 1:
-            raise ValueError("At least one surrogate level is required.")
-
-        if np.any(np.array(self._gammaList) <= 0.0):
-            raise ValueError(
-                "All regularisation parameters must be positive.")
-
-        if any(n < 0 for n in self._nChain):
-            raise ValueError(
-                "All nChain values must be non-negative integers.")
-
-        estimatorTypes = ['cumulant'] * (self._nSurrogate - 1)
-        estimatorTypes.append(
-            self._correction.estimatorType
-            if self._correction is not None
-            else self._correctionType or 'cumulant'
-        )
-        for level, (nChain, estimatorType) in enumerate(zip(
-                self._nChain, estimatorTypes)):
-            if nChain == 0:
+                "penaltyMetric must be a list of scalars or covariance matrices."
+            )
+        if len(metrics) != self._nSurr:
+            raise ValueError("Inconsistent parameter lengths for penaltyMetric.")
+        if self._gammaList is None and self._spectralWeights is not None:
+            raise ValueError("spectralWeights requires legacy regularisation.")
+        for level, metric in enumerate(metrics):
+            if isinstance(metric, (int, float, np.number)):
+                if not np.isfinite(metric) or metric < 0 or (
+                        self._gammaList is not None and metric == 0):
+                    raise ValueError(
+                        "Regularisation must be positive; metrics non-negative."
+                    )
+                if metric == 0:
+                    continue
+            if self._nChain[level] == 0:
                 continue
-            retained = RatioEstimator.retained_sample_count(
-                nChain, self._burnin, self._thinning
+            estimator = self._estimator(level)
+            retained = estimator.retained_sample_count(
+                self._nChain[level], estimator.burnin, estimator.thinning
             )
-            required = RatioEstimator.minimum_samples(estimatorType)
-            if retained < required:
-                raise ValueError(
-                    f"DART level {level} retains {retained} ratio sample(s); "
-                    f"{estimatorType} requires at least {required}."
-                )
+            if retained < estimator.minimumSamples:
+                raise ValueError(f"DART level {level} retains {retained} samples; "
+                                 f"{estimator.estimatorType} requires at least "
+                                 f"{estimator.minimumSamples}.")
+        if self._partition is not None and not 0 < self._finePCNStep <= 1:
+            raise ValueError("finePCNStep must be in (0, 1].")
 
-        if any(n == 0 for n in self._nChain):
-            self._logger.warning(
-                "At least one subchain length is zero. This recovers "
-                "standard Metropolis-Hastings at that level."
-            )
-
-        partitionSet = self._partition is not None
-        finePriorSet = self._finePrior is not None
-        if partitionSet != finePriorSet:
-            raise ValueError(
-                "partition and finePrior must both be set or both be None.")
-
-        if partitionSet:
-            if not (0.0 < self._finePCNStep <= 1.0):
-                raise ValueError(
-                    f"finePCNStep must satisfy 0 < beta <= 1. Got {self._finePCNStep}."
-                )
-            coarseDim = self._partition.rule.component_dimension(0)
-            surrDim = self._surrogate[0].domainDimension
-            if coarseDim != surrDim:
-                raise ValueError(
-                    f"Coarse partition dimension ({coarseDim}) does not "
-                    f"match surrogate[0] dimension ({surrDim}).")
-
-    def _build_surrogate_densities(self) -> None:
-        if self._thetaList is None:
-            self._surrogateDensity = [
-                LocalisedSurrogateDensity(
-                    regularisation=g, tempering=1.0,
-                    surrogateDensity=m,
-                    spectralWeights=self._spectralWeights)
-                for g, m in zip(self._gammaList, self._surrogate)
-            ]
-        else:
-            if len(self._thetaList) != self._nSurrogate:
-                raise ValueError(
-                    "Inconsistent number of tempering parameters")
-
-            if np.any(
-                    np.array(self._thetaList) <= 0.0) or np.any(
-                    np.array(self._thetaList) > 1.0):
-                raise ValueError(
-                    "Invalid tempering parameter value detected. "
-                    "Require 0 < theta <= 1.")
-
-            self._surrogateDensity = [
-                LocalisedSurrogateDensity(
-                    regularisation=g, tempering=t,
-                    surrogateDensity=m,
-                    spectralWeights=self._spectralWeights)
-                for g, t, m in zip(
-                    self._gammaList, self._thetaList,
-                    self._surrogate)
-            ]
-
-    def _root_needs_tuning(self) -> bool:
-        if isinstance(self._rootFactory, MRWFactory):
-            return self._rootFactory.proposalCovariance is None
-        if isinstance(self._rootFactory, PCNFactory):
-            return self._rootFactory.beta is None
-        if isinstance(self._rootFactory, MALAFactory):
-            return self._rootFactory.stepSize is None
-        if isinstance(self._rootFactory, PMALAFactory):
-            return self._rootFactory.beta is None
-        return False
-
-    def _tune_root(self, surr0, initialState) -> None:
-        """Auto-tune root chain proposal parameter against surr0."""
-        self._rootFactory.target = surr0
-
-        if isinstance(self._rootFactory, MRWFactory):
-            tuning.MRWTuner(self._rootFactory, initialState).tune()
-        elif isinstance(self._rootFactory, PCNFactory):
-            tuning.PCNTuner(self._rootFactory, initialState).tune()
-        elif isinstance(self._rootFactory, MALAFactory):
-            tuning.MALATuner(self._rootFactory, initialState).tune()
-        elif isinstance(self._rootFactory, PMALAFactory):
-            tuning.PMALATuner(self._rootFactory, initialState).tune()
-
-    def _crank_up_target(self) -> DensityInterface:
-        """Full-dimensional crank-up target.
-
-        Without partition: the coarsest surrogate density directly.
-        With partition: joins coarse surrogate and fine prior so the
-        crank-up MRW explores the full parameter space.
-        """
-        if self._partition is None:
-            return self._surrogate[0]
-
-        return IndependentPartitionDensity(
-            self._partition,
-            [self._surrogate[0], self._finePrior.density],
+    def _estimator(self, level):
+        if level == self._nSurr - 1 and self._correction is not None:
+            return self._correction
+        method = self._correctionType if level == self._nSurr - 1 else 'gaussian'
+        return NormalisingRatioEstimator(
+            self.level_burnin(level), self._thinning, method or 'gaussian'
         )
 
-    def _create_sampler(self) -> DART:
-        self._build_surrogate_densities()
-        self._localisedDensity = self._surrogateDensity[0]
+    def _crank_up_target(self, surrogate0=None):
+        return super()._crank_up_target(self._surrogate[0])
 
-        if self._crankUpSteps > 0:
-            crankUpTarget = self._crank_up_target()
-            dim = crankUpTarget.domainDimension
-            init = (self.crankUpInitialState
-                    if self.crankUpInitialState is not None
-                    else tuning.infer_init(crankUpTarget))
-
-            crankUpFactory = MRWFactory()
-            crankUpFactory.target = crankUpTarget
-            crankUpFactory.rng = self.rng
-            crankUpFactory.diagnostics = AcceptanceRateDiagnostics()
-
-            if self._crankUpProposalVariance is None:
-                config = tuning.RWTunerConfig(acceptanceGoal=0.5, tolerance=0.2)
-                crankUpSampler = tuning.MRWTuner(
-                    crankUpFactory, init, config=config
-                ).tune()
-            else:
-                crankUpFactory.proposalCovariance = IIDCovarianceMatrix(
-                    dim, self._crankUpProposalVariance
-                )
-                crankUpSampler = crankUpFactory.create()
-            
-            crankUpSampler.storeChain = False
-            self._logger.info(
-                "crank-up on coarse surrogate, %d steps", self._crankUpSteps
+    def _level_target(self, level):
+        metric = self._gammaList[level] if self._gammaList is not None \
+            else self._penaltyMetric[level]
+        if isinstance(metric, (int, float, np.number)) and metric == 0:
+            return super()._level_target(level)
+        approximation = (self._approximation or [None] * self._nSurr)[level]
+        theta = (self._thetaList or [1.0] * self._nSurr)[level]
+        key = (id(self._surrogate[level]), id(metric), theta, id(approximation),
+               self._penaltyReference, id(self._spectralWeights))
+        cache = self._geometryCache if self._geometryCache is not None else {}
+        if key not in cache:
+            settings = ({'regularisation': metric,
+                         'spectralWeights': self._spectralWeights}
+                        if self._gammaList is not None else {'penaltyMetric': metric})
+            cache[key] = LocalisedSurrogateDensity(
+                tempering=theta, surrogateDensity=self._surrogate[level],
+                approximation=approximation, penaltyReference=self._penaltyReference,
+                **settings,
             )
-            crankUpSampler.run(self._crankUpSteps, init)
-            self._crankedState = crankUpSampler.lastState
-        else:
-            self._crankedState = (
-                self.crankUpInitialState if self.crankUpInitialState is not None
-                else tuning.infer_init(self._crank_up_target())
-            )
+        if level == 0:
+            self._localisedDensity = cache[key]
+        return cache[key]
 
-        self._rootFactory.rng = self.rng
+    def _level_measure(self, sampler, length):
+        if isinstance(sampler.target, LocalisedSurrogateDensity):
+            return LocalisedSurrogateTransitionMeasure(sampler, length)
+        return super()._level_measure(sampler, length)
 
-        if self._root_needs_tuning():
-            if self._partition is not None:
-                rootInit = Vector(self._partition.rule.extract(
-                    0, self._crankedState.coordinate
-                ))
-            else:
-                rootInit = self._crankedState
-            self._tune_root(self._localisedDensity, rootInit)
+    def _level_sampler(self, target, measure, level):
+        if not isinstance(measure, LocalisedSurrogateTransitionMeasure):
+            return super()._level_sampler(target, measure, level)
+        return DART(target, measure, self._subDiagnostics(),
+                    self.level_burnin(level - 1), self._thinning, rng=self.rng)
 
-        self._rootFactory.target = self._localisedDensity
-        self._rootFactory.diagnostics = self._subDiagnostics()
-        rootMcmc = self._rootFactory.create()
-
-        surrogateMeasure = LocalisedSurrogateTransitionMeasure(
-            rootMcmc, self._nChain[0])
-
-        for levelIndex in range(1, self._nSurrogate):
-            surrogateMcmc = DART(
-                self._surrogateDensity[levelIndex],
-                surrogateMeasure,
-                self._subDiagnostics(),
-                self._burnin,
-                self._thinning,
-                rng=self.rng
-            )
-            surrogateMeasure = LocalisedSurrogateTransitionMeasure(
-                surrogateMcmc, self._nChain[levelIndex])
-
-        correction = (
-            self._correction if self._correction is not None
-            else RatioEstimator(
-                surrogateMeasure, self._burnin, self._thinning,
-                self._correctionType or 'cumulant')
+    def _main_sampler(self, measure):
+        if not isinstance(measure, LocalisedSurrogateTransitionMeasure):
+            return super()._main_sampler(measure)
+        level = self._nSurr - 1
+        correction = self._estimator(level)
+        proposal = LocalisedSurrogateTransition(
+            measure, correction.burnin, correction.thinning, correction
         )
-
         if self._partition is not None:
-            coarseProposal = LocalisedSurrogateTransition(
-                surrogateMeasure, self._burnin, self._thinning, correction)
-            fineKernel = PCNProposal(self._finePrior, self._finePCNStep)
             proposal = PartitionedSurrogateProposal(
-                self._partition, coarseProposal, fineKernel, self._finePrior)
-        else:
-            proposal = None
+                self._partition, proposal,
+                PCNProposal(self._finePrior, self._finePCNStep), self._finePrior,
+            )
+        return DART(self._target, measure, self._diagnostics,
+                    correction.burnin, correction.thinning, correction,
+                    self._acceptance, proposal, rng=self.rng)
 
-        mainChain = DART(
-            self._target,
-            surrogateMeasure,
-            self._diagnostics,
-            self._burnin,
-            self._thinning,
-            correction,
-            self._acceptance,
-            proposal=proposal,
-            rng=self.rng
-        )
-
-        return mainChain
+    def _create_sampler(self):
+        self._localisedDensity = None
+        if self._components is None:
+            return super()._create_sampler()
+        from styne.mcmc.mixture import Mixture
+        components, cache = [], {}
+        for settings in self._components:
+            component = copy.copy(self)
+            component._components = None
+            component._geometryCache = cache
+            component._diagnostics = copy.deepcopy(self._diagnostics)
+            component.root = copy.copy(settings.get('root', self.root))
+            for name, value in settings.items():
+                if name in ('penaltyMetric', 'regularisation', 'tempering',
+                            'approximation', 'rootLength', 'nChain'):
+                    setattr(component, name, [value])
+                elif name in ('penaltyReference', 'burnin', 'thinning', 'correctionType'):
+                    setattr(component, name, value)
+                elif name != 'root':
+                    if not isinstance(component.root, MHFactory):
+                        raise ValueError("Root settings require a factory root.")
+                    setattr(component.root, name, value)
+            components.append(component.create())
+        return Mixture(components, self._weights, rng=self.rng)

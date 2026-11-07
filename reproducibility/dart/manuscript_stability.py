@@ -188,8 +188,9 @@ def run_cell(d, gammaValue, childSeed):
         for k in range(nRuns):
             z = surrogateMeasure.generate_realisation(rng=rng)
 
-            logIs = isEstimator.log_ratio_estimate(x, z)
-            logCu = cumulantEstimator.log_ratio_estimate(x, z)
+            trajectory = surrogateMeasure.chain.trajectory
+            logIs = isEstimator.log_ratio_estimate(x, z, trajectory)
+            logCu = cumulantEstimator.log_ratio_estimate(x, z, trajectory)
 
             logTruth = log_truth(z.coordinate, gammaValue) - log_truth(
                 x.coordinate, gammaValue

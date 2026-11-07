@@ -225,3 +225,40 @@ def test_jax_batch_non_mh_component_sums():
     np.testing.assert_array_equal(
         result.sums["components"][1], result.sums["selected"][:, 1]
     )
+
+
+@pytest.mark.parametrize("backendName", ["numpy", "jax"])
+def test_dart_factory_with_mixture_components_and_mixture_root(backendName):
+    from styne.mcmc.method.dart import DARTFactory
+
+    backend, start, target, base = setup_mixture(backendName)
+    first = base.components[0]
+    second = MetropolisedRandomWalk(
+        target.density, IIDCovarianceMatrix(2, backend.asarray(0.6)),
+        DummyDiagnostics(),
+    )
+    root = Mixture([first, second], [0.5, 0.5])
+    factory = DARTFactory(root=root)
+    factory.target = target.density
+    factory.surrogate = [target.density]
+    factory.rootLength = [4]
+    factory.correctionType = "importance"
+    factory.components = [{"penaltyMetric": 0.3}, {"penaltyMetric": 2.0}]
+    factory.weights = [0.4, 0.6]
+    sampler = factory.create()
+    assert isinstance(sampler, Mixture)
+    assert factory.localisedDensity is None
+    assert all(component.target is target.density for component in sampler.components)
+    assert root.target is target.density
+    key = backend.random_state(37)
+    if backendName == "jax":
+        result = sampler.compiled_trajectory(3)(start, key)
+        state = result.finalState
+        assert np.sum(result.sums["selected"]) == 3
+    else:
+        state = sampler.initial_state(start)
+        for _ in range(3):
+            state, _, key = sampler.step(state, key)
+    np.testing.assert_allclose(
+        state.logDensity, target.density.evaluate_log(state.parameter), rtol=1e-5
+    )

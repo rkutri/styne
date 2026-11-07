@@ -101,8 +101,8 @@ def test_iid_regularisation_penalty():
     # log density at pt - log density at location = -gamma/2 * ||d||^2
     expected_diff = -gamma / 2.0 * np.dot(d, d)
     actual_diff = (
-        density._regGaussian.density.evaluate_log(pt)
-        - density._regGaussian.density.evaluate_log(location)
+        density.log_localisation(pt)
+        - density.log_localisation(location)
     )
     assert np.isclose(actual_diff, expected_diff, rtol=1e-10)
 
@@ -132,8 +132,8 @@ def test_weighted_regularisation_penalty():
     # log N(pt | loc, diag(1/(gamma*w^2))) - log N(loc | loc, ...) = -gamma/2 * ||W*d||^2
     expected_diff = -gamma / 2.0 * np.dot(weights * d, weights * d)
     actual_diff = (
-        density._regGaussian.density.evaluate_log(pt)
-        - density._regGaussian.density.evaluate_log(location)
+        density.log_localisation(pt)
+        - density.log_localisation(location)
     )
     assert np.isclose(actual_diff, expected_diff, rtol=1e-10)
 
@@ -163,8 +163,8 @@ def test_weighted_less_penalising_than_iid():
     displacement[2:] = 1.0  # modes with weight 0.01
     pt = Vector(displacement)
 
-    log_iid = density_iid._regGaussian.density.evaluate_log(pt)
-    log_wt = density_wt._regGaussian.density.evaluate_log(pt)
+    log_iid = density_iid.log_localisation(pt)
+    log_wt = density_wt.log_localisation(pt)
 
     # Weighted should penalise this displacement much less
     assert log_wt > log_iid
@@ -206,13 +206,13 @@ def test_sync_weights_updates_covariance():
     # Record penalty at a fixed point before sync
     d = np.ones(dim)
     pt = Vector(d)
-    log_before = density._regGaussian.density.evaluate_log(pt)
+    log_before = density.log_localisation(pt)
 
     # Now sync with different weights
     w2 = np.array([0.5, 0.5, 0.5, 0.5])
     density.sync_weights(w2)
 
-    log_after = density._regGaussian.density.evaluate_log(pt)
+    log_after = density.log_localisation(pt)
 
     # Expected after: -gamma/2 * ||w2 * d||^2 = -gamma/2 * dim * 0.25
     expected_after = -gamma / 2.0 * np.dot(w2 * d, w2 * d)
@@ -237,9 +237,9 @@ def test_sync_weights_none_is_noop():
     density.location = location
 
     pt = Vector(np.ones(dim))
-    log_before = density._regGaussian.density.evaluate_log(pt)
+    log_before = density.log_localisation(pt)
     density.sync_weights(None)
-    log_after = density._regGaussian.density.evaluate_log(pt)
+    log_after = density.log_localisation(pt)
 
     assert np.isclose(log_before, log_after)
     assert np.array_equal(density.spectralWeights, weights)

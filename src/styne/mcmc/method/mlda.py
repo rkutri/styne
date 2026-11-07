@@ -133,8 +133,11 @@ class MultilevelDelayedAcceptanceMCMC(MetropolisHastings):
         partition: Optional[Partition] = None,
         finePrior: Optional[AbsolutelyContinuousProbabilityMeasure] = None,
         rng: Optional[Generator] = None,
+        proposal: Optional[ProposalMethod] = None,
     ):
-        proposalMethod = MLDAProposal(surrogateMeasure, partition, finePrior)
+        proposalMethod = proposal if proposal is not None else MLDAProposal(
+            surrogateMeasure, partition, finePrior
+        )
         super().__init__(target, proposalMethod, diagnostics,
                          acceptance=acceptance, rng=rng)
 
@@ -155,9 +158,14 @@ class MLDAFactory(MHFactory):
         Root chain type: 'mrw' (default), 'pcn', or 'mala'.
     """
 
+    _minimumRootLength = 1
+    _temperFullSurrogate = False
+
     def __init__(self, root="mrw"):
 
-        if root == "mrw":
+        if not isinstance(root, str):
+            self._rootFactory = root
+        elif root == "mrw":
             self._rootFactory = MRWFactory()
         elif root == "pcn":
             self._rootFactory = PCNFactory()
@@ -202,6 +210,14 @@ class MLDAFactory(MHFactory):
         self._nChain = n
 
     @property
+    def rootLength(self):
+        return self._nChain
+
+    @rootLength.setter
+    def rootLength(self, value):
+        self._nChain = value
+
+    @property
     def tempering(self) -> Optional[List[float]]:
         return self._thetaList
 
@@ -212,6 +228,19 @@ class MLDAFactory(MHFactory):
     @property
     def root(self) -> MHFactory:
         return self._rootFactory
+
+    @root.setter
+    def root(self, value):
+        if isinstance(value, str):
+            factories = {'mrw': MRWFactory, 'pcn': PCNFactory,
+                         'mala': MALAFactory, 'pmala': PMALAFactory}
+            if value not in factories:
+                raise ValueError(f"Invalid root chain: {value}")
+            value = factories[value]()
+        if not isinstance(value, MHFactory) and not callable(
+                getattr(value, 'with_target', None)):
+            raise TypeError("root must be a factory or a retargetable sampler.")
+        self._rootFactory = value
 
     @property
     def acceptance(self) -> AcceptanceProbability:
@@ -334,14 +363,17 @@ class MLDAFactory(MHFactory):
 
             from styne.statistics.radonnikodym import RadonNikodym
             for theta, surr in zip(self._thetaList, self._surrogate):
-                if theta < 1.0 and not isinstance(surr, RadonNikodym):
+                if theta < 1.0 and not self._temperFullSurrogate \
+                        and not isinstance(surr, RadonNikodym):
                     raise TypeError(
                         "Tempering < 1.0 is only supported when the surrogate "
                         "density is an instance of RadonNikodym."
                     )
 
-        if any(n <= 0 for n in self._nChain):
-            raise ValueError("All subchain lengths must be positive integers.")
+        if any(n < self._minimumRootLength for n in self._nChain):
+            raise ValueError(
+                f"All root lengths must be at least {self._minimumRootLength}."
+            )
 
         partitionSet = self._partition is not None
         finePriorSet = self._finePrior is not None
@@ -402,20 +434,18 @@ class MLDAFactory(MHFactory):
             [coarseSurrogate, self._finePrior.density],
         )
 
-    def _create_sampler(self):
-        surrogates = list(self._surrogate)
-        if self._thetaList is not None:
-            for lvl in range(self._nSurr):
-                theta = self._thetaList[lvl]
-                if theta < 1.0:
-                    surr = surrogates[lvl]
-                    scaled_derivative = LogScalingWrapper(
-                        surr.derivative, theta
-                    )
-                    surrogates[lvl] = RadonNikodym(
-                        surr.reference, scaled_derivative
-                    )
+    def _level_target(self, level):
+        density = self._surrogate[level]
+        theta = (self._thetaList or [1.0] * self._nSurr)[level]
+        if theta == 1.0:
+            return density
+        if not isinstance(density, RadonNikodym):
+            return LogScalingWrapper(density, theta)
+        return RadonNikodym(
+            density.reference, LogScalingWrapper(density.derivative, theta)
+        )
 
+    def _create_root(self, surrogates):
         if self._crankUpSteps > 0:
             crankUpTarget = self._crank_up_target(surrogates[0])
             dim = crankUpTarget.domainDimension
@@ -451,6 +481,8 @@ class MLDAFactory(MHFactory):
                 else tuning.infer_init(self._crank_up_target(surrogates[0]))
             )
 
+        if not isinstance(self._rootFactory, MHFactory):
+            return self._rootFactory.with_target(surrogates[0])
         self._rootFactory.rng = self.rng
 
         if self._root_needs_tuning():
@@ -464,31 +496,27 @@ class MLDAFactory(MHFactory):
 
         self._rootFactory.target = surrogates[0]
         self._rootFactory.diagnostics = self._subDiagnostics()
-        surrogateChain = self._rootFactory.create()
+        return self._rootFactory.create()
 
-        surrogateMeasure = SurrogateTransitionMeasure(
-            surrogateChain, self._nChain[0], DiracMeasure()
+    def _level_measure(self, sampler, length):
+        return SurrogateTransitionMeasure(sampler, length, DiracMeasure())
+
+    def _level_sampler(self, target, measure, level):
+        return MultilevelDelayedAcceptanceMCMC(
+            target, measure, self._subDiagnostics(), rng=self.rng
         )
 
-        for lvl in range(1, self._nSurr):
-            surrogateChain = MultilevelDelayedAcceptanceMCMC(
-                surrogates[lvl],
-                surrogateMeasure,
-                self._subDiagnostics(),
-                rng=self.rng
-            )
-            surrogateMeasure = SurrogateTransitionMeasure(
-                surrogateChain, self._nChain[lvl], DiracMeasure()
-            )
-
-        mainChain = MultilevelDelayedAcceptanceMCMC(
-            self._target,
-            surrogateMeasure,
-            self._diagnostics,
-            self._acceptance,
-            self._partition,
-            self._finePrior,
-            rng=self.rng
+    def _main_sampler(self, measure):
+        return MultilevelDelayedAcceptanceMCMC(
+            self._target, measure, self._diagnostics, self._acceptance,
+            self._partition, self._finePrior, rng=self.rng
         )
 
-        return mainChain
+    def _create_sampler(self):
+        surrogates = [self._level_target(level) for level in range(self._nSurr)]
+        root = self._create_root(surrogates)
+        measure = self._level_measure(root, self._nChain[0])
+        for level in range(1, self._nSurr):
+            sampler = self._level_sampler(surrogates[level], measure, level)
+            measure = self._level_measure(sampler, self._nChain[level])
+        return self._main_sampler(measure)

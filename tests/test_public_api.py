@@ -56,7 +56,7 @@ EXPECTED_EXPORTS = {
     },
     "styne.mcmc": {
         "Adaptation", "NoAdaptation",
-        "Mixture",
+        "Mixture", "GaussianDARTProposal", "NormalisingRatioEstimator",
         "MetropolisHastings", "MCMCSampler", "Trajectory", "ProposalMethod", "MHFactory",
         "Annotator", "AcceptanceProbability", "ChainDiagnostics", "Chain",
         "GibbsChain", "EvaluatedState", "TransitionData", "DART",

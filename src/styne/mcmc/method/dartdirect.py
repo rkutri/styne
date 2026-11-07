@@ -3,62 +3,45 @@ from typing import Optional
 from numpy.random import Generator
 
 from styne.backend import infer_backend
-from styne.mcmc.proposal import ProposalMethod
+from styne.mcmc.method.dart import GaussianDARTProposal
 from styne.mcmc.metropolishastings import MetropolisHastings
 from styne.mcmc.diagnostics import ChainDiagnostics
 from styne.mcmc.acceptance import AcceptanceProbability
-from styne.parameter.parameter import Parameter
 from styne.statistics.gaussian import Gaussian
 from styne.statistics.interface import DensityInterface
 from styne.statistics.covariance import DenseCovarianceMatrix
 
 
-class DirectDARTProposal(ProposalMethod):
-    """Gaussian DART proposal based on a fixed surrogate.
+class DirectDARTProposal(GaussianDARTProposal):
+    """Legacy constructor for the exact Gaussian local-law proposal.
 
-    Its correction relative to the Lebesgue measure combines the tempered
-    surrogate ratio with the closed-form normalising ratio.
+    The supplied covariance must equal (tempering C^-1 + gamma I)^-1.
+    New code uses GaussianDARTProposal, which constructs that covariance.
     """
 
-    def __init__(
-            self, tempering: float, gamma: float, surrogate: Gaussian,
-            proposalCovariance: DenseCovarianceMatrix):
-        self._tempering = tempering
-        self._gamma = gamma
-        self._surrogate = surrogate
-        self._precisionMean = self._surrogate.covariance.apply_inverse(
-            self._surrogate.mean.coordinate
-        )
-        self._proposalMeasure = Gaussian(proposalCovariance)
-
-    def propose(self, state: Parameter, rng):
-        x = state.coordinate
-        bx = self._tempering * self._precisionMean + self._gamma * x
-        mux = self._proposalMeasure.covariance.apply(bx)
-        propMean = state.with_coordinate(mux)
-        proposal, nextRng = self._proposalMeasure.with_mean(propMean).sample(
-            rng
-        )
-        z = proposal.coordinate
-        bz = self._tempering * self._precisionMean + self._gamma * z
-        muz = self._proposalMeasure.covariance.apply(bz)
-        namespace = infer_backend(x).namespace
-        xHat = self._surrogate.mean.coordinate
-        surrogateCovariance = self._surrogate.covariance
-        quadSurrogateDiff = 0.5 * self._tempering * (
-            surrogateCovariance.dual_quadratic_form(z - xHat)
-            - surrogateCovariance.dual_quadratic_form(x - xHat)
-        )
-        normDiff = 0.5 * (
-            namespace.sum(mux * bx, axis=-1)
-            - namespace.sum(muz * bz, axis=-1)
-        ) - 0.5 * self._gamma * (
-            namespace.sum(x * x, axis=-1)
-            - namespace.sum(z * z, axis=-1)
-        )
-        return self.record(
-            state, proposal, quadSurrogateDiff + normDiff
-        ), nextRng
+    def __init__(self, tempering, gamma, surrogate, proposalCovariance):
+        if not 0 < tempering <= 1 or gamma <= 0:
+            raise ValueError("Require tempering in (0, 1] and positive gamma.")
+        approximation = Gaussian(surrogate.covariance.with_scaling(
+            surrogate.covariance.scaling / tempering
+        ), surrogate.mean)
+        super().__init__(approximation, gamma)
+        supplied = proposalCovariance.scaling * proposalCovariance.to_dense()
+        backend = infer_backend(supplied)
+        metadata = backend.metadata(supplied)
+        expected = self._localised._rootCovariance.apply(backend.eye(
+            supplied.shape[-1], dtype=metadata.dtype, device=metadata.device
+        ))
+        namespace = backend.namespace
+        tolerance = 1e-5 if '32' in str(expected.dtype) else 1e-10
+        if not bool(namespace.all(namespace.abs(expected - supplied)
+                                  <= tolerance * (1 + namespace.abs(expected)))):
+            raise ValueError(
+                "proposalCovariance is inconsistent with the Gaussian local law."
+            )
+        # Valid legacy covariance objects retain their factor/noise convention.
+        self._localised._rootCovariance = proposalCovariance
+        self._localised._reference = self._localised._root_reference()
 
 
 class DirectDART(MetropolisHastings):
