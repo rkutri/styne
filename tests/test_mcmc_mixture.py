@@ -13,6 +13,8 @@ from styne.utility import RobbinsMonroAdaptation
 
 
 def setup_mixture(backendName="numpy", weights=None):
+    if backendName != "numpy":
+        pytest.importorskip("torch" if backendName == "pytorch" else backendName)
     backend = get_backend(backendName)
     start = Vector(backend.zeros(2, dtype="float32"))
     target = Gaussian(IIDCovarianceMatrix(2, backend.asarray(1.0)), start)
