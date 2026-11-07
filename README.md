@@ -77,6 +77,7 @@ The backend-neutral examples cover the main workflows:
 - `examples/02_gp.py`: Gaussian-process representations.
 - `examples/03_sglmm.py`: a spatial Poisson GLMM.
 - `examples/04_hierarchical.py`: a named two-block Gibbs hierarchy.
+- `examples/07_mixtures.py`: mixtures of step scales or different MCMC methods.
 
 Run a fast check with:
 

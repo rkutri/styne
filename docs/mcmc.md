@@ -154,3 +154,125 @@ updates are linear in dimension; no dense factorisation is needed.
 The example handles one chain and learns coordinate scales, without estimating
 correlations. It continues adapting and illustrates the interface rather than
 establishing convergence of this rule.
+
+## Mixtures of transitions
+
+`Mixture(components, weights=None, rng=None)` chooses one complete component
+transition at each step. Components share one target object and state space.
+Weights are fixed, non-negative and normalised; omitted weights are uniform.
+Each selected component applies its own proposal and acceptance rule. This
+differs from applying MH to a marginal mixture proposal density.
+
+```python
+from styne.mcmc import Mixture
+
+sampler = Mixture([smallStepSampler, largeStepSampler], weights=[0.8, 0.2])
+sampler.run(1000, initialParameter)
+sampler.continue_run(1000)
+```
+
+The result is a `Mixture`, with its components available through `components`
+and its normalised probabilities through `weights`. Components retain their
+classes and unchanged covariance objects. The outer chain contains every
+retained position, including repetitions after rejection. Component runners
+do not acquire separate sample histories from these transitions.
+
+Each component's numerical state is retained separately. Its adaptation
+advances when it is selected; the next selection starts from the mixture's
+current position. A mixture-wide observer would instead consume every outer
+transition. Fixed mixtures preserve a common invariant target when each
+component preserves it; mixing approximate or adaptive methods does not by
+itself establish their convergence.
+
+### Composable sampler state
+
+`MCMCSampler.state_at(current, saved)` is a concrete method, not a required
+callback. Its default supports samplers whose state is a `Parameter`.
+Samplers with additional numerical history override it to install the current
+position while retaining their own history and refreshing dependent caches.
+Unknown structured state raises only when this new composition operation is
+requested; existing standalone samplers remain usable.
+
+MH implements this method for `EvaluatedState`. Target evaluations can be
+shared because components use the same target object. Rebinding numerical
+state does not copy targets, proposals or covariance factors.
+
+### JAX mixtures
+
+Mixtures support compiled trajectories and continuation through `finalState`.
+Component state and record slots have fixed structures, shapes and dtypes;
+slots belonging to different components may differ. Nested records preserve
+component attribution. Generic record handling does not depend on DART fields.
+
+Mixture observers receive `MixtureTransition`: its `component` selects the
+meaningful slot in `records`. A single-MH `AcceptanceRateDiagnostics` cannot
+consume this record directly. Compiled results expose component selection
+counts through `sums['selected']` and each component's summaries through
+`sums['components']`. The component runners' diagnostics remain untouched.
+
+Each chain chooses its own component when running independent batched chains.
+Use independent random keys for independently executed or vectorised chains.
+Vectorising conditional dispatch can evaluate unselected branches; elementwise
+compiled mapping preserves scalar dispatch for expensive heterogeneous kernels.
+Changing component configuration requires rebuilding the compiled trajectory.
+Direct batched mixture input currently requires JAX; NumPy and PyTorch support
+scalar chains. Run separate scalar mixtures for independent chains on those
+backends.
+
+The [mixture example](../examples/07_mixtures.py) demonstrates both different
+step scales and different algorithms on one Gaussian target, with a compiled
+JAX continuation. It illustrates usage rather than comparing efficiency.
+
+For a one-level DART hierarchy, `factory.components` accepts a list of setting
+overrides, for example `[{'beta': 0.2}, {'beta': 0.8}]`, with probabilities in
+`factory.weights`. It returns a `Mixture` and shares unchanged localisation
+geometry. For multilevel hierarchies, build the complete DART components and
+pass them to `Mixture` explicitly. Root-setting overrides require a root factory;
+an existing sampler root must already carry its intended settings.
+`factory.localisedDensity` is `None` after a mixture build; inspect its components
+for their individual localised densities.
+
+## DART construction and Gaussian proposals
+
+`DARTFactory` extends `MLDAFactory`'s hierarchy construction. `rootLength`
+names the number of transitions at each surrogate level; `nChain` remains a
+compatibility alias. An explicit `burnin` is preserved. Otherwise each level
+uses `rootLength // 4`, including zero burn-in for lengths below four.
+The factory's zero-length root retains its existing identity-transition
+behaviour; use `GaussianDARTProposal` for an exact Gaussian local-law draw.
+
+`penaltyMetric` specifies the localisation metric B as a scalar or a structured
+matrix. Legacy `regularisation` gamma means B = gamma I; with spectral weights
+w it means B = gamma diag(w squared). General matrix input has no unique legacy
+scalar interpretation. Use the existing matrix classes to preserve diagonal,
+isotropic, semidefinite or precision structure.
+
+Assigning `regularisation` or `penaltyMetric` selects that input convention;
+the latest assignment takes precedence. `spectralWeights` belongs to legacy
+regularisation and cannot accompany an explicit metric. A general metric's
+legacy scalar getter raises rather than inventing a value.
+
+Legacy regularisation retains its automatic penalty-Gaussian reference for
+surrogates without an existing Gaussian reference. With the new metric API,
+request `penaltyReference=True` explicitly when a pCN root should preserve
+N(x, B inverse). A semidefinite penalty can instead use MRW or MALA without
+requiring this inverse.
+
+The normalising-ratio modes are `importance`, `bridge` and `gaussian`.
+`NormalisingRatioEstimator` separates estimation settings from the selected
+component's metric and root trajectories. Estimation reduces over retained
+root samples, independently for each chain in a batch. The Gaussian mode is
+a second-order cumulant approximation and requires at least two retained states.
+The legacy `RatioEstimator` constructor and old mode spellings remain accepted.
+Calls now supply root trajectories explicitly; the estimator no longer reads a
+sampler's stored chain. DART always supplies the selected component's metric.
+
+`GaussianDARTProposal(approximation, penaltyMetric)` draws the local law exactly
+when the tempered surrogate approximation is Gaussian N(m, C). With
+S = C inverse + B, its covariance is S inverse and its mean solves
+S mu = C inverse m + B x. The covariance is independent of the current x and
+can be cached. The proposal supplies the reverse/forward Gaussian density
+correction to ordinary MH against the fine target; it needs neither a root
+trajectory nor an estimated normalising ratio.
+Legacy `DirectDART` entry points delegate to this proposal and validate that
+their supplied covariance matches the Gaussian local law.
