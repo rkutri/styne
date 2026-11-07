@@ -92,10 +92,14 @@ class RobbinsMonroAdaptation(Adaptation):
 
 
 class FullCovarianceAdaptationState(NamedTuple):
-    """Empirical moments and the retained proposal's lower Cholesky factor."""
+    """Empirical moments and the retained proposal covariance."""
 
     moments: Any
-    cholFactor: Any
+    covariance: Any
+
+    @property
+    def cholFactor(self):
+        return self.covariance.to_cholesky()
 
 
 class FullCovarianceAdaptation(Adaptation):
@@ -123,39 +127,36 @@ class FullCovarianceAdaptation(Adaptation):
         backend = infer_backend(parameter.coordinate, factor)
         metadata = backend.metadata(parameter.coordinate)
         factor = backend.asarray(factor, dtype=metadata.dtype, device=metadata.device)
-        # PyTorch conditional branches also require matching array layouts.
-        factor = factor.reshape((-1,)).reshape(factor.shape)
-        return FullCovarianceAdaptationState(moments, factor)
+        covariance = DenseCovarianceMatrix.from_cholesky(factor)
+        return FullCovarianceAdaptationState(moments, covariance)
 
     def prepare_proposal(self, proposalMethod, state):
-        return MRWProposal(DenseCovarianceMatrix.from_cholesky(state.cholFactor))
+        return MRWProposal(state.covariance)
 
     def update_state(self, state, nextState, transitionData):
         moments = FullCovarianceAccumulator.update_record(
             state.moments, nextState.parameter.coordinate,
         )
-        backend = infer_backend(state.cholFactor)
-        metadata = backend.metadata(state.cholFactor)
+        backend = infer_backend(moments.m2)
+        metadata = backend.metadata(moments.m2)
         nugget = backend.asarray(self._nugget, dtype=metadata.dtype,
                                  device=metadata.device)
         due = (moments.nData >= 2) & (moments.nData % self._interval == 0)
 
         def refactor(operand):
-            nData, m2, previousFactor, nugget = operand
+            nData, m2, previousCovariance, nugget = operand
             denominator = backend.asarray(
                 nData - 1,
                 dtype=metadata.dtype, device=metadata.device,
             )
             covariance = m2 / denominator
-            identity = backend.eye(previousFactor.shape[-1], dtype=metadata.dtype,
+            identity = backend.eye(previousCovariance.dimension, dtype=metadata.dtype,
                                    device=metadata.device)
-            factor = backend.cholesky(covariance + nugget * identity)
-            return factor.reshape((-1,)).reshape(factor.shape)
+            return DenseCovarianceMatrix(covariance + nugget * identity)
 
         # A conditional keeps Cholesky inside the scheduled branch under JAX.
-        # Tensor-only operands and fresh outputs also support PyTorch's cond.
-        factor = backend.cond(
-            due, refactor, lambda operand: operand[2] * 1.0,
-            (moments.nData, moments.m2, state.cholFactor, nugget),
+        covariance = backend.cond(
+            due, refactor, lambda operand: operand[2],
+            (moments.nData, moments.m2, state.covariance, nugget),
         )
-        return FullCovarianceAdaptationState(moments, factor)
+        return FullCovarianceAdaptationState(moments, covariance)

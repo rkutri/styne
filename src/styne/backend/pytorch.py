@@ -221,6 +221,20 @@ class PyTorchBackend(Backend):
             ),
         )
 
+        from styne.statistics.covariance import (
+            DenseCovarianceMatrix, DiagonalCovarianceMatrix, IIDCovarianceMatrix,
+        )
+
+        for covarianceType in (
+                DenseCovarianceMatrix, DiagonalCovarianceMatrix, IIDCovarianceMatrix):
+            _pytree.register_pytree_node(
+                covarianceType,
+                lambda covariance: covariance._tree_flatten(),
+                lambda children, backend, cls=covarianceType: cls._restore(
+                    backend, *children
+                ),
+            )
+
     @property
     def name(self):
         return "pytorch"
@@ -367,6 +381,8 @@ class PyTorchBackend(Backend):
     def cond(
             self, predicate, trueFunction,
             falseFunction, operand):
+        if not torch.compiler.is_compiling():
+            return trueFunction(operand) if predicate else falseFunction(operand)
         return torch.cond(
             predicate, trueFunction, falseFunction, (operand,)
         )

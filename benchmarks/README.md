@@ -3,6 +3,10 @@
 - `dartlogistic.py` compares pilot-tuned DART, MALA, and MLDA.
 - `dartlocalisation.py` compares localised and unlocalised DART.
 - `dartvisualisation.py` plots the latest production CSVs.
+- `covariancepreparation.py` compares reconstruction from a raw factor with
+  retaining a covariance object during proposal preparation. Run it with
+  `python benchmarks/covariancepreparation.py`. It reports microseconds per
+  preparation at three dimensions; these are not whole-chain timings.
 
 The localisation benchmark asks whether keeping DART proposals closer to the
 current state helps when its Gaussian approximation has the wrong centre,

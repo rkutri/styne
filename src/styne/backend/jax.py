@@ -83,6 +83,19 @@ def register_parameter_containers():
             auxiliary=children[4],
         ),
     )
+    from styne.statistics.covariance import (
+        DenseCovarianceMatrix, DiagonalCovarianceMatrix, IIDCovarianceMatrix,
+    )
+
+    for covarianceType in (
+            DenseCovarianceMatrix, DiagonalCovarianceMatrix, IIDCovarianceMatrix):
+        jax.tree_util.register_pytree_node(
+            covarianceType,
+            lambda covariance: covariance._tree_flatten(),
+            lambda backend, children, cls=covarianceType: cls._restore(
+                backend, *children
+            ),
+        )
 
 
 class JAXNamespace(ArrayNamespace):

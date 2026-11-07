@@ -207,12 +207,13 @@ its Cholesky factor. The new factor is used from the next transition. With
 `interval=1`, updates start at the second observation. Both settings must be
 positive, and the nugget must be finite.
 
-The numerical adaptation state carries the moments and the current factor.
-`prepare_proposal` wraps that factor with
-`DenseCovarianceMatrix.from_cholesky`, which stores a supplied lower factor
-without reconstructing or factorising the covariance. `with_scaling` also
-reuses the existing factor. Supplied factors must be finite, lower triangular
-and have a positive diagonal; NumPy checks these values eagerly.
+The numerical adaptation state carries the moments and the current covariance
+object. `prepare_proposal` retains that object without copying or validating
+its factor again. The compatibility property `state.cholFactor` still returns
+the current scaled factor. `with_scaling` shares a matrix's owned factor while
+replacing its scalar scale. Public constructors isolate external arrays;
+`DenseCovarianceMatrix.from_cholesky` validates supplied NumPy factors once.
+They must be finite, lower triangular and have a positive diagonal.
 
 The scheduled factorisation is inside `backend.cond`, which maps to
 `jax.lax.cond` for JAX. With the scalar update flag, only the selected branch

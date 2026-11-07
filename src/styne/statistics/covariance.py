@@ -1,3 +1,4 @@
+import copy
 import numpy as np
 from abc import abstractmethod
 
@@ -14,6 +15,9 @@ def backend_array(value):
 
 
 def scaling_array(backend, reference, scaling):
+    if isinstance(scaling, (int, float)):
+        metadata = backend.metadata(reference)
+        return backend.asarray(scaling, dtype=metadata.dtype, device=metadata.device)
     try:
         scalingBackend = infer_backend(scaling)
     except BackendInferenceError:
@@ -35,7 +39,7 @@ class CovarianceMatrix(CovarianceOperatorInterface):
 
     def __init__(self, backend, reference, scaling=1.0):
         self._backend = backend
-        self._scaling = scaling_array(backend, reference, scaling)
+        self._scaling = scaling_array(backend, reference, scaling) * 1.0
         if backend.name == "numpy" and np.any(self._scaling <= 0.0):
             raise ValueError(f"Scaling must be positive. Got {scaling}.")
 
@@ -71,14 +75,28 @@ class CovarianceMatrix(CovarianceOperatorInterface):
     def scaling(self):
         return self._scaling
 
-    @abstractmethod
     def with_scaling(self, scaling):
-        """Return an equivalent covariance with replacement scaling."""
-        ...
+        """Replace scaling while sharing the owned factorisation."""
+        result = copy.copy(self)
+        CovarianceMatrix.__init__(result, self._backend, self._scaling, scaling)
+        return result
+
+    def _tree_flatten(self):
+        return (getattr(self, self._factorName), self._scaling), self._backend
+
+    @classmethod
+    def _restore(cls, backend, factor, scaling):
+        """Restore owned numerical state without validating or copying it again."""
+        result = cls.__new__(cls)
+        result._backend = backend
+        result._scaling = scaling
+        setattr(result, cls._factorName, factor)
+        return result
 
 
 class DiagonalCovarianceMatrix(CovarianceMatrix):
     """Covariance matrix of independent random variables."""
+    _factorName = "_sqrtMV"
 
     def __init__(self, marginalVariance, scaling=1.0):
         backend, marginalVariance = backend_array(marginalVariance)
@@ -91,9 +109,6 @@ class DiagonalCovarianceMatrix(CovarianceMatrix):
 
         super().__init__(backend, marginalVariance, scaling)
         self._sqrtMV = backend.namespace.sqrt(marginalVariance)
-
-    def with_scaling(self, scaling):
-        return DiagonalCovarianceMatrix(self.marginalVariance, scaling)
 
     @property
     def marginalVariance(self):
@@ -150,14 +165,9 @@ class IIDCovarianceMatrix(DiagonalCovarianceMatrix):
         ) * variance
         super().__init__(marginalVariance, scaling)
 
-    def with_scaling(self, scaling):
-        return IIDCovarianceMatrix(
-            self.dimension, self.marginalVariance[0], scaling
-        )
-
-
 class DenseCovarianceMatrix(CovarianceMatrix):
     """Dense symmetric positive-definite covariance matrix."""
+    _factorName = "_cholFactor"
 
     def __init__(self, denseCovMat, scaling=1.0):
         backend, denseCovMat = backend_array(denseCovMat)
@@ -206,9 +216,6 @@ class DenseCovarianceMatrix(CovarianceMatrix):
         CovarianceMatrix.__init__(result, backend, factor, scaling)
         result._cholFactor = factor
         return result
-
-    def with_scaling(self, scaling):
-        return DenseCovarianceMatrix.from_cholesky(self._cholFactor, scaling)
 
     @property
     def dimension(self):
