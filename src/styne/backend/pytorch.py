@@ -398,6 +398,9 @@ class PyTorchBackend(Backend):
     def cholesky(self, matrix):
         return torch.linalg.cholesky(matrix)
 
+    def eigh(self, matrix):
+        return torch.linalg.eigh(matrix)
+
     def solve(self, matrix, rightHandSide):
         return torch.linalg.solve(matrix, rightHandSide)
 

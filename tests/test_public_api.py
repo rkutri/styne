@@ -43,6 +43,7 @@ EXPECTED_EXPORTS = {
         "RadonNikodym", "GaussianDensity", "Gaussian",
         "DiagonalCovarianceMatrix", "IIDCovarianceMatrix",
         "DenseCovarianceMatrix", "StationaryCovariance",
+        "PrecisionCovarianceMatrix", "SemidefiniteCovarianceMatrix",
         "ExponentialCovariance1D", "MaternCovariance1D",
         "MaternCovariance2D", "Data", "DiracMeasure", "Binomial", "Poisson",
         "GaussianResponse", "PoissonResponse", "BinomialResponse",

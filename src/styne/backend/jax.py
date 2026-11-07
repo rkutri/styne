@@ -308,6 +308,9 @@ class JAXBackend(Backend):
     def cholesky(self, matrix):
         return jnp.linalg.cholesky(matrix)
 
+    def eigh(self, matrix):
+        return jnp.linalg.eigh(matrix)
+
     def solve(self, matrix, rightHandSide):
         return jnp.linalg.solve(matrix, rightHandSide)
 

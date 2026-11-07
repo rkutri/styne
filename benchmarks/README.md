@@ -3,6 +3,13 @@
 - `dartlogistic.py` compares pilot-tuned DART, MALA, and MLDA.
 - `dartlocalisation.py` compares localised and unlocalised DART.
 - `dartvisualisation.py` plots the latest production CSVs.
+- `covariancescaling.py` compares cached covariance rescaling with a Git baseline.
+
+Run `python benchmarks/covariancescaling.py --baseline b2e0cad` to report
+median rescaling time and Cholesky call counts for a 64-dimensional covariance.
+The benchmark excludes initial factorisation and checks that the scaled
+operator is unchanged mathematically. Both versions use the current NumPy
+backend; timings depend on the machine and numerical libraries.
 
 The localisation benchmark asks whether keeping DART proposals closer to the
 current state helps when its Gaussian approximation has the wrong centre,

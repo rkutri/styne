@@ -190,13 +190,33 @@ class NumPyBackend(Backend):
     def cholesky(self, matrix):
         return np.linalg.cholesky(matrix)
 
+    def eigh(self, matrix):
+        return np.linalg.eigh(matrix)
+
     def solve(self, matrix, rightHandSide):
         return np.linalg.solve(matrix, rightHandSide)
 
     def solve_triangular(self, matrix, rightHandSide, *, lower):
-        return linalg.solve_triangular(
-            matrix, rightHandSide, lower=lower
+        if matrix.ndim == 2:
+            return linalg.solve_triangular(matrix, rightHandSide, lower=lower)
+        # SciPy 1.10, our minimum version, accepts one triangular matrix only.
+        vector = rightHandSide.ndim == matrix.ndim - 1
+        if vector:
+            rightHandSide = rightHandSide[..., None]
+        batchShape = np.broadcast_shapes(matrix.shape[:-2], rightHandSide.shape[:-2])
+        matrixShape = matrix.shape[-2:]
+        rightShape = rightHandSide.shape[-2:]
+        matrices = np.broadcast_to(matrix, batchShape + matrixShape).reshape(
+            (-1,) + matrixShape
         )
+        columns = np.broadcast_to(rightHandSide, batchShape + rightShape).reshape(
+            (-1,) + rightShape
+        )
+        solution = np.stack([
+            linalg.solve_triangular(factor, column, lower=lower)
+            for factor, column in zip(matrices, columns)
+        ]).reshape(batchShape + rightShape)
+        return solution[..., 0] if vector else solution
 
     def dct1(self, array, *, axis=-1):
         return fft.dct(array, type=1, norm="backward", axis=axis)

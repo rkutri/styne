@@ -17,6 +17,8 @@ _SYMBOL_TO_MODULE = {
     "DiagonalCovarianceMatrix": "styne.statistics.covariance",
     "IIDCovarianceMatrix": "styne.statistics.covariance",
     "DenseCovarianceMatrix": "styne.statistics.covariance",
+    "PrecisionCovarianceMatrix": "styne.statistics.covariance",
+    "SemidefiniteCovarianceMatrix": "styne.statistics.covariance",
     "StationaryCovariance": "styne.statistics.stationary",
     "ExponentialCovariance1D": "styne.statistics.stationary",
     "MaternCovariance1D": "styne.statistics.stationary",

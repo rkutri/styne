@@ -213,6 +213,9 @@ class Backend(ABC):
     def cholesky(self, matrix):
         raise NotImplementedError
 
+    def eigh(self, matrix):
+        raise NotImplementedError
+
     def solve(self, matrix, rightHandSide):
         raise NotImplementedError
 
