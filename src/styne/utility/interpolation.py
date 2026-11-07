@@ -3,11 +3,10 @@ import numpy as np
 from scipy.interpolate import make_interp_spline
 from scipy.sparse import csr_matrix
 
-from styne.model.representation.expansion import GridFunctionInterface
 from styne.utility.grid import Grid
 
 
-class Interpolation1D(GridFunctionInterface):
+class Interpolation1D:
     """
     1D grid-function interpolation via `scipy.interpolate.make_interp_spline`.
 
@@ -44,7 +43,7 @@ class Interpolation1D(GridFunctionInterface):
         return self._interp(grid.to_array().ravel())
 
 
-class GridInterpolation2D(GridFunctionInterface):
+class GridInterpolation2D:
     """
     Bilinear interpolant on a regular 2D grid.
 
@@ -140,7 +139,7 @@ def bilinear_interpolation_matrix(queryPoints, gridX, gridY):
     Maps values on a regular 2D grid to N arbitrary query points via
     bilinear interpolation. Node ordering, $\text{node}(i,j) = i n_Y + j$,
     consistent with the flat row-major layout of
-    `DNAFourierRealisation.evaluate_native()`.
+    `DNAFourierExpansion.evaluate_native()`.
 
     Parameters
     ----------

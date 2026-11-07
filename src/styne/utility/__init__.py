@@ -2,6 +2,7 @@
 import importlib
 
 _SYMBOL_TO_MODULE = {
+    "RobbinsMonroAdaptation": "styne.utility.adaptation",
     "Grid": "styne.utility.grid",
     "UniformGrid": "styne.utility.grid",
     "Interpolation1D": "styne.utility.interpolation",
@@ -21,7 +22,6 @@ _SYMBOL_TO_MODULE = {
     "PCNTuner": "styne.utility.tuning",
     "PMALATuner": "styne.utility.tuning",
     "infer_init": "styne.utility.tuning",
-    "EvaluationCache": "styne.utility.memoisation",
     "LogScalingWrapper": "styne.utility.densityarithmetic",
     "ProductWrapper": "styne.utility.densityarithmetic",
     "NotPositiveDefinite": "styne.utility.exceptions",

@@ -137,11 +137,8 @@ def run_cell(d, gammaValue, childSeed):
     mean1 = a * np.ones(d)
     mean2 = -a * np.ones(d)
 
-    g1 = GaussianDensity(surrogateCovariance)
-    g1.mean = Vector(mean1)
-
-    g2 = GaussianDensity(surrogateCovariance)
-    g2.mean = Vector(mean2)
+    g1 = GaussianDensity(surrogateCovariance, Vector(mean1))
+    g2 = GaussianDensity(surrogateCovariance, Vector(mean2))
 
     surrogateDensity = GaussianMixtureDensity([g1, g2], weights=mixWeights)
 
@@ -191,8 +188,9 @@ def run_cell(d, gammaValue, childSeed):
         for k in range(nRuns):
             z = surrogateMeasure.generate_realisation(rng=rng)
 
-            logIs = isEstimator.log_ratio_estimate(x, z)
-            logCu = cumulantEstimator.log_ratio_estimate(x, z)
+            trajectory = surrogateMeasure.chain.trajectory
+            logIs = isEstimator.log_ratio_estimate(x, z, trajectory)
+            logCu = cumulantEstimator.log_ratio_estimate(x, z, trajectory)
 
             logTruth = log_truth(z.coordinate, gammaValue) - log_truth(
                 x.coordinate, gammaValue

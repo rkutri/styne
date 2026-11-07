@@ -99,7 +99,7 @@ class TestBarkerAcceptance:
 # 2. Integration test: MRW on 2D standard Gaussian
 # ---------------------------------------------------------------------------
 
-def _run_mrw(acceptance, n_steps=5000, seed=42):
+def run_mrw(acceptance, n_steps=5000, seed=42):
     np.random.seed(seed)
     target = StandardGaussian2D()
     propCov = IIDCovarianceMatrix(2, 0.5)
@@ -118,19 +118,19 @@ def _run_mrw(acceptance, n_steps=5000, seed=42):
 class TestIntegration:
 
     def test_standard_acceptance_rate(self):
-        _, rate = _run_mrw(StandardAcceptance())
+        _, rate = run_mrw(StandardAcceptance())
         assert rate > 0.0
 
     def test_barker_acceptance_rate(self):
-        _, rate = _run_mrw(BarkerAcceptance())
+        _, rate = run_mrw(BarkerAcceptance())
         assert rate > 0.0
 
     def test_standard_mean(self):
-        samples, _ = _run_mrw(StandardAcceptance())
+        samples, _ = run_mrw(StandardAcceptance())
         assert np.abs(samples.mean(axis=0)).max() < 0.5
 
     def test_barker_mean(self):
-        samples, _ = _run_mrw(BarkerAcceptance())
+        samples, _ = run_mrw(BarkerAcceptance())
         assert np.abs(samples.mean(axis=0)).max() < 0.5
 
     def test_post_hoc_replacement(self):

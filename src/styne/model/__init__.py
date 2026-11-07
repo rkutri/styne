@@ -2,11 +2,10 @@
 import importlib
 
 _SYMBOL_TO_MODULE = {
-    "Model": "styne.model.model",
-    "DifferentiableModel": "styne.model.model",
-    "LinearModel": "styne.model.linear",
+    "ForwardMap": "styne.model.forwardmap",
+    "DifferentiableForwardMap": "styne.model.forwardmap",
+    "LinearForwardMap": "styne.model.linear",
     "SGLMM": "styne.model.sglmm",
-    "SGLMMPredictor": "styne.model.sglmm",
     "Trend": "styne.model.trend",
     "ConstantTrend": "styne.model.trend",
     "LinearTrend": "styne.model.trend",

@@ -1,8 +1,15 @@
-"""Curated public surface of styne.mcmc. mcmc.method is an implementation detail, not a documented import path."""
+"""Curated public surface of ``styne.mcmc``.
+
+``mcmc.method`` is an implementation detail, not a documented import path.
+"""
 import importlib
 
 _SYMBOL_TO_MODULE = {
+    "Adaptation": "styne.mcmc.adaptation",
+    "NoAdaptation": "styne.mcmc.adaptation",
     "MetropolisHastings": "styne.mcmc.metropolishastings",
+    "Mixture": "styne.mcmc.mixture",
+    "Trajectory": "styne.mcmc.sampler",
     "MCMCSampler": "styne.mcmc.sampler",
     "ProposalMethod": "styne.mcmc.proposal",
     "MHFactory": "styne.mcmc.factory",
@@ -11,8 +18,11 @@ _SYMBOL_TO_MODULE = {
     "ChainDiagnostics": "styne.mcmc.diagnostics",
     "Chain": "styne.mcmc.chain",
     "GibbsChain": "styne.mcmc.chain",
+    "EvaluatedState": "styne.mcmc.transition",
+    "TransitionData": "styne.mcmc.transition",
     "DART": "styne.mcmc.method.dart",
     "DARTFactory": "styne.mcmc.method.dart",
+    "GaussianDARTProposal": "styne.mcmc.method.dart",
     "DirectDART": "styne.mcmc.method.dartdirect",
     "MetropolisAdjustedLangevinAlgorithm": "styne.mcmc.method.mala",
     "MALAFactory": "styne.mcmc.method.mala",
@@ -22,13 +32,12 @@ _SYMBOL_TO_MODULE = {
     "PCNFactory": "styne.mcmc.method.pcn",
     "MetropolisedRandomWalk": "styne.mcmc.method.mrw",
     "MRWFactory": "styne.mcmc.method.mrw",
-    "RobbinsMonroMRW": "styne.mcmc.method.mrw",
-    "RobbinsMonroMRWFactory": "styne.mcmc.method.mrw",
     "MultilevelDelayedAcceptanceMCMC": "styne.mcmc.method.mlda",
     "MLDAFactory": "styne.mcmc.method.mlda",
     "BlockGibbs": "styne.mcmc.method.gibbs",
     "GibbsBuilder": "styne.mcmc.method.gibbs",
     "RatioEstimator": "styne.mcmc.method.ratio",
+    "NormalisingRatioEstimator": "styne.mcmc.method.ratio",
     "BlockProposal": "styne.mcmc.proposal",
     "StandardAcceptance": "styne.mcmc.acceptance",
     "BarkerAcceptance": "styne.mcmc.acceptance",

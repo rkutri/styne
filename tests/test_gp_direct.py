@@ -3,56 +3,54 @@ import pytest
 
 from numpy.random import default_rng
 
-from styne.gp.direct import DirectRealisation, DirectGPEngine
+from styne.gp.direct import DirectExpansion
 from styne.gp.gaussianprocess import GaussianProcess
 from styne.statistics.gaussian import Gaussian
-from styne.statistics.covariance import CovarianceMatrix, DenseCovarianceMatrix
+from styne.statistics.covariance import CovarianceMatrix
 from styne.statistics.stationary import MaternCovariance1D
 from styne.utility.grid import Grid, UniformGrid
 
 
-# ---- DirectRealisation API sanity ----
+# ---- DirectExpansion API sanity ----
 
-class TestDirectRealisationAPI:
+class TestDirectExpansionAPI:
 
     def setup_method(self):
         self.grid1d = UniformGrid(0., 1., 5)
         self.n = 5
 
     def test_dimension(self):
-        r = DirectRealisation(self.grid1d, self.n)
+        r = DirectExpansion(self.grid1d, self.n)
         assert r.dimension == self.n
 
-    def test_coefficient_unset_raises(self):
-        r = DirectRealisation(self.grid1d, self.n)
-        with pytest.raises(ValueError):
-            _ = r.coefficient
-
-    def test_coefficient_round_trip(self):
-        r = DirectRealisation(self.grid1d, self.n)
-        coeff = np.array([1., 2., 3., 4., 5.])
-        r.coefficient = coeff
-        np.testing.assert_allclose(r.coefficient, coeff)
-
-    def test_coefficient_returns_copy(self):
-        r = DirectRealisation(self.grid1d, self.n)
-        coeff = np.ones(self.n)
-        r.coefficient = coeff
-        c = r.coefficient
-        c[0] = 999.
-        np.testing.assert_allclose(r.coefficient[0], 1.)
+    def test_has_no_coefficient_state(self):
+        r = DirectExpansion(self.grid1d, self.n)
+        for name in ("coefficient", "project", "clone"):
+            assert not hasattr(r, name)
 
     def test_size_mismatch_raises(self):
-        r = DirectRealisation(self.grid1d, self.n)
+        r = DirectExpansion(self.grid1d, self.n)
         with pytest.raises(ValueError):
-            r.coefficient = np.ones(self.n + 1)
+            r.evaluate(np.ones(self.n + 1), self.grid1d)
 
     def test_evaluate_1d(self):
         grid_vals = self.grid1d.to_array().ravel()
-        r = DirectRealisation(self.grid1d, self.n)
-        r.coefficient = grid_vals * 2.
-        result = r.evaluate(self.grid1d)
+        r = DirectExpansion(self.grid1d, self.n)
+        result = r.evaluate(grid_vals * 2., self.grid1d)
         np.testing.assert_allclose(result, grid_vals * 2., atol=1e-12)
+
+    def test_evaluate_batch(self):
+        gridValues = self.grid1d.to_array().ravel()
+        coefficient = np.stack([
+            gridValues, 2. * gridValues
+        ]).reshape(1, 2, self.n)
+        expansion = DirectExpansion(self.grid1d, self.n)
+
+        result = expansion.evaluate(
+            coefficient=coefficient, grid=self.grid1d
+        )
+
+        np.testing.assert_allclose(result, coefficient, atol=1e-12)
 
     def test_evaluate_2d(self):
         gridX = np.array([0., 0.5, 1.])
@@ -60,47 +58,39 @@ class TestDirectRealisationAPI:
         xx, yy = np.meshgrid(gridX, gridY, indexing='ij')
         grid2d = Grid(np.column_stack([xx.ravel(), yy.ravel()]))
         values = xx.ravel() + yy.ravel()
-        r = DirectRealisation(grid2d, len(grid2d))
-        r.coefficient = values
-        with pytest.raises(NotImplementedError):
-            r.evaluate(grid2d)
-
-    def test_clone_is_independent(self):
-        r = DirectRealisation(self.grid1d, self.n)
-        coeff = np.ones(self.n)
-        r.coefficient = coeff
-        r2 = r.clone()
-        r2.coefficient = np.zeros(self.n)
-        np.testing.assert_allclose(r.coefficient, np.ones(self.n))
+        r = DirectExpansion(grid2d, len(grid2d))
+        np.testing.assert_allclose(r.evaluate(values, grid2d), values)
 
 
-# ---- DirectGPEngine API sanity ----
+# ---- Direct GP construction sanity ----
 
-class TestDirectGPEngineAPI:
+class TestDirectGPConstruction:
 
     def setup_method(self):
         self.n = 10
         self.grid = UniformGrid(0., 1., self.n)
         self.variance = 0.7
         self.covFcn = MaternCovariance1D(0.3, 1.5, self.variance)
-        self.engine = DirectGPEngine(self.grid)
+        self.gp = GaussianProcess.direct(self.grid, self.covFcn)
 
-    def test_realisation_type(self):
-        r = self.engine.build_realisation()
-        assert isinstance(r, DirectRealisation)
+    def test_expansion_type(self):
+        assert isinstance(self.gp.expansion, DirectExpansion)
 
-    def test_realisation_dimension(self):
-        r = self.engine.build_realisation()
-        assert r.dimension == self.n
+    def test_expansion_dimension(self):
+        assert self.gp.expansion.dimension == self.n
 
     def test_covariance_type(self):
-        cov = self.engine.build_covariance(self.covFcn)
-        assert isinstance(cov, CovarianceMatrix)
+        assert isinstance(self.gp.measure.covariance, CovarianceMatrix)
 
     def test_covariance_dimension(self):
-        cov = self.engine.build_covariance(self.covFcn)
+        cov = self.gp.measure.covariance
         assert cov.dimension == self.n
-        assert self.engine._shapeCovariance.to_dense().shape == (self.n, self.n)
+        assert self.gp.expansion.shapeCovariance.to_dense().shape == (self.n, self.n)
+
+    def test_bound_evaluation_caches_covariance_basis(self):
+        evaluation = self.gp.bind(UniformGrid(0.1, 0.9, 7))
+
+        assert evaluation._basis.shape == (7, self.n)
 
 
 # ---- GaussianProcess.direct correctness ----
@@ -121,7 +111,7 @@ class TestDirectGPCorrectness:
         samples = []
         for _ in range(self.nSamples):
             sample = sampler.draw(self.rng)
-            val = sample.function.evaluate(self.gp.engine.grid)
+            val = sample.evaluate(self.gp.nativeGrid)
             samples.append(val)
         return np.array(samples)
 
@@ -147,25 +137,26 @@ class TestDirectGPCorrectness:
     def test_sample_covariance(self):
         samples = self._draw_samples()
         empiricalCov = np.cov(samples.T)
-        trueCov = self.gp.engine._shapeCovariance.to_dense()
+        trueCov = self.gp.expansion.shapeCovariance.to_dense()
         frobTrue = np.linalg.norm(trueCov, 'fro')
         frobErr = np.linalg.norm(empiricalCov - trueCov, 'fro')
         assert frobErr / frobTrue < 0.3
 
-    def test_covariance_update_inplace(self):
+    def test_covariance_update_returns_new_process(self):
         newCovFcn = MaternCovariance1D(0.5, 1.5, 1.2)
-        self.gp.covarianceFunction = newCovFcn
-        newK = self.gp.engine._shapeCovariance.to_dense()
+        updated = self.gp.with_covariance_function(newCovFcn)
+        newK = updated.expansion.shapeCovariance.to_dense()
         expected = newCovFcn.evaluate_covariance(
             self.grid, self.grid
         )
         np.testing.assert_allclose(newK, expected, atol=1e-10)
+        assert updated is not self.gp
 
 
 # ---- DirectSampler evaluate behaviour ----
 
 class TestDirectSamplerEvaluate:
-    """Regression tests verifying DirectRealisation shapes itself when evaluated."""
+    """Regression tests for bound direct-function evaluation."""
 
     def setup_method(self):
         self.gridSize = 15
@@ -175,17 +166,17 @@ class TestDirectSamplerEvaluate:
         self.process = GaussianProcess.direct(self.grid, self.covariance)
         self.randomGenerator = default_rng(2026)
 
-    def test_sampler_evaluate_matches_at_sites(self):
+    def test_sampler_evaluate_matches_gp_evaluate(self):
         sample = self.process.sampler.generate_realisation(rng=self.randomGenerator)
-        evaluated = sample.function.evaluate(self.grid)
-        atSites = self.process.engine.at_sites(sample.function, self.grid)
+        evaluated = sample.evaluate(self.grid)
+        atSites = self.process.evaluate(sample.coordinate, self.grid)
         np.testing.assert_allclose(evaluated, atSites, atol=1e-12)
 
     def test_sampler_evaluate_marginal_variance(self):
         sampleCount = 2000
         samples = np.array([
             self.process.sampler.generate_realisation(
-                rng=self.randomGenerator).function.evaluate(self.grid)
+                rng=self.randomGenerator).evaluate(self.grid)
             for _ in range(sampleCount)
         ])
         empiricalVariance = samples.var(axis=0)

@@ -1,48 +1,41 @@
-"""
-Base class for model parameters.
+"""Base class for immutable model parameters.
 
-A Parameter wraps the coordinate array that the model and MCMC layer
-operate on. The library reads 'coordinate' to evaluate models, and
-writes to 'coordinate' to propose new states. The rest of the library
-never needs to know the semantic meaning of the coordinates; that
-knowledge lives inside the Parameter subclass and the Model that
-consumes it.
+A Parameter wraps the backend-native coordinate array that the model and MCMC
+layer operate on. State transitions construct replacements through
+``with_coordinate`` rather than replacing coordinates in place.
 
-To define a custom parameter, subclass 'Parameter' and implement:
-
-    dimension   - int, the number of scalar degrees of freedom.
-    coordinate  - ndarray property with a getter *and* a setter.
-                  The getter returns the current coordinate array;
-                  the setter accepts an ndarray of the same shape
-                  and updates internal state accordingly.
-    clone()     - return an independent copy with identical content.
-
-Built-in subclasses: 'Vector', 'Scalar', 'Function', 'BlockParameter'.
+To define a custom parameter, subclass ``Parameter`` and implement
+``dimension``, a read-only ``coordinate`` property, and ``with_coordinate``.
 """
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from numpy import ndarray, array_equal
+
+from styne.backend import BackendInferenceError, get_backend, infer_backend
+
+
+def as_coordinate(coordinate):
+    """Preserve native arrays and default non-array input to NumPy."""
+    try:
+        backend = infer_backend(coordinate)
+    except BackendInferenceError:
+        backend = get_backend("numpy")
+        coordinate = backend.asarray(coordinate)
+
+    if coordinate.ndim == 0:
+        coordinate = backend.namespace.expand_dims(coordinate, axis=0)
+
+    return coordinate
 
 
 class Parameter(ABC):
-    """Finite-dimensional parameter with a mutable coordinate array.
-
-    See the module docstring for the extension guide. Instances are
-    unhashable; equality is strict elementwise identity.
+    """Finite-dimensional parameter with a read-only coordinate array.
 
     Notes
     -----
-    The coordinate is always a NumPy ndarray. The reason for wrapping
-    it in a Parameter object rather than passing the array directly is
-    that subclasses can carry metadata for the forward model alongside
-    the coordinates. For instance, a 'Function' parameter holds the basis
-    expansion that lets the model evaluate the function on a grid, and
-    a 'BlockParameter' preserves the blocking structure across
-    sub-parameters.
+    The coordinate remains native to its numerical backend. Subclasses may
+    carry static metadata for the forward model alongside that array.
     """
-
-    __hash__ = None  # equality defined, hashing disabled
 
     @property
     @abstractmethod
@@ -52,34 +45,28 @@ class Parameter(ABC):
 
     @property
     @abstractmethod
-    def coordinate(self) -> ndarray:
-        """Coordinate array representing the parameter.
-
-        Subclasses must also provide a setter that accepts an ndarray
-        of the same shape. The MCMC layer writes to this property to
-        update the parameter state in-place.
-        """
+    def coordinate(self):
+        """Backend-native coordinate array representing the parameter."""
         pass
-
-    def __eq__(self, other: object) -> bool:
-        """
-        Parameters are equal if they have the same dimension and identical
-        coordinate entries. NaNs compare unequal.
-        """
-        if not isinstance(other, Parameter):
-            return NotImplemented
-
-        if self.dimension != other.dimension:
-            return False
-
-        # Exact match in all entries
-        return array_equal(self.coordinate, other.coordinate)
 
     @abstractmethod
-    def clone(self) -> Parameter:
-        """Return an independent copy with identical content.
-
-        The clone must not share mutable state with the original;
-        writing to one's coordinate must not affect the other.
-        """
+    def with_coordinate(self, coordinate) -> Parameter:
+        """Return a parameter with ``coordinate`` without changing this one."""
         pass
+
+    @property
+    def backend(self):
+        """Numerical backend inferred from the coordinate array."""
+        return infer_backend(self.coordinate)
+
+    @property
+    def backendMetadata(self):
+        """Dtype and device metadata computed from the coordinate array."""
+        return self.backend.metadata(self.coordinate)
+
+    @classmethod
+    def _restore(cls, coordinate):
+        """Restore transformed state without validating structural values."""
+        parameter = object.__new__(cls)
+        parameter._coordinate = coordinate
+        return parameter

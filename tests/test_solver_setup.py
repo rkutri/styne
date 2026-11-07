@@ -32,28 +32,25 @@ def test_initialize_solver():
     assert solver.tBoundary_ == (0., config['T'])
     assert solver._fixedParam == [config['alpha'], config['gamma']]
     assert solver._dataShape == (config['nData'], config['dataDim'])
-    assert solver._param == [None, None]
-    assert solver._evaluation is None
     assert solver._status == EvaluationStatus.NONE
 
 
-def test_interpolate():
+def test_prepare():
 
     solver = ts.LotkaVolterraSolver(design, config)
-    solver.interpolate(parameter)
+    preparedState = solver.prepare(parameter)
 
-    np.testing.assert_allclose(solver._param, np.exp([0.2, 0.3]),
+    np.testing.assert_allclose(preparedState, np.exp([0.2, 0.3]),
                                rtol=1e-5, atol=1e-8)
 
 
 def test_invoke():
 
     solver = ts.LotkaVolterraSolver(design, config)
-    solver.interpolate(parameter)
-    solver.evaluate()
+    evaluation = solver(parameter)
 
     assert solver._status == EvaluationStatus.SUCCESS
-    assert solver._evaluation.shape == (config['nData'], config['dataDim'])
+    assert evaluation.shape == (config['nData'], config['dataDim'])
 
 
 def test_full_solution():

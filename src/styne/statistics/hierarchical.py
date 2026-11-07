@@ -1,18 +1,20 @@
-import numpy as np
 import copy
+import numpy as np
 from typing import Optional
 
+from styne.backend import infer_backend
 from styne.statistics.measure import ConditionalMeasure
-from styne.statistics.interface import DensityInterface, LikelihoodInterface
+from styne.statistics.interface import (
+    DensityInterface,
+    LikelihoodInterface,
+    RadonNikodymInterface,
+)
+from styne.statistics.likelihood import RegressionLikelihood
+from styne.statistics.radonnikodym import RadonNikodym
 from styne.parameter.parameter import Parameter
 from styne.parameter.block import BlockParameter
-from styne.parameter.function import Function
 from styne.model.sglmm import SGLMM
 from styne.gp.gaussianprocess import GaussianProcess
-from styne.statistics.stationary import MaternCovariance1D
-from styne.statistics.covariance import DenseCovarianceMatrix, IIDCovarianceMatrix
-from styne.gp.direct import DirectGPEngine
-from styne.gp.dna import DNAFourierEngine
 
 class SGLMMHyperConditionalDensity(DensityInterface):
     """
@@ -29,7 +31,7 @@ class SGLMMHyperConditionalDensity(DensityInterface):
     likelihood : LikelihoodInterface
         Likelihood the data are evaluated under.
     latentState : Parameter
-        Latent field value the model is interpolated at.
+        Latent field value the forward map is prepared at.
     """
     def __init__(
             self,
@@ -44,8 +46,6 @@ class SGLMMHyperConditionalDensity(DensityInterface):
         self._model = model
         self._likelihood = likelihood
         self._latentState = latentState
-        self._cachedProposalLog = None
-        self._cachedProposalParams = None
 
     @property
     def domainType(self):
@@ -65,23 +65,30 @@ class SGLMMHyperConditionalDensity(DensityInterface):
         latent state reference to match the current Gibbs block.
         """
         self._latentState = state.block(0)
-        hyperparameters = np.exp(np.asarray(state.block(1).coordinate).ravel())
-        lengthScale, sigma = hyperparameters[0], hyperparameters[1]
 
-        try:
-            covarianceType = type(self._gp.covarianceFunction)
-            smoothness = self._gp.covarianceFunction._smoothness
-            self._gp.covarianceFunction = covarianceType(
-                lengthScale, smoothness, sigma**2
-            )
-            self._gp.measure.covariance.scaling = 1.0
-            # Defer evaluation to evaluate_log to avoid double-pass
-        except np.linalg.LinAlgError:
-            pass
+    def condition(self, state: BlockParameter):
+        """Return a density using the latent block from ``state``."""
+        return type(self)(
+            self._pcPrior,
+            self._gp,
+            self._model,
+            self._likelihood,
+            state.block(0),
+        )
+
+    def _model_at(self, lengthScale, sigma):
+        """Construct an isolated model for one hyperparameter evaluation."""
+        covarianceType = type(self._gp.covarianceFunction)
+        smoothness = self._gp.covarianceFunction._smoothness
+        gp = self._gp.with_covariance_function(
+            covarianceType(lengthScale, smoothness, sigma**2)
+        )
+        if isinstance(self._model, SGLMM):
+            return self._model.with_gp(gp)
+        model = copy.deepcopy(self._model)
+        model._gp = gp
+        return model
             
-        self._cachedProposalParams = None
-        self._cachedProposalLog = None
-
     def evaluate_log(self, parameter: Parameter, normalised: bool = False) -> float:
         """
         Log-posterior density on log-hyperparameters `(log rho, log sigma)`,
@@ -104,109 +111,27 @@ class SGLMMHyperConditionalDensity(DensityInterface):
             `-inf` if the prior is zero, hyperparameters are extreme, or the
             covariance factorisation fails.
         """
-        logHyperparameters = np.asarray(parameter.coordinate).ravel()
-        hyperparameters = np.exp(logHyperparameters)
+        logHyperparameters = parameter.coordinate.reshape((-1,))
+        backend = infer_backend(logHyperparameters)
+        hyperparameters = backend.namespace.exp(logHyperparameters)
         lengthScale, sigma = hyperparameters[0], hyperparameters[1]
 
         from styne.parameter.vector import Vector
         hyperparameterVector = Vector(hyperparameters)
         logPrior = self._pcPrior.evaluate_log(hyperparameterVector)
-        if logPrior == -np.inf or not np.all(np.abs(logHyperparameters) < 150.0):
-            return -np.inf
-
-        logJacobian = np.sum(logHyperparameters)
+        logJacobian = backend.namespace.sum(logHyperparameters)
         try:
-            covarianceType = type(self._gp.covarianceFunction)
-            smoothness = self._gp.covarianceFunction._smoothness
-            newCovariance = covarianceType(lengthScale, smoothness, sigma**2)
-            self._gp.covarianceFunction = newCovariance
-            self._gp.measure.covariance.scaling = 1.0
-
-            self._model.reset()
-            self._model.interpolate(self._latentState)
-            self._model.evaluate()
+            linearPredictor = self._model_at(
+                lengthScale, sigma
+            )(self._latentState)
         except np.linalg.LinAlgError:
             return -np.inf
             
-        linearPredictor = self._model.evaluation
-
         logLikelihood = self._likelihood.response.log_likelihood(
             self._likelihood.data.measurement, linearPredictor
         )
         
-        logPriorContribution = 0.0
-
-        totalLogProbability = (logPrior + logPriorContribution + 
-                               logLikelihood + logJacobian)
-        
-        self._cachedProposalLog = totalLogProbability
-        self._cachedProposalParams = (lengthScale, sigma)
-
-        return float(totalLogProbability)
-
-    def evaluate_log_gradient(self, parameter: Parameter) -> np.ndarray:
-        logHyperparameters = np.asarray(parameter.coordinate).ravel()
-        hyperparameters = np.exp(logHyperparameters)
-        lengthScale, sigma = hyperparameters[0], hyperparameters[1]
-
-        try:
-            if self._cachedProposalParams != (lengthScale, sigma):
-                covarianceType = type(self._gp.covarianceFunction)
-                smoothness = self._gp.covarianceFunction._smoothness
-                self._gp.covarianceFunction = covarianceType(
-                    lengthScale, smoothness, sigma**2
-                )
-                self._gp.measure.covariance.scaling = 1.0
-
-                self._model.reset()
-                self._model.interpolate(self._latentState)
-                self._model.evaluate()
-        except np.linalg.LinAlgError:
-            raise RuntimeError("Failed model evaluation due to singular covariance.")
-            
-        linearPredictorScore = self._likelihood.response.score(
-            self._likelihood.data.measurement, self._model
-        )
-
-        from styne.parameter.vector import Vector
-        priorGradient = self._pcPrior.evaluate_log_gradient(
-            Vector([lengthScale, sigma])
-        )
-
-        if hasattr(self._gp.engine, 'evaluate_hyper_gradient'):
-            # Engine expects the Expansion representation
-            latentExpansion = self._latentState.function \
-                if isinstance(self._latentState, Function) else self._latentState
-            hyperparameterGradients = self._gp.engine.evaluate_hyper_gradient(
-                latentExpansion, linearPredictorScore, self._gp.covarianceFunction
-            )
-            gradLogLengthScale = hyperparameterGradients.get('log_rho', 0.0) \
-                + priorGradient[0] * lengthScale + 1.0
-            gradLogSigma = hyperparameterGradients.get('log_sigma', 0.0) \
-                + priorGradient[1] * sigma + 1.0
-            return np.array([gradLogLengthScale, gradLogSigma])
-
-        if not hasattr(self._gp.engine, "compute_log_length_multiplier"):
-            raise NotImplementedError(
-                "Hyperparameter gradients not implemented for "
-                f"{type(self._gp.engine).__name__}."
-            )
-
-        lengthMultiplier = self._gp.engine.compute_log_length_multiplier(
-            smoothness, lengthScale
-        )
-
-        # latentCoordinate must be the coordinate vector
-        latentCoordinate = self._latentState.coordinate \
-            if isinstance(self._latentState, Parameter) else self._latentState
-
-        gradLogLengthScale = np.dot(linearPredictorScore, lengthMultiplier * latentCoordinate) \
-            + priorGradient[0] * lengthScale + 1.0
-        gradLogSigma = np.dot(linearPredictorScore, latentCoordinate) \
-            + priorGradient[1] * sigma + 1.0
-
-        return np.array([gradLogLengthScale, gradLogSigma])
-
+        return logPrior + logLikelihood + logJacobian
 
 class SGLMMHyperConditional(ConditionalMeasure, DensityInterface):
     """
@@ -288,15 +213,6 @@ class SGLMMHyperConditional(ConditionalMeasure, DensityInterface):
         zeta = np.exp(phi)
         rho, sigma = zeta[0], zeta[1]
 
-        covType = type(self._gp.covarianceFunction)
-        smoothness = self._gp.covarianceFunction._smoothness
-        self._gp.covarianceFunction = covType(rho, smoothness, sigma**2)
-        self._gp.measure.covariance.scaling = 1.0
-
-        self._model.reset()
-        self._model.interpolate(latentState)
-        self._model.evaluate()
-
         self._density = SGLMMHyperConditionalDensity(
             self._pcPrior,
             self._gp,
@@ -305,28 +221,25 @@ class SGLMMHyperConditional(ConditionalMeasure, DensityInterface):
             latentState
         )
 
-    def evaluate_log_gradient(self, parameter: Parameter) -> np.ndarray:
-        return self.density.evaluate_log_gradient(parameter)
-
     def draw(self, rng):
         raise NotImplementedError("SGLMMHyperConditional cannot be drawn from.")
 
-class SGLMMLatentConditional(ConditionalMeasure, DensityInterface):
+class SGLMMLatentConditional(ConditionalMeasure, RadonNikodymInterface):
     """
     Blocks latent evaluation until GP dependencies are synced to
     hyperparameters.
 
-    Proxies unset attributes to `target` via `__getattr__`, so attributes
-    like `derivative` and `reference` on a `RadonNikodym` target are
-    accessible directly on this wrapper.
+    Implements :class:`RadonNikodymInterface` explicitly so Gaussian-reference
+    samplers can consume the conditioned reference and RN factor while generic
+    samplers continue to evaluate the full target.
 
     Cannot be drawn from directly. `draw` unconditionally raises
     `NotImplementedError`. See flag 3 above.
 
     Parameters
     ----------
-    target : DensityInterface
-        The wrapped density, evaluated once GP dependencies are synced.
+    target : RadonNikodym
+        The wrapped RN density, evaluated once GP dependencies are synced.
     gp : GaussianProcess
         GP kept in sync with the current hyperparameter block.
     coarseGP : GaussianProcess, optional
@@ -334,19 +247,18 @@ class SGLMMLatentConditional(ConditionalMeasure, DensityInterface):
     partition : DNACoarseFinePartition, optional
         Coarse/fine partition used to extract the fine-block prior variance.
     finePrior : object, optional
-        Prior on the fine block, updated in place when `partition` is given.
+        Prior on the fine block, reconstructed when `partition` is given.
         Untyped in source, inferred from usage.
     hyperIdx : int, default 1
         Index of the hyperparameter block within the joint state.
     localisedDensity : object, optional
-        Target with a `sync_weights` method, called with the coarse
-        engine's spectral weights when present. Untyped in source, inferred
-        from usage.
+        Localised target reconstructed from the conditioned coarse GP and its
+        spectral weights. Untyped in source, inferred from usage.
     """
 
     def __init__(
             self,
-            target: DensityInterface,
+            target: RadonNikodym,
             gp: GaussianProcess,
             coarseGP: Optional[GaussianProcess] = None,
             partition=None,
@@ -354,6 +266,10 @@ class SGLMMLatentConditional(ConditionalMeasure, DensityInterface):
             hyperIdx: int = 1,
             localisedDensity=None
     ):
+        if not isinstance(target, RadonNikodym):
+            raise TypeError(
+                "target must be a RadonNikodym instance."
+            )
         self._target = target
         self._gp = gp
         self._coarseGP = coarseGP
@@ -361,7 +277,6 @@ class SGLMMLatentConditional(ConditionalMeasure, DensityInterface):
         self._finePrior = finePrior
         self._hyperIdx = hyperIdx
         self._localisedDensity = localisedDensity
-        self._cachedHyper = None
 
     @property
     def blockDimension(self) -> int:
@@ -379,11 +294,13 @@ class SGLMMLatentConditional(ConditionalMeasure, DensityInterface):
     def domainDimension(self) -> int:
         return self._target.domainDimension
 
-    def __getattr__(self, name):
-        # Pass through attributes like 'derivative' and 'reference' for RadonNikodym targets
-        if hasattr(self._target, name):
-            return getattr(self._target, name)
-        raise AttributeError(f"'{type(self).__name__}' object has no attribute '{name}'")
+    @property
+    def reference(self):
+        return self._target.reference
+
+    @property
+    def derivative(self):
+        return self._target.derivative
 
     def evaluate_log(self, parameter: Parameter) -> float:
         return self._target.evaluate_log(parameter)
@@ -391,22 +308,113 @@ class SGLMMLatentConditional(ConditionalMeasure, DensityInterface):
     def evaluate_log_gradient(self, parameter: Parameter) -> np.ndarray:
         return self._target.evaluate_log_gradient(parameter)
 
+    @property
+    def gp(self):
+        return self._gp
+
+    @property
+    def coarseGP(self):
+        return self._coarseGP
+
+    @property
+    def partition(self):
+        return self._partition
+
+    @property
+    def finePrior(self):
+        return self._finePrior
+
+    @property
+    def localisedDensity(self):
+        return self._localisedDensity
+
+    @staticmethod
+    def _with_gp(density, currentGP, replacementGP):
+        if isinstance(density, RadonNikodym):
+            reference = density.reference
+            if reference is currentGP.measure:
+                reference = replacementGP.measure
+            derivative = SGLMMLatentConditional._with_gp(
+                density.derivative, currentGP, replacementGP
+            )
+            return density.with_reference(reference).with_derivative(derivative)
+
+        if isinstance(density, RegressionLikelihood):
+            model = density.model
+            if isinstance(model, SGLMM) and model._gp is currentGP:
+                return density.with_model(model.with_gp(replacementGP))
+
+        return copy.copy(density)
+
+    @staticmethod
+    def _condition_gp(gp, hyperState):
+        coordinate = hyperState.coordinate
+        backend = infer_backend(coordinate)
+        rho, sigma = backend.namespace.exp(coordinate)
+        covarianceType = type(gp.covarianceFunction)
+        smoothness = gp.covarianceFunction._smoothness
+        return gp.with_covariance_function(
+            covarianceType(rho, smoothness, sigma**2)
+        )
+
+    def condition(self, state: BlockParameter):
+        """Return a consistently reconstructed conditional composition."""
+        hyperState = state.block(self._hyperIdx)
+        gp = self._condition_gp(self._gp, hyperState)
+        target = self._with_gp(self._target, self._gp, gp)
+
+        coarseGP = None
+        if self._coarseGP is not None:
+            coarseGP = self._condition_gp(self._coarseGP, hyperState)
+
+        partition = self._partition
+        if partition is not None:
+            if callable(getattr(partition, "with_process", None)):
+                partition = partition.with_process(gp, state.block(0))
+            else:
+                partition = copy.copy(partition)
+                partition.parameter = state.block(0)
+
+        finePrior = self._finePrior
+        if finePrior is not None and partition is not None:
+            componentVariance = partition.rule.extract(
+                1, gp.measure.covariance.marginalVariance
+            )
+            finePrior = finePrior.with_covariance(
+                finePrior.covariance.__class__(componentVariance)
+            )
+
+        localisedDensity = self._localisedDensity
+        if localisedDensity is not None and coarseGP is not None:
+            surrogate = self._with_gp(
+                localisedDensity.surrogateDensity,
+                self._coarseGP,
+                coarseGP,
+            )
+            localisedDensity = localisedDensity.with_surrogate_density(
+                surrogate, coarseGP.expansion.spectralWeights
+            )
+
+        return type(self)(
+            target,
+            gp,
+            coarseGP=coarseGP,
+            partition=partition,
+            finePrior=finePrior,
+            hyperIdx=self._hyperIdx,
+            localisedDensity=localisedDensity,
+        )
+
     def condition_on(self, state: BlockParameter) -> None:
         """
         Sync GP covariance functions to the current hyperparameter block, then
         forward conditioning to `target`.
 
-        If the hyperparameter block is unchanged since the last call, the
-        rebuild is skipped. Otherwise, rebuilds `gp`'s covariance function at
-        the new hyperparameters, and `coarseGP`'s too if set. If `partition` and
-        `finePrior` are both set, also extracts the fine-block marginal variance
-        from `gp`'s covariance and rebuilds `finePrior` from it. If
-        `localisedDensity` is set, syncs its weights from `coarseGP`'s engine.
-
-        Forwarding to `target` happens on every call regardless of whether the
-        rebuild ran, this updates the likelihood and prior evaluation points for
-        the current hyperparameters, and is required even when the covariance
-        itself hasn't changed.
+        Rebuilds `gp`'s covariance function at the supplied hyperparameters,
+        and `coarseGP`'s too if set. If `partition` and `finePrior` are both
+        set, also extracts the fine-block marginal variance from `gp`'s
+        covariance and rebuilds `finePrior` from it. If `localisedDensity` is
+        set, syncs its weights from `coarseGP`'s expansion.
 
         Parameters
         ----------
@@ -414,54 +422,13 @@ class SGLMMLatentConditional(ConditionalMeasure, DensityInterface):
             Full joint state. The hyperparameter block is
             `state.block(self.hyperIdx)`, index 1 by default.
         """
-        # Finding 3: jointState accesses the hyper block via state.block(self._hyperIdx)
-        # where _hyperIdx defaults to 1.
-        hyperState = state.block(self._hyperIdx)
-
-        if self._cachedHyper is not None and self._cachedHyper == hyperState:
-            # Hyperparameters are unchanged, so we can skip the rebuild.
-            pass
-        else:
-            # Finding 1: The "rebuild" is constituted by creating a new covariance object
-            # and assigning it to self._gp.covarianceFunction (and potentially _coarseGP and _finePrior).
-            # This invalidates the previously cached covariance, forcing assembly and
-            # factorisation upon the next evaluation.
-            phi = hyperState.coordinate
-            zeta = np.exp(phi)
-            rho, sigma = zeta[0], zeta[1]
-
-            covType = type(self._gp.covarianceFunction)
-            smoothness = self._gp.covarianceFunction._smoothness
-            newCov = covType(rho, smoothness, sigma**2)
-            
-            self._gp.covarianceFunction = newCov
-            if self._coarseGP is not None:
-                self._coarseGP.covarianceFunction = covType(
-                    rho, smoothness, sigma**2
-                )
-                if self._localisedDensity is not None:
-                    self._localisedDensity.sync_weights(
-                        self._coarseGP.engine.spectralWeights
-                    )
-
-            if self._finePrior is not None and self._partition is not None:
-                cov = self._gp.measure.covariance
-                compVar = self._partition.rule.extract(
-                    1, cov.marginalVariance
-                )
-                self._finePrior.covariance = (
-                    self._finePrior.covariance.__class__(compVar)
-                )
-
-            self._cachedHyper = hyperState.clone()
-
-        # Finding 2: The operations that must still run even when theta is unchanged
-        # are updating the likelihood evaluation point and the prior evaluation point
-        # for the current zeta, which are handled by target.condition_on(state).
-        if hasattr(self._target, 'condition_on'):
-            self._target.condition_on(state)
-        elif hasattr(self._target, 'derivative') and hasattr(self._target.derivative, 'condition_on'):
-            self._target.derivative.condition_on(state)
+        conditioned = self.condition(state)
+        self._target = conditioned._target
+        self._gp = conditioned._gp
+        self._coarseGP = conditioned._coarseGP
+        self._partition = conditioned._partition
+        self._finePrior = conditioned._finePrior
+        self._localisedDensity = conditioned._localisedDensity
 
     def draw(self, rng):
         raise NotImplementedError("SGLMMLatentConditional cannot be drawn from.")

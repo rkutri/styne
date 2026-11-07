@@ -36,9 +36,10 @@ version with others is always appreciated.
 
 ## Explicitly welcomed contributions
 
-- **New samplers, models, or GP engines** that fit the existing
-  interfaces (`MetropolisHastings`, `Model`, `GPEngine`, etc.). Please open an
-  issue before writing code if you are unsure about structural compatibility.
+- **New samplers, forward maps, or GP representations** that fit the existing
+  interfaces (`MetropolisHastings`, `ForwardMap`, `GaussianProcess`, etc.).
+  Please open an issue before writing code if you are unsure about structural
+  compatibility.
 - **Interface extensions.** If existing interfaces do not support specific
   surrogate classes, your model or likelihood, open an issue detailing the
   structural gap. Modifying interfaces to robustly accommodate new computational
@@ -61,6 +62,16 @@ requests failing to adhere to these rules will not be merged.
 - **Naming conventions.** Use `camelCase` for variables and properties,
   `snake_case` for methods and functions, `PascalCase` for class names.
   Module filenames are lower-case with no separators at all.
+- **Encapsulation.** Reserve a leading underscore for non-public members of a
+  class: state and behaviour owned by an object are the level at which the
+  convention communicates a meaningful boundary. Do not prefix module-level
+  classes or free functions with an underscore merely to imply module privacy.
+  A class used only as a component of another class may be nested when that
+  ownership is intrinsic; otherwise give it an ordinary `PascalCase` name in
+  the module. Give free functions ordinary `snake_case` names. Control the
+  supported package API through curated exports and documentation, not through
+  underscore-prefixed module declarations. Python protocol hooks such as
+  `__getattr__` and `__dir__` are required exceptions.
 - **Line width.** Maximum 90 characters.
 - **Docstrings.** Please provide minimal and signal-dense docstrings for the
   core entry-points of the new features.
@@ -81,7 +92,7 @@ requests failing to adhere to these rules will not be merged.
 2. Set up the development environment.
 
    ```bash
-   pip install -e ".[plotting]"
+   uv sync --extra plotting --group dev
    ```
 
 3. Branch from `main`.
@@ -96,7 +107,7 @@ requests failing to adhere to these rules will not be merged.
 5. Run the specific tests for your changes followed by the full test suite.
 
    ```bash
-   python -m pytest tests/
+   uv run --extra plotting pytest tests/
    ```
 
 6. Open a pull request against `main`. Describe the changes, the reasoning and

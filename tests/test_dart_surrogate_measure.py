@@ -135,9 +135,9 @@ def test_samples(kappa, h):
     )
 
     for loc in locations:
-        surrogateMeasure.location = loc
-        surrogateMeasure.generate_realisation()
-        subchain = np.array(surrogateMeasure.chain.trajectory)
+        _, _, subchain, rng = surrogateMeasure.transition_trajectory(loc, rng)
+        subchain = np.asarray(subchain)
+        density = surrogateMeasure.density.with_location(loc)
 
         burnin = 1000
         thinning = int(np.ceil(integrated_autocorrelation(subchain[burnin:], "max")))
@@ -161,8 +161,7 @@ def test_samples(kappa, h):
         targetDensity = np.exp(
             np.array(
                 [
-                    surrogateMeasure.density.evaluate_log(
-                        Vector(coord))
+                    density.evaluate_log(Vector(coord))
                     for coord in mesh.T
                 ]
             )
@@ -197,8 +196,8 @@ def test_localised_density_iid_backward_compatible():
     expected = -gamma / 2.0 * np.dot(d, d)
     # access the regularisation Gaussian density directly
     actual = (
-        density._regGaussian.density.evaluate_log(pt)
-        - density._regGaussian.density.evaluate_log(location)
+        density.log_localisation(pt)
+        - density.log_localisation(location)
     )
     assert np.isclose(actual, expected, rtol=1e-10)
     assert density.spectralWeights is None

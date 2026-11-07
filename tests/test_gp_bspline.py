@@ -1,64 +1,66 @@
 import numpy as np
-import pytest
 
 from numpy.random import default_rng
 
-from styne.gp.bspline import (
-    BSplineRealisation1D, BSplineRealisation2D,
-    BSplineGPEngine
-)
+from styne.gp.bspline import _collocation_points
 from styne.gp.gaussianprocess import GaussianProcess
 from styne.model.representation.bspline import BSpline1D, BSpline2D
 from styne.statistics.gaussian import Gaussian
-from styne.statistics.covariance import CovarianceMatrix
 from styne.statistics.stationary import MaternCovariance1D, MaternCovariance2D
 
 
 # ---- helpers ----
 
-def _make_bsp1d(n=6):
-    bsp = BSpline1D(n, degree=3, boundary=[0., 1.])
-    bsp.project(np.zeros(n))
-    return bsp
+def make_bsp1d(n=6):
+    return BSpline1D(n, degree=3, boundary=[0., 1.])
 
 
-def _make_bsp2d(nx=5, ny=5):
-    bsp = BSpline2D([nx, ny], degree=3, boundary=[[0., 1.], [0., 1.]])
-    bsp.project(np.zeros(nx * ny))
-    return bsp
+def make_bsp2d(nx=5, ny=5):
+    return BSpline2D(
+        [nx, ny], degree=3, boundary=[[0., 1.], [0., 1.]]
+    )
 
 
-def _cov1d(ell=0.3, nu=1.5, variance=0.7):
+def cov1d(ell=0.3, nu=1.5, variance=0.7):
     return MaternCovariance1D(ell, nu, variance)
 
 
-def _cov2d(ell=0.3, nu=1.5, variance=0.7):
+def cov2d(ell=0.3, nu=1.5, variance=0.7):
     return MaternCovariance2D(ell, nu, variance)
 
 
-# ---- BSplineRealisation API sanity ----
+def test_collocation_falls_back_for_compatible_expansions():
+    class CompatibleExpansion:
+        dimension = 4
 
-class TestBSplineRealisation1DAPI:
+    points = _collocation_points(CompatibleExpansion(), [-1.0, 1.0])
+
+    np.testing.assert_allclose(points, np.linspace(-1.0, 1.0, 4))
+
+
+# ---- Static B-spline API sanity ----
+
+class TestBSplineExpansion1DAPI:
 
     def setup_method(self):
-        self.bsp = _make_bsp1d(n=6)
-        self.r = BSplineRealisation1D(self.bsp)
+        self.bsp = make_bsp1d(n=6)
+    def test_dimension(self):
+        assert self.bsp.dimension == 6
+
+    def test_explicit_coefficient_evaluation(self):
+        coeff = np.arange(24, dtype=float).reshape(2, 2, 6)
+        grid = np.linspace(0., 1., 10)
+        np.testing.assert_allclose(
+            self.bsp.evaluate(coefficient=coeff, grid=grid),
+            coeff @ self.bsp.design_matrix(grid).T,
+        )
+
+
+class TestBSplineExpansion2DAPI:
 
     def test_dimension(self):
-        assert self.r.dimension == 6
-
-    def test_coefficient_round_trip(self):
-        coeff = np.arange(6, dtype=float)
-        self.r.coefficient = coeff
-        np.testing.assert_allclose(self.r.coefficient, coeff)
-
-
-class TestBSplineRealisation2DAPI:
-
-    def test_dimension(self):
-        bsp = _make_bsp2d(nx=5, ny=4)
-        r = BSplineRealisation2D(bsp)
-        assert r.dimension == 20
+        bsp = make_bsp2d(nx=5, ny=4)
+        assert bsp.dimension == 20
 
 
 # ---- GaussianProcess.bspline API sanity ----
@@ -67,8 +69,8 @@ class TestBSpline1DGPMeasure:
 
     def setup_method(self):
         self.grid = np.linspace(0., 1., 20)
-        self.bsp = _make_bsp1d(n=6)
-        self.gp = GaussianProcess.bspline(_cov1d(), self.bsp)
+        self.bsp = make_bsp1d(n=6)
+        self.gp = GaussianProcess.bspline(cov1d(), self.bsp)
 
     def test_measure_dimension(self):
         assert self.gp.measure.covariance.to_dense().shape == (6, 6)
@@ -76,21 +78,18 @@ class TestBSpline1DGPMeasure:
     def test_measure_is_gaussian(self):
         assert isinstance(self.gp.measure, Gaussian)
 
-    def test_sampler_returns_realisation(self):
+    def test_sampler_shares_expansion(self):
         rng = default_rng(0)
         sample = self.gp.sampler.draw(rng)
-        assert isinstance(sample.function, BSplineRealisation1D)
+        assert sample.expansion is self.bsp
         assert sample.coordinate.shape == (6,)
 
 
 class TestBSpline2DGPMeasure:
 
     def setup_method(self):
-        grid2d = np.array([[x, y]
-                           for x in np.linspace(0., 1., 5)
-                           for y in np.linspace(0., 1., 5)])
-        self.bsp2d = _make_bsp2d(nx=5, ny=5)
-        self.gp = GaussianProcess.bspline(_cov2d(), self.bsp2d)
+        self.bsp2d = make_bsp2d(nx=5, ny=5)
+        self.gp = GaussianProcess.bspline(cov2d(), self.bsp2d)
         self.dim = 25
 
     def test_measure_dimension(self):
@@ -99,10 +98,10 @@ class TestBSpline2DGPMeasure:
     def test_measure_is_gaussian(self):
         assert isinstance(self.gp.measure, Gaussian)
 
-    def test_sampler_returns_realisation(self):
+    def test_sampler_shares_expansion(self):
         rng = default_rng(0)
         sample = self.gp.sampler.draw(rng)
-        assert isinstance(sample.function, BSplineRealisation2D)
+        assert sample.expansion is self.bsp2d
         assert sample.coordinate.shape == (self.dim,)
 
 
@@ -113,8 +112,8 @@ class TestBSpline1DGPCorrectness:
     def setup_method(self):
         self.n = 6
         self.grid = np.linspace(0., 1., 20)
-        self.bsp = _make_bsp1d(n=self.n)
-        self.gp = GaussianProcess.bspline(_cov1d(), self.bsp)
+        self.bsp = make_bsp1d(n=self.n)
+        self.gp = GaussianProcess.bspline(cov1d(), self.bsp)
         self.nSamples = 1000
         self.rng = default_rng(7)
 
@@ -143,17 +142,29 @@ class TestBSpline1DGPCorrectness:
         assert frobErr / frobTrue < 0.3
 
 
+def test_high_resolution_prior_preserves_marginal_variance():
+    expansion = make_bsp1d(n=100)
+    gp = GaussianProcess.bspline(
+        cov1d(ell=0.2, nu=1.5, variance=1.0), expansion
+    )
+    design = expansion.design_matrix(np.linspace(0.0, 1.0, 300))
+    coefficientCovariance = gp.measure.covariance.to_dense()
+
+    fieldVariance = np.einsum(
+        "ij,jk,ik->i", design, coefficientCovariance, design
+    )
+
+    np.testing.assert_allclose(fieldVariance, 1.0, atol=1e-3)
+
+
 class TestBSpline2DGPCorrectness:
 
     def setup_method(self):
         self.nx = 5
         self.ny = 5
         self.dim = self.nx * self.ny
-        grid2d = np.array([[x, y]
-                           for x in np.linspace(0., 1., 5)
-                           for y in np.linspace(0., 1., 5)])
-        self.bsp2d = _make_bsp2d(nx=self.nx, ny=self.ny)
-        self.gp = GaussianProcess.bspline(_cov2d(), self.bsp2d)
+        self.bsp2d = make_bsp2d(nx=self.nx, ny=self.ny)
+        self.gp = GaussianProcess.bspline(cov2d(), self.bsp2d)
         self.nSamples = 1000
         self.rng = default_rng(13)
 

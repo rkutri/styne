@@ -5,7 +5,6 @@ _SYMBOL_TO_MODULE = {
     "Parameter": "styne.parameter.parameter",
     "Scalar": "styne.parameter.scalar",
     "Vector": "styne.parameter.vector",
-    "Numeric": "styne.parameter.numeric",
     "Function": "styne.parameter.function",
     "BlockParameter": "styne.parameter.block",
 }

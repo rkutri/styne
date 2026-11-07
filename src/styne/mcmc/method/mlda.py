@@ -4,7 +4,11 @@ from numpy.random import Generator
 
 from styne.mcmc.metropolishastings import MetropolisHastings
 from styne.mcmc.acceptance import AcceptanceProbability
-from styne.mcmc.proposal import ProposalMethod, PartitionedProposalMixin
+from styne.mcmc.proposal import (
+    ProposalMethod,
+    PartitionedProposalMixin,
+    log_reference_ratio,
+)
 from styne.mcmc.surrogate import SurrogateTransitionMeasure
 from styne.mcmc.diagnostics import ChainDiagnostics
 from styne.mcmc.factory import MHFactory
@@ -13,7 +17,6 @@ from styne.mcmc.method.pcn import PCNFactory
 from styne.mcmc.method.mala import MALAFactory
 from styne.mcmc.method.pmala import PMALAFactory
 from styne.mcmc.diagnostics import DummyDiagnostics, AcceptanceRateDiagnostics
-from styne.mcmc.transition import TransitionData
 from styne.statistics.interface import DensityInterface
 from styne.statistics.measure import AbsolutelyContinuousProbabilityMeasure
 from styne.statistics.dirac import DiracMeasure
@@ -51,18 +54,44 @@ class MLDAProposal(PartitionedProposalMixin, ProposalMethod):
         partition: Optional[Partition] = None,
         finePrior: Optional[AbsolutelyContinuousProbabilityMeasure] = None,
     ):
-        ProposalMethod.__init__(self)
         self._init_partition(partition, finePrior)
         self._surrogateMeasure = surrogateMeasure
 
-    @ProposalMethod.state.setter
-    def state(self, state: Parameter):
-        ProposalMethod.state.fset(self, state)
+    @property
+    def reference(self):
+        """The surrogate chain's stored reference, or Lebesgue when partitioned."""
         if self.isPartitioned:
-            self._surrogateMeasure.initialMeasure.location = (
-                self._coarse_from(state))
-        else:
-            self._surrogateMeasure.initialMeasure.location = state
+            return None
+        return self._surrogateMeasure.mcmc.targetReference
+
+    def propose(self, state: Parameter, rng):
+        # The surrogate chain is reversible for the surrogate density, whose
+        # values at the current and proposed states are its first and last
+        # stored values.
+        initialState = self._coarse_from(state) if self.isPartitioned \
+            else state
+        start, end, _, nextRng = self._surrogateMeasure.transition_trajectory(
+            initialState, rng
+        )
+        logCorrection = start.logDensity - end.logDensity
+        if not self.isPartitioned:
+            return self.record(state, end.parameter, logCorrection), nextRng
+        fineProposal, nextRng = self._pFinePrior.sample(nextRng)
+        fine = self._fine_from(state)
+        # Partitioned blocks refer to different measures, so the correction
+        # of the independent fine draw and the coarse correction are both
+        # taken relative to the Lebesgue measure.
+        logCorrection = (
+            logCorrection
+            - log_reference_ratio(
+                self._surrogateMeasure.mcmc.targetReference,
+                initialState, end.parameter,
+            )
+            - log_reference_ratio(self._pFinePrior, fine, fineProposal)
+        )
+        fullProposal = self._merge(
+            end.parameter.coordinate, fineProposal.coordinate, state)
+        return self.record(state, fullProposal, logCorrection), nextRng
 
     @property
     def density(self) -> DensityInterface:
@@ -72,15 +101,6 @@ class MLDAProposal(PartitionedProposalMixin, ProposalMethod):
     @property
     def measure(self) -> SurrogateTransitionMeasure:
         return self._surrogateMeasure
-
-    def generate_proposal(self, rng: Generator) -> TransitionData:
-        coarseProposal = self._surrogateMeasure.generate_realisation(rng=rng)
-        if not self.isPartitioned:
-            return TransitionData(self._state, coarseProposal)
-        fineProposal = self._draw_fine(rng)
-        fullProposal = self._merge(
-            coarseProposal.coordinate, fineProposal.coordinate, self._state)
-        return TransitionData(self._state, fullProposal)
 
 
 class MultilevelDelayedAcceptanceMCMC(MetropolisHastings):
@@ -113,54 +133,13 @@ class MultilevelDelayedAcceptanceMCMC(MetropolisHastings):
         partition: Optional[Partition] = None,
         finePrior: Optional[AbsolutelyContinuousProbabilityMeasure] = None,
         rng: Optional[Generator] = None,
+        proposal: Optional[ProposalMethod] = None,
     ):
-        self._partition = partition
-        self._finePrior = finePrior
-
-        proposalMethod = MLDAProposal(surrogateMeasure, partition, finePrior)
+        proposalMethod = proposal if proposal is not None else MLDAProposal(
+            surrogateMeasure, partition, finePrior
+        )
         super().__init__(target, proposalMethod, diagnostics,
                          acceptance=acceptance, rng=rng)
-
-    def _log_mh_ratio(self, transition: TransitionData) -> float:
-        """Delayed-acceptance MH ratio, with optional fine-prior correction.
-
-        Without partition: logDiffTarget - logDiffSurrogate.
-        With partition:    logDiffTarget - logDiffFinePrior
-                           - logDiffCoarseSurrogate.
-
-        The fine-prior terms cancel from the target exactly, making the
-        correction exact rather than approximate.
-        """
-        state = transition.state
-        proposal = transition.proposal
-
-        tgt = self._tgtDensity
-        logDiffTarget = (
-            tgt.evaluate_log(proposal) - tgt.evaluate_log(state)
-        )
-
-        surr = self._proposalMethod.density
-
-        if self._partition is None:
-            logDiffSurr = (
-                surr.evaluate_log(proposal) - surr.evaluate_log(state)
-            )
-            return logDiffTarget - logDiffSurr
-
-        rule = self._partition.rule
-        stateC = Vector(rule.extract(0, state.coordinate))
-        proposalC = Vector(rule.extract(0, proposal.coordinate))
-        stateF = Vector(rule.extract(1, state.coordinate))
-        proposalF = Vector(rule.extract(1, proposal.coordinate))
-
-        logDiffSurr = (
-            surr.evaluate_log(proposalC) - surr.evaluate_log(stateC)
-        )
-        logDiffFinePrior = (
-            self._finePrior.density.evaluate_log(proposalF)
-            - self._finePrior.density.evaluate_log(stateF)
-        )
-        return logDiffTarget - logDiffFinePrior - logDiffSurr
 
 
 class MLDAFactory(MHFactory):
@@ -179,9 +158,14 @@ class MLDAFactory(MHFactory):
         Root chain type: 'mrw' (default), 'pcn', or 'mala'.
     """
 
+    _minimumRootLength = 1
+    _temperFullSurrogate = False
+
     def __init__(self, root="mrw"):
 
-        if root == "mrw":
+        if not isinstance(root, str):
+            self._rootFactory = root
+        elif root == "mrw":
             self._rootFactory = MRWFactory()
         elif root == "pcn":
             self._rootFactory = PCNFactory()
@@ -226,6 +210,14 @@ class MLDAFactory(MHFactory):
         self._nChain = n
 
     @property
+    def rootLength(self):
+        return self._nChain
+
+    @rootLength.setter
+    def rootLength(self, value):
+        self._nChain = value
+
+    @property
     def tempering(self) -> Optional[List[float]]:
         return self._thetaList
 
@@ -236,6 +228,19 @@ class MLDAFactory(MHFactory):
     @property
     def root(self) -> MHFactory:
         return self._rootFactory
+
+    @root.setter
+    def root(self, value):
+        if isinstance(value, str):
+            factories = {'mrw': MRWFactory, 'pcn': PCNFactory,
+                         'mala': MALAFactory, 'pmala': PMALAFactory}
+            if value not in factories:
+                raise ValueError(f"Invalid root chain: {value}")
+            value = factories[value]()
+        if not isinstance(value, MHFactory) and not callable(
+                getattr(value, 'with_target', None)):
+            raise TypeError("root must be a factory or a retargetable sampler.")
+        self._rootFactory = value
 
     @property
     def acceptance(self) -> AcceptanceProbability:
@@ -270,7 +275,10 @@ class MLDAFactory(MHFactory):
     @subDiagnostics.setter
     def subDiagnostics(self, factory):
         if not callable(factory):
-            raise TypeError("subDiagnostics must be a zero-argument callable returning a ChainDiagnostics.")
+            raise TypeError(
+                "subDiagnostics must be a zero-argument callable returning "
+                "a ChainDiagnostics."
+            )
         self._subDiagnostics = factory
 
     @property
@@ -355,14 +363,17 @@ class MLDAFactory(MHFactory):
 
             from styne.statistics.radonnikodym import RadonNikodym
             for theta, surr in zip(self._thetaList, self._surrogate):
-                if theta < 1.0 and not isinstance(surr, RadonNikodym):
+                if theta < 1.0 and not self._temperFullSurrogate \
+                        and not isinstance(surr, RadonNikodym):
                     raise TypeError(
                         "Tempering < 1.0 is only supported when the surrogate "
                         "density is an instance of RadonNikodym."
                     )
 
-        if any(n <= 0 for n in self._nChain):
-            raise ValueError("All subchain lengths must be positive integers.")
+        if any(n < self._minimumRootLength for n in self._nChain):
+            raise ValueError(
+                f"All root lengths must be at least {self._minimumRootLength}."
+            )
 
         partitionSet = self._partition is not None
         finePriorSet = self._finePrior is not None
@@ -423,24 +434,24 @@ class MLDAFactory(MHFactory):
             [coarseSurrogate, self._finePrior.density],
         )
 
-    def _create_sampler(self):
-        surrogates = list(self._surrogate)
-        if self._thetaList is not None:
-            for lvl in range(self._nSurr):
-                theta = self._thetaList[lvl]
-                if theta < 1.0:
-                    surr = surrogates[lvl]
-                    scaled_derivative = LogScalingWrapper(
-                        surr.derivative, theta
-                    )
-                    surrogates[lvl] = RadonNikodym(
-                        surr.reference, scaled_derivative
-                    )
+    def _level_target(self, level):
+        density = self._surrogate[level]
+        theta = (self._thetaList or [1.0] * self._nSurr)[level]
+        if theta == 1.0:
+            return density
+        if not isinstance(density, RadonNikodym):
+            return LogScalingWrapper(density, theta)
+        return RadonNikodym(
+            density.reference, LogScalingWrapper(density.derivative, theta)
+        )
 
+    def _create_root(self, surrogates):
         if self._crankUpSteps > 0:
             crankUpTarget = self._crank_up_target(surrogates[0])
             dim = crankUpTarget.domainDimension
-            init = self.crankUpInitialState if self.crankUpInitialState is not None else tuning.infer_init(crankUpTarget)
+            init = (self.crankUpInitialState
+                    if self.crankUpInitialState is not None
+                    else tuning.infer_init(crankUpTarget))
 
             crankUpFactory = MRWFactory()
             crankUpFactory.target = crankUpTarget
@@ -449,54 +460,63 @@ class MLDAFactory(MHFactory):
 
             if self._crankUpProposalVariance is None:
                 config = tuning.RWTunerConfig(acceptanceGoal=0.5, tolerance=0.2)
-                crankUpSampler = tuning.MRWTuner(crankUpFactory, init, config=config).tune()
+                crankUpSampler = tuning.MRWTuner(
+                    crankUpFactory, init, config=config
+                ).tune()
             else:
-                crankUpFactory.proposalCovariance = IIDCovarianceMatrix(dim, self._crankUpProposalVariance)
+                crankUpFactory.proposalCovariance = IIDCovarianceMatrix(
+                    dim, self._crankUpProposalVariance
+                )
                 crankUpSampler = crankUpFactory.create()
             
             crankUpSampler.storeChain = False
-            self._logger.info("crank-up on coarse surrogate, %d steps", self._crankUpSteps)
+            self._logger.info(
+                "crank-up on coarse surrogate, %d steps", self._crankUpSteps
+            )
             crankUpSampler.run(self._crankUpSteps, init)
             self._crankedState = crankUpSampler.lastState
         else:
-            self._crankedState = self.crankUpInitialState if self.crankUpInitialState is not None else tuning.infer_init(self._crank_up_target(surrogates[0]))
+            self._crankedState = (
+                self.crankUpInitialState if self.crankUpInitialState is not None
+                else tuning.infer_init(self._crank_up_target(surrogates[0]))
+            )
 
+        if not isinstance(self._rootFactory, MHFactory):
+            return self._rootFactory.with_target(surrogates[0])
         self._rootFactory.rng = self.rng
 
         if self._root_needs_tuning():
             if self._partition is not None:
-                rootInit = Vector(self._partition.rule.extract(0, self._crankedState.coordinate))
+                rootInit = Vector(self._partition.rule.extract(
+                    0, self._crankedState.coordinate
+                ))
             else:
-                rootInit = self._crankedState.clone()
+                rootInit = self._crankedState
             self._tune_root(surrogates[0], rootInit)
 
         self._rootFactory.target = surrogates[0]
         self._rootFactory.diagnostics = self._subDiagnostics()
-        surrogateChain = self._rootFactory.create()
+        return self._rootFactory.create()
 
-        surrogateMeasure = SurrogateTransitionMeasure(
-            surrogateChain, self._nChain[0], DiracMeasure()
+    def _level_measure(self, sampler, length):
+        return SurrogateTransitionMeasure(sampler, length, DiracMeasure())
+
+    def _level_sampler(self, target, measure, level):
+        return MultilevelDelayedAcceptanceMCMC(
+            target, measure, self._subDiagnostics(), rng=self.rng
         )
 
-        for lvl in range(1, self._nSurr):
-            surrogateChain = MultilevelDelayedAcceptanceMCMC(
-                surrogates[lvl],
-                surrogateMeasure,
-                self._subDiagnostics(),
-                rng=self.rng
-            )
-            surrogateMeasure = SurrogateTransitionMeasure(
-                surrogateChain, self._nChain[lvl], DiracMeasure()
-            )
-
-        mainChain = MultilevelDelayedAcceptanceMCMC(
-            self._target,
-            surrogateMeasure,
-            self._diagnostics,
-            self._acceptance,
-            self._partition,
-            self._finePrior,
-            rng=self.rng
+    def _main_sampler(self, measure):
+        return MultilevelDelayedAcceptanceMCMC(
+            self._target, measure, self._diagnostics, self._acceptance,
+            self._partition, self._finePrior, rng=self.rng
         )
 
-        return mainChain
+    def _create_sampler(self):
+        surrogates = [self._level_target(level) for level in range(self._nSurr)]
+        root = self._create_root(surrogates)
+        measure = self._level_measure(root, self._nChain[0])
+        for level in range(1, self._nSurr):
+            sampler = self._level_sampler(surrogates[level], measure, level)
+            measure = self._level_measure(sampler, self._nChain[level])
+        return self._main_sampler(measure)

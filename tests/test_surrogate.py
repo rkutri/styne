@@ -66,6 +66,7 @@ def test_density(dim, h, cond):
 
 @pytest.mark.parametrize("kappa", [1.0, 5.0])
 @pytest.mark.parametrize("h", [1.0, 0.1])
+@pytest.mark.slow
 def test_samples(kappa, h):
     """
     Overkill the subchain length and verify that the invariant measure
@@ -105,10 +106,8 @@ def test_samples(kappa, h):
     )
 
     for loc in locations:
-        surrogateMeasure.mcmc.clear()
-        surrogateMeasure.location = loc
-        surrogateMeasure.generate_realisation()
-        subchain = np.array(surrogateMeasure.chain.trajectory)
+        _, _, subchain, rng = surrogateMeasure.transition_trajectory(loc, rng)
+        subchain = np.asarray(subchain)
 
         burnin = 2000
         thinning = 5
@@ -141,8 +140,7 @@ def test_surrogate_decomposition():
     from styne.statistics.gaussian import Gaussian
     baseCov = IIDCovarianceMatrix(dim, 1.0)
     baseMean = Vector(np.zeros(dim))
-    baseMeasure = Gaussian(baseCov)
-    baseMeasure.mean = baseMean
+    baseMeasure = Gaussian(baseCov, baseMean)
     
     from styne.statistics.interface import DensityInterface
     class DummyDerivative(DensityInterface):
@@ -166,7 +164,7 @@ def test_surrogate_decomposition():
         density_obj.location = loc
         full_eval = density_obj.evaluate_log(y)
         surr_eval = density_obj.evaluate_log_surrogate(y)
-        reg_eval = density_obj._regGaussian.density.evaluate_log(y)
+        reg_eval = density_obj.log_localisation(y)
         from math import isclose
         assert isclose(full_eval - surr_eval, reg_eval, rel_tol=1e-10)
 
@@ -192,4 +190,3 @@ def test_surrogate_decomposition():
         gamma, theta, baseMeasure.density, spectralWeights=weights
     )
     check_density(weighted)
-
