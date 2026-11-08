@@ -7,11 +7,12 @@ with a Metropolis-adjusted Langevin sampler.
 
 import numpy as np
 
+from runtime import as_numpy, configure_backend, parse_arguments
 from styne.gp import GaussianProcess
 from styne.model import SGLMM
 from styne.parameter import Vector
 from styne.statistics import (
-    MaternCovariance2D, Data, PoissonResponse, SGLMMLikelihood,
+    MaternCovariance2D, Data, PoissonResponse, RegressionLikelihood,
     Gaussian, IIDCovarianceMatrix, UnnormalisedPosterior,
 )
 from styne.mcmc import MALAFactory
@@ -23,37 +24,48 @@ try:
     hasMatplotlib = True
 except ImportError:
     hasMatplotlib = False
-    print("matplotlib not installed (pip install styne[plotting]); skipping plot.")
+    print(
+        "matplotlib not installed (pip install styne[plotting]); "
+        "skipping plot."
+    )
 
-# fix seed
-rng = np.random.default_rng(2026)
+arguments = parse_arguments(__doc__)
+smokeMode = arguments.smoke
+if smokeMode:
+    hasMatplotlib = False
+
+backend, rng = configure_backend(arguments.backend)
+designRng = np.random.default_rng(2026)
 
 
 # --- SETUP ---
 
 # latent Gaussian field
 spatialDim = 2
-truthResolution = 32
-resolution = 8
+truthResolution = 8 if smokeMode else 32
+resolution = 4 if smokeMode else 8
 
-covariance = MaternCovariance2D(0.3, 1.5, 1.0)
+covariance = MaternCovariance2D(
+    backend.asarray(0.3), 1.5, backend.asarray(1.0)
+)
 truthGP = GaussianProcess.dna(covariance, q=truthResolution, d=spatialDim)
 gp = GaussianProcess.dna(covariance, q=resolution, d=spatialDim)
-latentDim = gp.parameter.dimension
+latentDim = gp.parameterDimension
 
 # DNA uses whitened latent coefficients, so the prior is standard normal
 # on the coordinate vector.
-zTrue = truthGP.sampler.generate_realisation(rng=rng)
+zTrue, rng = truthGP.sampler.sample(rng)
 
 # measurement locations
-nObs = 200
-obsSites = Grid(rng.uniform(0.0, 1.0, (nObs, spatialDim)))
+nObs = 20 if smokeMode else 200
+obsSites = Grid(designRng.uniform(0.0, 1.0, (nObs, spatialDim)))
 model = SGLMM(gp, obsSites)
 
 # synthetic data generation
-truthGP.sites = obsSites
-truthGP.parameter.coordinate = zTrue.coordinate
-counts = rng.poisson(np.exp(truthGP.at_sites()))
+rate = backend.namespace.exp(
+    truthGP.evaluate(zTrue.coordinate, obsSites)
+)
+counts, rng = backend.poisson(rng, rate)
 
 data = Data(dimension=1, design=obsSites.to_array())
 data.measurement = counts[:, None]
@@ -62,11 +74,11 @@ data.measurement = counts[:, None]
 # --- PROBLEM FORMULATION ---
 
 # prior definition
-priorCov = IIDCovarianceMatrix(latentDim, 1.0)
-prior = Gaussian(priorCov, mean=Vector(np.zeros(latentDim)))
+priorCov = IIDCovarianceMatrix(latentDim, backend.asarray(1.0))
+prior = Gaussian(priorCov, mean=Vector(backend.zeros(latentDim)))
 
 # likelihood definition
-likelihood = SGLMMLikelihood(data, model, PoissonResponse())
+likelihood = RegressionLikelihood(data, model, PoissonResponse())
 
 # posterior definition
 posterior = UnnormalisedPosterior(prior, likelihood)
@@ -77,19 +89,24 @@ posterior = UnnormalisedPosterior(prior, likelihood)
 factory = MALAFactory()
 factory.target = posterior
 factory.stepSize = 0.08
+factory.gradient = posterior.evaluate_log_gradient
 factory.rng = rng
 
 sampler = factory.create()
 
 # run mcmc
-nSteps = 10_000
-initState = Vector(np.zeros(latentDim))
-sampler.run(nSteps, initState, progress=True, description="Sampling MALA")
+nSteps = 20 if smokeMode else 10_000
+initState = Vector(backend.zeros(latentDim))
+sampler.run(
+    nSteps, initState, progress=not smokeMode, description="Sampling MALA"
+)
 
 # discard burn-in
-nBurnIn = 1500
-trajectory = np.array(sampler.chain.trajectory)[nBurnIn:]
-zMean = trajectory.mean(axis=0)
+nBurnIn = 5 if smokeMode else 1500
+trajectory = backend.namespace.stack(
+    sampler.chain.trajectory[nBurnIn:]
+)
+zMean = backend.namespace.mean(trajectory, axis=0)
 
 # diagnostics
 acceptanceRate = sampler.diagnostics.global_acceptance_rate()
@@ -99,16 +116,12 @@ print(f"acceptance rate={acceptanceRate:.3f}")
 # --- POSTPROCESSING ---
 
 # compare posterior mean to the true latent field on a dense grid
-gridRes = 40
+gridRes = 10 if smokeMode else 40
 dense = UniformGrid((0.0, 1.0, gridRes), (0.0, 1.0, gridRes))
 
-truthGP.sites = dense
-truthGP.parameter.coordinate = zTrue.coordinate
-fieldTrue = truthGP.at_sites()
+fieldTrue = as_numpy(truthGP.evaluate(zTrue.coordinate, dense))
 
-gp.sites = dense
-gp.parameter.coordinate = zMean
-fieldRecovered = gp.at_sites()
+fieldRecovered = as_numpy(gp.evaluate(zMean, dense))
 
 correlation = np.corrcoef(fieldTrue, fieldRecovered)[0, 1]
 print(f"posterior mean vs truth: field correlation = {correlation:.3f}")

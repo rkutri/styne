@@ -2,6 +2,7 @@ from abc import ABC, abstractmethod
 from typing import Optional
 from numpy.random import Generator
 
+from styne.mcmc.adaptation import Adaptation, NoAdaptation
 from styne.mcmc.diagnostics import AcceptanceRateDiagnostics, ChainDiagnostics
 from styne.statistics.interface import DensityInterface
 from styne.mcmc.metropolishastings import MetropolisHastings
@@ -19,10 +20,31 @@ class MHFactory(ABC):
     is created automatically.
     """
 
+    def __setattr__(self, name, value):
+        if name.startswith("_"):
+            object.__setattr__(self, name, value)
+            return
+
+        descriptor = getattr(type(self), name, None)
+        if isinstance(descriptor, property) and descriptor.fset is not None:
+            object.__setattr__(self, name, value)
+            return
+
+        writable = sorted(
+            attr for attr in dir(type(self))
+            if isinstance(getattr(type(self), attr, None), property)
+            and getattr(type(self), attr).fset is not None
+        )
+        raise AttributeError(
+            f"{type(self).__name__} has no configurable attribute '{name}'. "
+            f"Available settings: {', '.join(writable)}."
+        )
+
     def __init__(self):
         self._target: DensityInterface = None
         self._diagnostics: ChainDiagnostics = None
         self._rng: Optional[Generator] = None
+        self._adaptation = NoAdaptation()
 
     @property
     def target(self) -> DensityInterface:
@@ -49,6 +71,16 @@ class MHFactory(ABC):
         self._rng = r
 
 
+    @property
+    def adaptation(self) -> Adaptation:
+        return self._adaptation
+
+    @adaptation.setter
+    def adaptation(self, strategy: Adaptation):
+        if not isinstance(strategy, Adaptation):
+            raise TypeError("adaptation must implement Adaptation.")
+        self._adaptation = strategy
+
     def _validate(self):
         if self._target is None:
             raise ValueError("Target not set.")
@@ -65,4 +97,6 @@ class MHFactory(ABC):
         self._validate()
         if self._diagnostics is None:
             self._diagnostics = AcceptanceRateDiagnostics()
-        return self._create_sampler()
+        sampler = self._create_sampler()
+        sampler.adaptation = self._adaptation
+        return sampler

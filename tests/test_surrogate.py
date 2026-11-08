@@ -1,9 +1,11 @@
 import pytest
 import numpy as np
-from math import isclose
-from numpy.random import seed
 from numpy.linalg import norm
 from scipy.stats import ks_2samp
+
+from tests.testSetup import (
+    GaussianTargetDensity, RosenbrockTargetDensity, covariance_matrix,
+)
 
 from styne.parameter.vector import Vector
 from styne.statistics.gaussian import GaussianDensity
@@ -15,57 +17,50 @@ from styne.mcmc.localised import (
 )
 
 
-@pytest.mark.parametrize("dim", [1, 16, 256])
-@pytest.mark.parametrize("h", [500., 50.0, 0.5, 0.005])
-@pytest.mark.parametrize("cond", [1, 100, 1000])
-def test_density(dim, h, cond):
-    seed(1111)
+@pytest.mark.parametrize('target, dim, gamma, condition', [
+    ('iid', 1, 500.0, 1),
+    ('iid', 16, 50.0, 100),
+    ('iid', 256, 0.5, 1000),
+    ('iid', 16, 0.005, 1),
+    ('gaussian', 1, 0.005, 1),
+    ('gaussian', 16, 0.5, 100),
+    ('gaussian', 256, 50.0, 1000),
+    ('gaussian', 16, 500.0, 1000),
+    ('rosenbrock', 2, 0.5, 1),
+    ('rosenbrock', 16, 50.0, 100),
+    ('rosenbrock', 256, 0.005, 1000),
+    ('rosenbrock', 16, 500.0, 1000),
+])
+def test_localised_density_matches_quadratic_penalty(target, dim, gamma, condition):
+    mode = Vector(np.ones(dim))
+    if target == 'iid':
+        baseDensity = GaussianDensity(IIDCovarianceMatrix(dim, float(condition)), mode)
+    elif target == 'gaussian':
+        baseDensity = GaussianTargetDensity(mode, covariance_matrix(dim, condition))
+    else:
+        baseDensity = RosenbrockTargetDensity(mode, condition)
 
-    modelCov = IIDCovarianceMatrix(dim, float(cond))
-    modelMean = Vector(np.ones(dim))
-    baseDensity = GaussianDensity(modelCov, modelMean)
-
-    nLocs = 5
+    builder = MRWFactory()
+    builder.target = LocalisedSurrogateDensity(gamma, 1.0, baseDensity)
+    builder.proposalCovariance = IIDCovarianceMatrix(dim, 1.0)
+    measure = LocalisedSurrogateTransitionMeasure(builder.create(), nChain=1)
     rng = np.random.default_rng(1234)
-    locations = [
-        Vector(rng.normal(modelMean.coordinate, 10., size=dim))
-        for _ in range(nLocs)
-    ]
 
-    initLoc = Vector(np.zeros(dim))
-    surrogateDensity = LocalisedSurrogateDensity(h, 1.0, baseDensity)
-
-    rootBuilder = MRWFactory()
-    rootBuilder.proposalCovariance = IIDCovarianceMatrix(dim, 1e-10)
-    rootBuilder.target = surrogateDensity
-
-    rC = rootBuilder.create()
-    nC = 1
-
-    surrogateMeasure = LocalisedSurrogateTransitionMeasure(rC, nC)
-
-    nEval = 100
-    for loc in locations:
-
-        def true_density_log(z: Vector):
-            y = z.coordinate - loc.coordinate
-            return -0.5 * h * np.dot(y, y) + baseDensity.evaluate_log(z)
-
-        surrogateMeasure.location = loc
-
-        xEval = [
-            Vector(rng.normal(np.zeros(dim), 20., size=dim))
-            for _ in range(nEval)
-        ]
-
-        for x in xEval:
-            smEval = surrogateMeasure.density.evaluate_log(x)
-            trueEval = true_density_log(x)
-            assert isclose(smEval, trueEval, rel_tol=1e-5, abs_tol=1e-8)
+    for location in (Vector(np.zeros(dim)), Vector(rng.normal(1.0, 10.0, dim))):
+        measure.location = location
+        for coordinate in (location.coordinate, np.ones(dim), rng.normal(0.0, 20.0, dim)):
+            parameter = Vector(coordinate)
+            displacement = coordinate - location.coordinate
+            penalty = -0.5 * gamma * np.dot(displacement, displacement)
+            expected = baseDensity.evaluate_log(parameter) + penalty
+            assert measure.density.evaluate_log(parameter) == pytest.approx(
+                expected, rel=1e-5, abs=1e-8
+            )
 
 
 @pytest.mark.parametrize("kappa", [1.0, 5.0])
 @pytest.mark.parametrize("h", [1.0, 0.1])
+@pytest.mark.slow
 def test_samples(kappa, h):
     """
     Overkill the subchain length and verify that the invariant measure
@@ -105,10 +100,8 @@ def test_samples(kappa, h):
     )
 
     for loc in locations:
-        surrogateMeasure.mcmc.clear()
-        surrogateMeasure.location = loc
-        surrogateMeasure.generate_realisation()
-        subchain = np.array(surrogateMeasure.chain.trajectory)
+        _, _, subchain, rng = surrogateMeasure.transition_trajectory(loc, rng)
+        subchain = np.asarray(subchain)
 
         burnin = 2000
         thinning = 5
@@ -141,8 +134,7 @@ def test_surrogate_decomposition():
     from styne.statistics.gaussian import Gaussian
     baseCov = IIDCovarianceMatrix(dim, 1.0)
     baseMean = Vector(np.zeros(dim))
-    baseMeasure = Gaussian(baseCov)
-    baseMeasure.mean = baseMean
+    baseMeasure = Gaussian(baseCov, baseMean)
     
     from styne.statistics.interface import DensityInterface
     class DummyDerivative(DensityInterface):
@@ -166,7 +158,7 @@ def test_surrogate_decomposition():
         density_obj.location = loc
         full_eval = density_obj.evaluate_log(y)
         surr_eval = density_obj.evaluate_log_surrogate(y)
-        reg_eval = density_obj._regGaussian.density.evaluate_log(y)
+        reg_eval = density_obj.log_localisation(y)
         from math import isclose
         assert isclose(full_eval - surr_eval, reg_eval, rel_tol=1e-10)
 
@@ -192,4 +184,3 @@ def test_surrogate_decomposition():
         gamma, theta, baseMeasure.density, spectralWeights=weights
     )
     check_density(weighted)
-

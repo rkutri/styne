@@ -1,17 +1,21 @@
-from abc import abstractmethod
+import copy
+from dataclasses import replace
 from typing import Optional
 
-from numpy import log
 from numpy.random import Generator
 
+from styne.backend import infer_backend
 from styne.mcmc.sampler import MCMCSampler
 from styne.parameter.parameter import Parameter
-from styne.statistics.interface import DensityInterface
-from styne.mcmc.transition import TransitionData
-from styne.mcmc.proposal import ProposalMethod
+from styne.statistics.interface import DensityInterface, RadonNikodymInterface
+from styne.mcmc.transition import (
+    EvaluatedState, TransitionData, parameter_of, stored_log_density,
+)
+from styne.mcmc.proposal import ProposalMethod, log_reference_ratio
 from styne.mcmc.chain import Chain
 from styne.mcmc.annotator import Annotator
 from styne.mcmc.diagnostics import ChainDiagnostics
+from styne.mcmc.adaptation import Adaptation, NoAdaptation
 from styne.mcmc.acceptance import AcceptanceProbability, StandardAcceptance
 
 
@@ -19,8 +23,12 @@ class MetropolisHastings(MCMCSampler):
     """
     Metropolis-Hastings sampler base class.
 
-    Subclasses implement '_log_mh_ratio' to define the variant of the algorithm.
-    This class handles accept/reject, diagnostics, and chain bookkeeping.
+    The proposal defines the variant of the algorithm. It returns its log
+    acceptance correction relative to its reference measure, and the log MH
+    ratio adds that correction to the target ratio relative to the same
+    measure. States store a 'RadonNikodymInterface' target relative to its
+    reference and any other target in full. This class handles accept/reject,
+    diagnostics, and chain bookkeeping.
 
     Parameters
     ----------
@@ -34,6 +42,8 @@ class MetropolisHastings(MCMCSampler):
     acceptance : AcceptanceProbability, optional
         Defaults to `StandardAcceptance` if not given.
     rng : Generator, optional
+    adaptation : Adaptation, optional
+        Proposal-update strategy; defaults to NoAdaptation.
     """
 
     def __init__(
@@ -43,6 +53,7 @@ class MetropolisHastings(MCMCSampler):
         diagnostics: ChainDiagnostics,
         acceptance: Optional[AcceptanceProbability] = None,
         rng: Optional[Generator] = None,
+        *, adaptation: Optional[Adaptation] = None,
     ) -> None:
 
         super().__init__(rng=rng)
@@ -54,6 +65,7 @@ class MetropolisHastings(MCMCSampler):
 
         self._chain = Chain()
         self._annotator: Optional[Annotator] = None
+        self.adaptation = adaptation if adaptation is not None else NoAdaptation()
 
     @property
     def chain(self):
@@ -69,13 +81,81 @@ class MetropolisHastings(MCMCSampler):
 
     @target.setter
     def target(self, targetDensity: DensityInterface):
-        """Replace the target density and reset state."""
+        """Replace the target and reconstruct target-dependent proposal state."""
+        proposalMethod = self._proposal_for_target(targetDensity)
         self._tgtDensity = targetDensity
+        self._proposalMethod = proposalMethod
         self.clear()
+
+    def with_target(self, targetDensity: DensityInterface):
+        """Retarget a fresh outer runner; unchanged proposal components are shared."""
+        result = self.with_proposal(self._proposal_for_target(targetDensity))
+        result._tgtDensity = targetDensity
+        return result
+
+    def with_proposal(self, proposalMethod: ProposalMethod, rng=None):
+        """Replace the proposal in a fresh runner, optionally setting its RNG."""
+        result = copy.copy(self)
+        result._chain = copy.copy(self._chain)
+        result._diagnostics = copy.deepcopy(self._diagnostics)
+        result._rng = copy.deepcopy(self._rng) if rng is None else rng
+        result._proposalMethod = proposalMethod
+        # Only this runner is copied. Resetting nested diagnostics would alter
+        # samplers owned by the supplied proposal.
+        MCMCSampler.clear(result)
+        result._diagnostics.reset()
+        result._chain.clear()
+        return result
+
+    def _proposal_for_target(self, targetDensity):
+        """Return an isolated proposal for ``targetDensity``."""
+        # Copying keeps a proposal with adjustable settings, such as a random
+        # walk covariance, apart from this sampler's.
+        return copy.copy(
+            self._proposalMethod.for_target(targetDensity, self._tgtDensity)
+        )
 
     @property
     def proposal(self):
+        """Effective proposal after an eager run, otherwise the initial template."""
+        if self._runnerState is not None:
+            return self.proposal_at(self._runnerState)
         return self._proposalMethod
+
+    def proposal_at(self, state: EvaluatedState) -> ProposalMethod:
+        """Return the proposal settings carried by an explicit numerical state."""
+        return self._adaptation.prepare_proposal(
+            self._proposalMethod, state.adaptationState
+        )
+
+    @property
+    def adaptation(self) -> Adaptation:
+        return self._adaptation
+
+    @adaptation.setter
+    def adaptation(self, strategy: Adaptation):
+        """Replace the static rule and discard this runner's history.
+
+        Rebuild compiled functions after changing configuration.
+        """
+        if not isinstance(strategy, Adaptation):
+            raise TypeError("adaptation must implement Adaptation.")
+        self._adaptation = strategy
+        MCMCSampler.clear(self)
+        self._chain.clear()
+
+    def freeze_adaptation(self, state=None, rng=None):
+        """Return the same sampler class with fixed settings and fresh history.
+
+        With explicit transitions, pass their final state and RNG. Otherwise use
+        the eager runner's current state and RNG. This operation is optional.
+        """
+        state = self._runnerState if state is None else state
+        if state is None:
+            raise RuntimeError("No numerical state available to freeze.")
+        result = self.with_proposal(self.proposal_at(state), rng=rng)
+        result.adaptation = NoAdaptation()
+        return result
 
     @property
     def acceptance(self) -> AcceptanceProbability:
@@ -121,27 +201,142 @@ class MetropolisHastings(MCMCSampler):
         return result
 
 
-    @abstractmethod
-    def _log_mh_ratio(self, transition: TransitionData) -> float:
-        """Compute log MH ratio from a proposal transition."""
-        ...
+    @property
+    def targetReference(self):
+        """Measure the stored target densities refer to, None for Lebesgue."""
+        if isinstance(self._tgtDensity, RadonNikodymInterface):
+            return self._tgtDensity.reference
+        return None
 
-    def _accept_reject(self, transition: TransitionData) -> TransitionData:
-        logMHRatio = self._log_mh_ratio(transition)
-        logAcceptProb = self._acceptance.log_probability(logMHRatio)
-
-        outcome = (TransitionData.ACCEPTED if log(self._rng.uniform()) <= logAcceptProb
-                   else TransitionData.REJECTED)
-        return TransitionData(
-            transition.state, transition.proposal, outcome, transition.auxiliary
+    def _log_mh_ratio(self, transition: TransitionData, reference):
+        """Log MH ratio, the target ratio plus the proposal's correction."""
+        return (
+            self._log_target_ratio(transition, reference)
+            + transition.auxiliary["logCorrection"]
         )
 
-    def _update_chain(self, nextState):
+    def initial_state(self, parameter: Parameter) -> EvaluatedState:
+        """Evaluate the target density once for a parameter state."""
+        return EvaluatedState(
+            parameter, self._evaluate_log_density(parameter),
+            self._adaptation.initial_state(parameter, self._proposalMethod),
+        )
+
+    evaluate_state = initial_state
+
+    def state_at(self, current, saved):
+        """Reuse the current target value while retaining this chain's adaptation."""
+        return replace(
+            saved, parameter=parameter_of(current),
+            logDensity=stored_log_density(self.target, current),
+        )
+
+    def zero_sums(self, state):
+        """Accepted-transition counts, one per chain."""
+        coordinate = state.parameter.coordinate
+        backend = infer_backend(coordinate)
+        metadata = backend.metadata(coordinate)
+        return {"accepted": backend.zeros(
+            coordinate.shape[:-1], dtype=metadata.dtype, device=metadata.device
+        )}
+
+    def add_to_sums(self, sums, transition):
+        accepted = sums["accepted"]
+        backend = infer_backend(accepted)
+        metadata = backend.metadata(accepted)
+        one, zero = (
+            backend.asarray(value, dtype=metadata.dtype, device=metadata.device)
+            for value in (1.0, 0.0)
+        )
+        return {"accepted": accepted + backend.namespace.where(
+            transition.outcome, one, zero
+        )}
+
+    def step(self, currentState: EvaluatedState, rng):
+        """Construct and accept or reject one transition without mutation."""
+        proposal = self.proposal_at(currentState).condition(currentState.parameter)
+        proposedTransition, proposalRng = proposal.propose(
+            currentState.parameter, rng
+        )
+        proposedParameter = proposedTransition.proposed.parameter
+        proposedState = EvaluatedState(
+            proposedParameter, self._evaluate_log_density(proposedParameter)
+        )
+        logMHRatio = self._log_mh_ratio(
+            TransitionData(
+                current=currentState,
+                proposed=proposedState,
+                auxiliary=proposedTransition.auxiliary,
+            ), proposal.reference,
+        )
+        logAcceptanceProbability = self._acceptance.log_probability(logMHRatio)
+        backend = infer_backend(currentState.parameter.coordinate)
+        metadata = backend.metadata(currentState.parameter.coordinate)
+        batchShape = currentState.parameter.coordinate.shape[:-1]
+        acceptanceUniform, nextRng = backend.uniform(
+            proposalRng, batchShape,
+            dtype=metadata.dtype, device=metadata.device,
+        )
+        outcome = backend.namespace.log(acceptanceUniform) \
+            <= logAcceptanceProbability
+        transition = TransitionData(
+            current=currentState,
+            proposed=proposedState,
+            outcome=outcome,
+            logAcceptanceProbability=logAcceptanceProbability,
+            auxiliary=proposedTransition.auxiliary,
+        )
+        coordinateOutcome = outcome
+        while coordinateOutcome.ndim \
+                < proposedState.parameter.coordinate.ndim:
+            coordinateOutcome = backend.namespace.expand_dims(
+                coordinateOutcome, axis=-1
+            )
+        nextCoordinate = backend.namespace.where(
+            coordinateOutcome,
+            proposedState.parameter.coordinate,
+            currentState.parameter.coordinate,
+        )
+        nextLogDensity = backend.namespace.where(
+            outcome, proposedState.logDensity, currentState.logDensity
+        )
+        nextState = EvaluatedState(
+            currentState.parameter.with_coordinate(nextCoordinate),
+            nextLogDensity,
+        )
+        adaptationState = self._adaptation.update_state(
+            currentState.adaptationState, nextState, transition
+        )
+        return replace(nextState, adaptationState=adaptationState), transition, nextRng
+
+    def _evaluate_log_density(self, parameter: Parameter):
+        # A Radon-Nikodym target is stored relative to its reference, so a
+        # proposal preserving that reference needs no reference evaluations.
+        if isinstance(self._tgtDensity, RadonNikodymInterface):
+            return self._tgtDensity.derivative.evaluate_log(parameter)
+        return self._tgtDensity.evaluate_log(parameter)
+
+    def _log_target_ratio(self, transition: TransitionData, proposalReference):
+        """Log target ratio relative to the reference of the proposal."""
+        logRatio = transition.proposed.logDensity - transition.current.logDensity
+        targetReference = self.targetReference
+        if targetReference is proposalReference:
+            return logRatio
+        current = transition.current.parameter
+        proposed = transition.proposed.parameter
+        return (
+            logRatio
+            + log_reference_ratio(targetReference, current, proposed)
+            - log_reference_ratio(proposalReference, current, proposed)
+        )
+
+    def _record_transition(self, transitionData, nextState):
+        self._diagnostics.process(transitionData)
         if not self._storeChain:
             return
         annotation = self._annotator.annotate(
-            nextState) if self._annotator else None
-        self._chain.append(nextState.coordinate, annotation)
+            nextState.parameter) if self._annotator else None
+        self._chain.append(nextState.parameter.coordinate, annotation)
 
     def _determine_next_state(self, transitionData):
         if transitionData.outcome == TransitionData.ACCEPTED:
@@ -152,23 +347,6 @@ class MetropolisHastings(MCMCSampler):
 
         raise ValueError(
             f"Invalid transition outcome: {transitionData.outcome}")
-
-    def _process_transition(self, transitionData):
-        self._diagnostics.process(transitionData)
-        nextState = self._determine_next_state(transitionData)
-        self._update_chain(nextState)
-        return nextState
-
-    def _iterate(self) -> Parameter:
-        """Perform a single Metropolis-Hastings transition."""
-
-        self._proposalMethod.state = self._lastState
-        transition = self._proposalMethod.generate_proposal(self._rng)
-
-        transitionOutcome = self._accept_reject(transition)
-        self._lastState = self._process_transition(transitionOutcome)
-
-        return self._lastState
 
     def clear(self):
         """Reset diagnostics and discard all chain history."""

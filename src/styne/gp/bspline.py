@@ -1,14 +1,17 @@
-import copy
 import numpy as np
 
-from numpy.linalg import LinAlgError
+from styne.backend import infer_backend
+from styne.model.representation.expansion import backend_constant
 
-from styne.gp.engine import GPEngine, GPState
-from styne.model.representation.bspline import BSpline1D, BSpline2D
-from styne.statistics.interface import CovarianceFunctionInterface, Predictor
-from styne.statistics.covariance import CovarianceMatrix, DenseCovarianceMatrix
-from styne.model.representation.expansion import Expansion
-from styne.utility.grid import Grid
+from styne.model.representation.bspline import BSpline2D
+from styne.statistics.interface import CovarianceFunctionInterface
+from styne.statistics.covariance import DenseCovarianceMatrix
+
+
+def _collocation_points(expansion, bounds):
+    if hasattr(expansion, "greville_abscissae"):
+        return expansion.greville_abscissae()
+    return np.linspace(bounds[0], bounds[-1], expansion.dimension)
 
 
 def induced_prior_covariance(
@@ -23,7 +26,7 @@ def induced_prior_covariance(
     cov_fn : object with evaluate_covariance(pts1, pts2)
         Stationary covariance function (e.g. MaternCovariance1D).
     grid : array_like, shape (n,)
-        1D GP grid; determines the domain [grid[0], grid[-1]].
+        One-dimensional GP domain description.
     expansion : Expansion
         Finite-dimensional basis (e.g. BSpline1D).
     """
@@ -34,32 +37,22 @@ def induced_prior_covariance(
 
     n = expansion.dimension
 
-    x0, x1 = grid[0], grid[-1]
-    collocation = np.linspace(x0, x1, n)
+    collocation = _collocation_points(expansion, grid)
 
     phi = expansion.design_matrix(collocation)
     kernel = cov_fn.evaluate_covariance(collocation, collocation)
+    backend = infer_backend(kernel)
+    phi = backend_constant(phi, kernel)
 
-    y = np.linalg.solve(phi, kernel)
-    c = np.linalg.solve(phi, y.T)
+    y = backend.solve(phi, kernel)
+    c = backend.solve(phi, y.T)
     c = 0.5 * (c + c.T)
-
-    eps = nuggetEps
-    for k in range(maxTries):
-
-        try:
-            return DenseCovarianceMatrix(c)
-
-        except (ValueError, LinAlgError) as e:
-
-            if k == maxTries - 1:
-                raise ValueError(
-                    "Prior covariance is not s.p.d. even after attempted "
-                    "regularisation."
-                ) from e
-
-            c = c + eps * np.eye(n)
-            eps *= 100.
+    return DenseCovarianceMatrix(
+        c + nuggetEps * backend.eye(
+            n, dtype=backend.metadata(c).dtype,
+            device=backend.metadata(c).device,
+        )
+    )
 
 
 def induced_prior_covariance_2d(covFunc2d, bspX, bspY, xBounds, yBounds,
@@ -82,8 +75,8 @@ def induced_prior_covariance_2d(covFunc2d, bspX, bspY, xBounds, yBounds,
     ny = bspY.dimension
     N = nx * ny
 
-    xColloc = np.linspace(xBounds[0], xBounds[1], nx)
-    yColloc = np.linspace(yBounds[0], yBounds[1], ny)
+    xColloc = _collocation_points(bspX, xBounds)
+    yColloc = _collocation_points(bspY, yBounds)
 
     xi, yj = np.meshgrid(xColloc, yColloc, indexing='ij')
     pts = np.column_stack([xi.ravel(), yj.ravel()])
@@ -94,217 +87,40 @@ def induced_prior_covariance_2d(covFunc2d, bspX, bspY, xBounds, yBounds,
     phiY = bspY.design_matrix(yColloc)
     phi2D = np.kron(phiX, phiY)
 
-    y = np.linalg.solve(phi2D, K)
-    c = np.linalg.solve(phi2D, y.T)
+    backend = infer_backend(K)
+    phi2D = backend_constant(phi2D, K)
+    y = backend.solve(phi2D, K)
+    c = backend.solve(phi2D, y.T)
     c = 0.5 * (c + c.T)
-
-    eps = nuggetEps
-    for k in range(maxTries):
-
-        try:
-            return DenseCovarianceMatrix(c)
-
-        except (ValueError, LinAlgError) as e:
-
-            if k == maxTries - 1:
-                raise ValueError(
-                    "2D prior covariance is not s.p.d. even after attempted "
-                    "regularisation."
-                ) from e
-
-            c = c + eps * np.eye(N)
-            eps *= 100.
+    return DenseCovarianceMatrix(
+        c + nuggetEps * backend.eye(
+            N, dtype=backend.metadata(c).dtype,
+            device=backend.metadata(c).device,
+        )
+    )
 
 
-class BSplineRealisation1D(Expansion):
-    """
-    Gaussian process parametrisation via a 1D B-spline coefficient space.
-
-    Parameters
-    ----------
-    expansion : BSpline1D
-        The underlying B-spline basis and coefficient store.
-    """
-
-    def __init__(self, expansion: BSpline1D):
-        self._expansion = expansion
-
-    @property
-    def dimension(self) -> int:
-        return self._expansion.dimension
-
-    @property
-    def coefficient(self) -> np.ndarray:
-        return self._expansion.coefficient
-
-    @coefficient.setter
-    def coefficient(self, coeff: np.ndarray) -> None:
-        self._expansion.coefficient = coeff
-
-    def project(self, coeff: np.ndarray) -> None:
-        self._expansion.project(coeff)
-
-    def evaluate(self, grid: Grid) -> np.ndarray:
-        """
-        Evaluate the B-spline realisation on a query grid.
-
-        Parameters
-        ----------
-        grid : Grid
-            Sites to evaluate the realisation at.
-
-        Returns
-        -------
-        np.ndarray
-            Field values at `grid`.
-        """
-        return self._expansion.evaluate(grid.to_array().ravel())
-
-    def clone(self) -> 'BSplineRealisation1D':
-        return BSplineRealisation1D(copy.deepcopy(self._expansion))
-
-
-class BSplineRealisation2D(Expansion):
-    """
-    Gaussian process parametrisation via a 2D tensor-product B-spline
-    coefficient space.
-
-    Parameters
-    ----------
-    expansion : BSpline2D
-        The underlying tensor-product B-spline basis and coefficient store.
-    """
-
-    def __init__(self, expansion: BSpline2D):
-        self._expansion = expansion
-
-    @property
-    def dimension(self) -> int:
-        return self._expansion.dimension
-
-    @property
-    def coefficient(self) -> np.ndarray:
-        return self._expansion.coefficient
-
-    @coefficient.setter
-    def coefficient(self, coeff: np.ndarray) -> None:
-        self._expansion.coefficient = coeff
-
-    def project(self, coeff: np.ndarray) -> None:
-        self._expansion.project(coeff)
-
-    def evaluate(self, grid: Grid) -> np.ndarray:
-        """
-        Evaluate the B-spline realisation on a query grid.
-
-        Parameters
-        ----------
-        grid : Grid
-            Sites to evaluate the realisation at.
-
-        Returns
-        -------
-        np.ndarray
-            Field values at `grid`.
-        """
-        return self._expansion.evaluate(grid.to_array())
-
-    def clone(self) -> 'BSplineRealisation2D':
-        return BSplineRealisation2D(copy.deepcopy(self._expansion))
-
-
-class BSplineGPEngine(GPEngine):
-    """
-    GPEngine using a B-spline basis parametrisation, 1D or 2D depending on
-    the expansion supplied.
-
-    Parameters
-    ----------
-    expansion : BSpline1D | BSpline2D
-        The B-spline basis. Dimensionality is inferred from its type.
-    """
+class BSplineGPSpecification:
+    """Construction rules for a B-spline GP."""
 
     def __init__(self, expansion):
         self._expansion = expansion
         self._is2d = isinstance(expansion, BSpline2D)
-        self._H = None
 
     @property
     def spatialDimension(self) -> int:
         return 2 if self._is2d else 1
 
-    def set_sites(self, sites: Grid) -> None:
-        if sites is None:
-            self._H = None
-            return
-        pts = sites.to_array()
-        self._H = self._expansion.design_matrix(pts if self._is2d else pts.ravel())
-
-    def build_realisation(self) -> Expansion:
-        """
-        Construct a new B-spline realisation matching the engine's basis.
-
-        Returns
-        -------
-        BSplineRealisation1D | BSplineRealisation2D
-            A fresh realisation, 1D or 2D matching the engine's expansion.
-        """
-        if self._is2d:
-            return BSplineRealisation2D(copy.deepcopy(self._expansion))
-        return BSplineRealisation1D(copy.deepcopy(self._expansion))
-
-    def build_covariance(
-            self, covFcn: CovarianceFunctionInterface) -> CovarianceMatrix:
+    def build(self, covFcn: CovarianceFunctionInterface):
         if self._is2d:
             bspX = self._expansion.splineX
             bspY = self._expansion.splineY
-            return induced_prior_covariance_2d(
+            covariance = induced_prior_covariance_2d(
                 covFcn, bspX, bspY, bspX.boundary, bspY.boundary
             )
-        bounds = np.array(self._expansion.boundary)
-        return induced_prior_covariance(covFcn, bounds, self._expansion)
-
-    def at_sites(self, realisation, sites: Grid) -> np.ndarray:
-        return self._H @ realisation.coefficient
-
-    def apply_jacobian(
-            self, v: np.ndarray, _covariance: CovarianceMatrix) -> np.ndarray:
-        return self._H @ v
-
-    def apply_adjoint_jacobian(
-            self, w: np.ndarray, _covariance: CovarianceMatrix) -> np.ndarray:
-        return self._H.T @ w
-
-    def create_predictor(self, gpState: GPState, queryGrid: Grid) -> Predictor:
-        pts = queryGrid.to_array()
-        H_pred = self._expansion.design_matrix(pts if self._is2d else pts.ravel())
-        return BSplineGPPredictor(gpState, H_pred)
-
-
-class BSplineGPPredictor(Predictor):
-    """
-    Out-of-sample prediction for the B-spline GP engine.
-
-    Parameters
-    ----------
-    gpState : GPState
-        Current GP state, exposes the parameter to predict from.
-    H_pred : np.ndarray
-        Design matrix mapping B-spline coefficients to values at the query
-        sites.
-    """
-
-    def __init__(self, gpState: GPState, H_pred: np.ndarray):
-        self._gpState = gpState
-        self._H_pred = H_pred
-
-    def mean(self) -> np.ndarray:
-        """
-        Predictive mean at the query sites.
-
-        Returns
-        -------
-        np.ndarray
-            Predictive mean values, `H_pred @ coefficients`.
-        """
-        return self._H_pred @ self._gpState.parameter.coordinate
+        else:
+            bounds = np.array(self._expansion.boundary)
+            covariance = induced_prior_covariance(
+                covFcn, bounds, self._expansion
+            )
+        return covariance, self._expansion

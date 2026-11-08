@@ -5,7 +5,26 @@ uniform grids.
 """
 import numpy as np
 
-from typing import Iterable, Sequence, Union, Iterator
+from typing import Iterable, Iterator
+
+from styne.backend import BackendInferenceError, infer_backend
+
+
+def as_array(value):
+    """Preserve registered backend arrays; convert Python values to NumPy."""
+    try:
+        infer_backend(value)
+    except BackendInferenceError:
+        return np.asarray(value)
+    return value
+
+
+def copy_array(array):
+    if hasattr(array, "copy"):
+        return array.copy()
+    if hasattr(array, "clone"):
+        return array.clone()
+    return array
 
 
 class Grid:
@@ -16,14 +35,14 @@ class Grid:
 
     Parameters
     ----------
-    points : Iterable[np.ndarray | Sequence[float]]
-        Points, each coerced to a flat float array. All points must have
-        the same dimension.
+    points : iterable of array-like
+        Points, each reshaped to a flat array. Registered backend arrays are
+        retained without conversion. All points must have the same dimension.
     """
 
-    def __init__(self, points: Iterable[Union[np.ndarray, Sequence[float]]]):
+    def __init__(self, points: Iterable):
 
-        self._points = [np.asarray(p, dtype=float).ravel() for p in points]
+        self._points = [as_array(p).reshape(-1) for p in points]
 
         if len(self._points) == 0:
             self._dimension = 0
@@ -50,27 +69,28 @@ class Grid:
             return self.to_array()[idx]
 
         if isinstance(idx, int):
-            return self._points[idx].copy()
+            return copy_array(self._points[idx])
 
         raise TypeError("index must be int or slice")
 
-    def __iter__(self) -> Iterator[np.ndarray]:
+    def __iter__(self) -> Iterator:
         for p in self._points:
-            yield p.copy()
+            yield copy_array(p)
 
-    def to_array(self) -> np.ndarray:
+    def to_array(self):
         """
         Stack all points into a single `(n_points, dimension)` array.
 
         Returns
         -------
-        np.ndarray
+        array-like
         """
 
         if len(self._points) == 0:
             return np.empty((0, 0))
 
-        return np.vstack(self._points)
+        backend = infer_backend(self._points[0])
+        return backend.namespace.stack(self._points, axis=0)
 
     def __repr__(self) -> str:
         return f"Grid(n_points={len(self)}, dimension={self.dimension})"

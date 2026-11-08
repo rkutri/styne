@@ -9,7 +9,6 @@ from numpy.random import default_rng
 from tests.testSetup import GaussianTargetDensity
 from styne.statistics.covariance import IIDCovarianceMatrix
 from styne.mcmc.method.mrw import MetropolisedRandomWalk
-from styne.mcmc.transition import TransitionData
 from styne.mcmc.diagnostics import *
 from styne.parameter.scalar import Scalar
 
@@ -37,7 +36,7 @@ def test_metropolishastings_initialisation(Diagnostics):
 @pytest.mark.parametrize("Diagnostics",
                          [DummyDiagnostics, AcceptanceRateDiagnostics,
                           FullDiagnostics])
-def test_accept_reject(Diagnostics):
+def test_step(Diagnostics):
 
     tgtMean = Scalar(0.)
     tgtVar = 1.
@@ -51,11 +50,13 @@ def test_accept_reject(Diagnostics):
     mc = MetropolisedRandomWalk(tgtDensity, proposalCov, diagnostics)
 
     state = Scalar(2.)
-    proposal = Scalar(2.5)
+    nextState, transition, _ = mc.step(mc.evaluate_state(state), mc._rng)
 
-    transitionOutcome = mc._accept_reject(TransitionData(state, proposal))
-
-    assert transitionOutcome.state in [state, proposal]
+    assert transition.current.parameter is state
+    selected = transition.proposal if transition.outcome else transition.state
+    np.testing.assert_allclose(
+        nextState.parameter.coordinate, selected.coordinate
+    )
 
 
 @pytest.mark.parametrize("Diagnostics",
@@ -136,7 +137,7 @@ def test_run_zero_steps():
 def test_metropolis_within_gibbs():
     from styne.model.trend import ConstantTrend
     from styne.model.sglmm import SGLMM
-    from styne.statistics.likelihood import SGLMMLikelihood
+    from styne.statistics.likelihood import RegressionLikelihood
     from styne.statistics.response import PoissonResponse
     from styne.statistics.data import Data
     from styne.gp.gaussianprocess import GaussianProcess
@@ -145,7 +146,6 @@ def test_metropolis_within_gibbs():
     from styne.utility.tuning import PCNTuner
     from styne.statistics.conditional import MetropolisWithinGibbsConditional
     from styne.mcmc.method.gibbs import GibbsBuilder
-    from styne.statistics.bayes import HierarchicalBayes
     from styne.utility.grid import Grid
     from styne.statistics.radonnikodym import RadonNikodym
     from styne.parameter.block import BlockParameter
@@ -161,7 +161,7 @@ def test_metropolis_within_gibbs():
     gp = GaussianProcess.dna(covFcn, q=20, d=1)
     predictor = SGLMM(gp, sites, trend=ConstantTrend(0.0))
 
-    likelihood = SGLMMLikelihood(data, predictor, PoissonResponse())
+    likelihood = RegressionLikelihood(data, predictor, PoissonResponse())
     
     latentTarget = RadonNikodym(gp.measure, likelihood)
     rng = default_rng(42)
@@ -177,7 +177,15 @@ def test_metropolis_within_gibbs():
     
     # Simple block conditional
     cond = MetropolisWithinGibbsConditional(mcmc, blockIdx=0, nSteps=2)
-    joint = HierarchicalBayes(conditionals=[cond], root=gp.measure)
+    class OneBlockModel:
+        nBlocks = 1
+
+        @staticmethod
+        def conditional(index, state):
+            assert index == 0
+            return cond.condition(state)
+
+    joint = OneBlockModel()
     
     builder = GibbsBuilder()
     builder.model = joint
@@ -185,17 +193,17 @@ def test_metropolis_within_gibbs():
     gibbs = builder.build()
     
     nSteps = 5
-    initState = BlockParameter([latentInit.clone()])
+    initState = BlockParameter([latentInit])
     gibbs.run(nSteps, initState)
     
     assert len(gibbs.chain.block(0).trajectory) == nSteps + 1
 
 
-def test_metropolis_within_gibbs_chain_continuity():
-    """Inner sampler accumulates nSteps per sweep, not resetting between sweeps."""
+def test_metropolis_within_gibbs_does_not_mutate_template_sampler():
+    """Each conditioned inner sampler is isolated from the template."""
     from styne.model.trend import ConstantTrend
     from styne.model.sglmm import SGLMM
-    from styne.statistics.likelihood import SGLMMLikelihood
+    from styne.statistics.likelihood import RegressionLikelihood
     from styne.statistics.response import PoissonResponse
     from styne.statistics.data import Data
     from styne.gp.gaussianprocess import GaussianProcess
@@ -203,7 +211,6 @@ def test_metropolis_within_gibbs_chain_continuity():
     from styne.mcmc.method.pcn import PCNFactory
     from styne.statistics.conditional import MetropolisWithinGibbsConditional
     from styne.mcmc.method.gibbs import GibbsBuilder
-    from styne.statistics.bayes import HierarchicalBayes
     from styne.utility.grid import Grid
     from styne.statistics.radonnikodym import RadonNikodym
     from styne.parameter.block import BlockParameter
@@ -215,7 +222,7 @@ def test_metropolis_within_gibbs_chain_continuity():
     covFcn = MaternCovariance1D(0.2, 1.5, 1.0)
     gp = GaussianProcess.dna(covFcn, q=20, d=1)
     predictor = SGLMM(gp, sites, trend=ConstantTrend(0.0))
-    likelihood = SGLMMLikelihood(data, predictor, PoissonResponse())
+    likelihood = RegressionLikelihood(data, predictor, PoissonResponse())
     latentTarget = RadonNikodym(gp.measure, likelihood)
     rng = default_rng(43)
     latentInit = gp.measure.generate_realisation(rng=rng)
@@ -231,7 +238,15 @@ def test_metropolis_within_gibbs_chain_continuity():
         mcmc, blockIdx=0, nSteps=nStepsPerSweep
     )
     mcmc.storeChain = True
-    joint = HierarchicalBayes(conditionals=[cond], root=gp.measure)
+    class OneBlockModel:
+        nBlocks = 1
+
+        @staticmethod
+        def conditional(index, state):
+            assert index == 0
+            return cond.condition(state)
+
+    joint = OneBlockModel()
 
     builder = GibbsBuilder()
     builder.model = joint
@@ -239,15 +254,10 @@ def test_metropolis_within_gibbs_chain_continuity():
     gibbs = builder.build()
 
     nGibbsSweeps = 4
-    initState = BlockParameter([latentInit.clone()])
+    initState = BlockParameter([latentInit])
     gibbs.run(nGibbsSweeps, initState)
 
-    # Inner chain must accumulate: 1 initial + nGibbsSweeps * nStepsPerSweep
-    expected_inner_len = 1 + nGibbsSweeps * nStepsPerSweep
-    assert len(mcmc.chain.trajectory) == expected_inner_len, (
-        f"Expected inner chain length {expected_inner_len}, "
-        f"got {len(mcmc.chain.trajectory)}"
-    )
+    assert len(mcmc.chain.trajectory) == 0
 
 
 

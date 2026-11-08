@@ -1,22 +1,12 @@
 import numpy as np
 
-from enum import Enum
-from sys import exit
-
-
 from scipy.stats import multivariate_normal
 from scipy.integrate import solve_ivp
 
 from styne.parameter.vector import Vector
-from styne.model.model import Model
+from styne.model.forwardmap import ForwardMap
 from styne.statistics.interface import DensityInterface
 from styne.statistics.data import Data
-
-
-class EvaluationStatus(Enum):
-    NONE = 0
-    SUCCESS = 1
-    FAILURE = 2
 
 
 def covariance_matrix(dim, kappa):
@@ -102,10 +92,6 @@ class GaussianTargetDensity(DensityInterface):
 class LotkaVolterraParameter(Vector):
 
     @classmethod
-    def from_coefficient(cls, coefficient):
-        return cls(coefficient)
-
-    @classmethod
     def from_interpolation(cls, value):
         return cls(np.log(value))
 
@@ -113,7 +99,7 @@ class LotkaVolterraParameter(Vector):
         return np.exp(self.coordinate)
 
 
-class LotkaVolterraSolver(Model):
+class LotkaVolterraSolver(ForwardMap):
 
     def __init__(self, design, config):
 
@@ -126,9 +112,6 @@ class LotkaVolterraSolver(Model):
         self._solverMethod = config['solver']
         self._solverRTol = config['rtol']
 
-        self._param = [None, None]
-        self._status = EvaluationStatus.NONE
-
     @property
     def pType(self):
         return LotkaVolterraParameter
@@ -136,10 +119,6 @@ class LotkaVolterraSolver(Model):
     @property
     def pDim(self):
         return self._dataShape[1]
-
-    @property
-    def status(self):
-        return self._status
 
     @property
     def dataShape(self):
@@ -158,19 +137,16 @@ class LotkaVolterraSolver(Model):
         return [alpha * x[0] - beta * x[0] * x[1],
                 delta * x[0] * x[1] - gamma * x[1]]
 
-    def _interpolate(self, parameter):
-
+    def _prepare(self, parameter):
         paramEval = parameter.evaluate()
-        self._param = [paramEval[0], paramEval[1]]
+        return paramEval[0], paramEval[1]
 
-    def _evaluate(self):
-
-        self._status = EvaluationStatus.SUCCESS
+    def _evaluate(self, preparedState):
 
         alpha = self._fixedParam[0]
-        beta = self._param[0]
+        beta = preparedState[0]
         gamma = self._fixedParam[1]
-        delta = self._param[1]
+        delta = preparedState[1]
 
         evaluation = np.zeros(self._dataShape)
 
@@ -187,47 +163,24 @@ class LotkaVolterraSolver(Model):
                 print("forward map evaluation failed. Reason: \n"
                       + odeResult.message)
 
-                self._status = EvaluationStatus.FAILURE
                 raise RuntimeError(
                     "ODE solver failed: " + odeResult.message)
 
             evaluation[n, :] = odeResult.y[:, -1]
 
-        self._evaluation = evaluation
-
-    def full_solution(self, parameter, y0):
-
-        paramEval = parameter.evaluate()
-
-        beta = paramEval[0]
-        delta = paramEval[1]
-
-        alpha = self._fixedParam[0]
-        gamma = self._fixedParam[1]
-
-        def odeFlow(t, x): return self._flow(t, x, alpha, beta, gamma, delta)
-        odeResult = solve_ivp(odeFlow, self.tBoundary_, y0, method='LSODA')
-
-        if odeResult.status != 0:
-
-            print("forward map evaluation failed. aborting program.")
-            print(odeResult.message)
-            exit()
-
-        return (odeResult.t, odeResult.y)
+        return evaluation
 
 
 def generate_synthetic_data(parameter, solver, noiseVar, rng=None):
 
     sig = np.sqrt(noiseVar)
 
-    solver.interpolate(parameter)
-    solver.evaluate()
+    evaluation = solver(parameter)
 
     if rng is None:
         rng = np.random.default_rng()
 
-    measurement = solver.evaluation + sig * rng.standard_normal(solver.dataShape)
+    measurement = evaluation + sig * rng.standard_normal(solver.dataShape)
 
     data = Data(solver.dataDim, solver.x_)
     data.measurement = measurement

@@ -117,6 +117,54 @@ def apply_neumann_1d(A, b=None):
 # where i is the x-index (0 .. nx) and j is the y-index (0 .. ny).
 # ---------------------------------------------------------------------------
 
+def q1_element_geometry_2d(xVert, yVert):
+    """Per-element node indices and unweighted Q1 stiffness geometry.
+
+    Scale ``geometry`` by a per-element diffusion value to obtain the
+    elementwise stiffness contribution ``Ke``. Shared by the forward
+    assembly (`q1_stiffness_2d`) and its adjoint
+    (`q1_log_diffusion_adjoint_2d`), which must stay consistent with each
+    other.
+
+    Parameters
+    ----------
+    xVert : array_like, shape (nx+1,)
+    yVert : array_like, shape (ny+1,)
+
+    Returns
+    -------
+    nodes : ndarray, shape (nx*ny, 4)
+        Global node indices of each element, ordered with the x-index
+        varying fastest (i.e. element eIdx = ex*ny + ey, ex in 0..nx-1,
+        ey in 0..ny-1).
+    geometry : ndarray, shape (nx*ny, 4, 4)
+        Unweighted local stiffness matrices, i.e. Ke / diffusion.
+    """
+    xVert = np.asarray(xVert, dtype=float)
+    yVert = np.asarray(yVert, dtype=float)
+    nx, ny = xVert.size - 1, yVert.size - 1
+
+    hx = np.diff(xVert)
+    hy = np.diff(yVert)
+    HX, HY = np.meshgrid(hx, hy, indexing='ij')
+    HX, HY = HX.ravel(), HY.ravel()
+
+    eIdx = np.arange(nx * ny)
+    ex, ey = eIdx // ny, eIdx % ny
+    nodes = np.stack([
+        ex * (ny + 1) + ey,
+        (ex + 1) * (ny + 1) + ey,
+        (ex + 1) * (ny + 1) + ey + 1,
+        ex * (ny + 1) + ey + 1,
+    ], axis=1)
+
+    geometry = (
+        (HY / HX)[:, None, None] * _KXI[None]
+        + (HX / HY)[:, None, None] * _KETA[None]
+    )
+    return nodes, geometry
+
+
 def q1_stiffness_2d(xVert, yVert, diffusion_at_centers) -> csc_matrix:
     """Assemble the Q1 global stiffness matrix for -div(A grad u) on a 2D grid.
 
@@ -134,29 +182,12 @@ def q1_stiffness_2d(xVert, yVert, diffusion_at_centers) -> csc_matrix:
     nNodes = (nx + 1) * (ny + 1)
     nElem = nx * ny
 
-    hx = np.diff(xVert)
-    hy = np.diff(yVert)
-    HX, HY = np.meshgrid(hx, hy, indexing='ij')
-    HX, HY = HX.ravel(), HY.ravel()
-
+    nodes, geometry = q1_element_geometry_2d(xVert, yVert)
     AEval = np.asarray(diffusion_at_centers, dtype=float).ravel()
+    Ke = AEval[:, None, None] * geometry  # (nElem, 4, 4)
 
-    eIdx = np.arange(nElem)
-    ex, ey = eIdx // ny, eIdx % ny
-
-    n0 = ex * (ny + 1) + ey
-    n1 = (ex + 1) * (ny + 1) + ey
-    n2 = (ex + 1) * (ny + 1) + (ey + 1)
-    n3 = ex * (ny + 1) + (ey + 1)
-    nods = np.stack([n0, n1, n2, n3], axis=1)  # (nElem, 4)
-
-    Ke = AEval[:, None, None] * (
-        (HY / HX)[:, None, None] * _KXI[None]
-        + (HX / HY)[:, None, None] * _KETA[None]
-    )  # (nElem, 4, 4)
-
-    i_idx = np.broadcast_to(nods[:, :, None], (nElem, 4, 4)).reshape(-1)
-    j_idx = np.broadcast_to(nods[:, None, :], (nElem, 4, 4)).reshape(-1)
+    i_idx = np.broadcast_to(nodes[:, :, None], (nElem, 4, 4)).reshape(-1)
+    j_idx = np.broadcast_to(nodes[:, None, :], (nElem, 4, 4)).reshape(-1)
 
     return coo_matrix((Ke.ravel(), (i_idx, j_idx)),
                       shape=(nNodes, nNodes)).tocsc()
@@ -183,6 +214,24 @@ def q1_mass_lumped_2d(xVert, yVert) -> csc_matrix:
     mass[1:, 1:] += areas
 
     return diags(mass.ravel(), 0, format='csc')
+
+
+def q1_log_diffusion_adjoint_2d(
+        xVert, yVert, diffusion_at_centers, primal, adjoint):
+    """Pull a Q1 stiffness cotangent back to element log diffusion.
+
+    If ``K(exp(theta)) primal = rhs``, the returned vector is the derivative
+    of a scalar output with adjoint solution ``adjoint`` with respect to the
+    elementwise values of ``theta``. Boundary rows that were replaced by
+    Dirichlet identity rows must have zero entries in ``adjoint``.
+    """
+    nodes, geometry = q1_element_geometry_2d(xVert, yVert)
+    localPrimal = np.asarray(primal)[nodes]
+    localAdjoint = np.asarray(adjoint)[nodes]
+    energy = np.einsum(
+        'ei,eij,ej->e', localAdjoint, geometry, localPrimal
+    )
+    return -np.asarray(diffusion_at_centers).ravel() * energy
 
 
 def apply_dirichlet_2d(A, b=None, nx=None, ny=None):

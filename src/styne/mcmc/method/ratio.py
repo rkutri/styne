@@ -1,139 +1,273 @@
-from numpy import ndarray, asarray, log
-from typing import Optional, List
-from scipy.special import logsumexp
+import numpy as np
+
+from styne.backend import infer_backend
+from styne.mcmc.localised import apply_metric
 from styne.parameter.parameter import Parameter
 
 
-def log_dot_product_weights(
-    gamma: float, samples: ndarray, x: ndarray, z: ndarray,
-    spectralWeights: ndarray = None
-) -> ndarray:
-    """Raw IS log-weights for the regularisation ratio."""
-    mid = 0.5 * (x + z)
-    diff = x - z
-    if spectralWeights is not None:
-        diff = spectralWeights**2 * diff
-    return gamma * ((samples - mid) @ diff)
+def log_dot_product_weights(penaltyMetric, samples, x, z, spectralWeights=None):
+    """Raw IS log-weights (v - (x + z)/2)^T B (x - z) of the ratio.
 
-
-class RatioEstimator:
+    They are the penalty differences between the localisations at z and x,
+    where a number gamma as the penalty metric B stands for gamma I.
     """
-    Normalising constant ratio estimator for DART.
+    backend = infer_backend(samples)
+    mid = 0.5 * (x + z)
+    difference = x - z
+    if spectralWeights is not None:
+        difference = spectralWeights ** 2 * difference
+    return backend.namespace.sum(
+        (samples - mid) * apply_metric(penaltyMetric, difference), axis=-1
+    )
 
-    Estimates log(N_z / N_x) from the samples of a localised surrogate chain using
-    either one-sided importance sampling ('is'), a geometric bridge ('bridge'),
-    or a second-order cumulant approximation ('cumulant').
+
+class NormalisingRatioEstimator:
+    """
+    Normalising-ratio estimator for DART.
+
+    Estimates log(N_z / N_x) from retained states of the root chains.
+    Importance sampling and geometric bridge estimation require at least one
+    state. The Gaussian estimator, a second-order cumulant approximation,
+    requires two states because it estimates a sample variance.
 
     Parameters
     ----------
-    surrogateMeasure : LocalisedSurrogateTransitionMeasure
-        Surrogate measure whose chain trajectories are used in estimation.
     burnin : int
-        Number of leading trajectory samples to discard.
+        Number of leading non-terminal trajectory states to discard.
     thinning : int
-        Keep every thinning-th sample after burnin.
+        Keep every thinning-th state after burnin.
     type : str
-        One of 'is', 'bridge', or 'cumulant'. Defaults to 'cumulant'.
-        'cumulant' is a one-sided second-order CGF approximation;
-        same cost as 'is', estimates the log-ratio directly, robust under large
-        weight spread, but carries a bias that does not vanish with sample size.
+        One of 'importance', 'bridge', or 'gaussian'. Defaults to 'gaussian'.
     """
 
     def __init__(
         self,
-        surrogateMeasure,
-        burnin: int,
-        thinning: int,
-        type: str = 'cumulant'
+        burnin: int = 0,
+        thinning: int = 1,
+        type: str = 'gaussian'
     ):
-        if type not in ('is', 'bridge', 'cumulant'):
+        type = {'is': 'importance', 'cumulant': 'gaussian'}.get(type, type)
+        if type not in ('importance', 'bridge', 'gaussian'):
             raise ValueError(
-                f"type must be 'is', 'bridge', or 'cumulant', got '{type}'."
+                "type must be 'importance', 'bridge', or 'gaussian', "
+                f"got '{type}'."
+            )
+        if not isinstance(burnin, int) or burnin < 0:
+            raise ValueError(
+                f"burnin must be a non-negative integer. Got {burnin}."
+            )
+        if not isinstance(thinning, int) or thinning < 1:
+            raise ValueError(
+                f"thinning must be a positive integer. Got {thinning}."
             )
 
-        self._surrogateMeasure = surrogateMeasure
         self._burnin = burnin
         self._thinning = thinning
         self._type = type
 
+    @staticmethod
+    def minimum_samples(estimatorType):
+        """Return the retained-state requirement for an estimator."""
+        return 2 if estimatorType in ('gaussian', 'cumulant') else 1
+
+    @staticmethod
+    def retained_sample_count(availableStates, burnin, thinning):
+        """Count states retained after burn-in and thinning."""
+        remaining = max(0, availableStates - burnin)
+        return (remaining + thinning - 1) // thinning
+
+    @staticmethod
+    def default_burnin(rootLength):
+        """States discarded from a root run of ``rootLength`` by default.
+
+        A quarter of the non-terminal states, rounded down, so a run of 20
+        discards five and a run of 10 discards two.
+        """
+        return rootLength // 4
+
+    @property
+    def estimatorType(self):
+        return self._type
+
+    @property
+    def burnin(self) -> int:
+        """Leading non-terminal root states discarded before estimation."""
+        return self._burnin
+
+    @property
+    def thinning(self) -> int:
+        return self._thinning
+
+    @property
+    def minimumSamples(self):
+        return self.minimum_samples(self._type)
+
+    @property
+    def requires_proposal_trajectory(self):
+        return self._type == 'bridge'
+
+    def _as_trajectory(self, trajectory, backend, metadata, dimension):
+        if isinstance(trajectory, list):
+            if not trajectory:
+                return backend.zeros(
+                    (0, dimension),
+                    dtype=metadata.dtype,
+                    device=metadata.device,
+                )
+            return backend.asarray(
+                np.stack(trajectory),
+                dtype=metadata.dtype,
+                device=metadata.device,
+            )
+        return trajectory
+
+    def _retained_samples(
+            self, trajectory, backend, metadata, dimension, label):
+        trajectory = self._as_trajectory(
+            trajectory, backend, metadata, dimension
+        )
+        samples = trajectory[:-1][self._burnin::self._thinning]
+        if samples.shape[0] < self.minimumSamples:
+            raise ValueError(
+                f"{self._type} ratio estimation requires at least "
+                f"{self.minimumSamples} retained state(s) in {label}; got "
+                f"{samples.shape[0]}."
+            )
+        return samples
+
+    @staticmethod
+    def _concrete_truth(predicate):
+        try:
+            return bool(np.asarray(predicate))
+        except Exception:
+            return None
+
     def log_ratio_estimate(
-        self, state: Parameter, proposal: Parameter
-    ) -> float:
-        """
-        Estimate log(N_z / N_x) from the surrogate chain trajectory.
+        self, state: Parameter, proposal: Parameter, trajectory,
+        proposalTrajectory=None, *, penaltyMetric, returnDiagnostics=False,
+    ):
+        """Estimate log(N_z / N_x) from explicit retained trajectories."""
+        backend = infer_backend(state.coordinate)
+        metadata = backend.metadata(state.coordinate)
+        zero = backend.asarray(
+            0., dtype=metadata.dtype, device=metadata.device
+        )
+        # Retained states run along the first axis and chains along the
+        # batch axes, so every reduction below keeps the chains apart.
+        coincident = backend.namespace.all(
+            state.coordinate == proposal.coordinate, axis=-1
+        )
+        if self._concrete_truth(backend.namespace.all(coincident)):
+            estimate = backend.namespace.where(coincident, zero, zero)
+            diagnostics = {"logWeightMean": estimate,
+                           "logWeightVariance": estimate}
+            return (estimate, diagnostics) if returnDiagnostics else estimate
 
-        Parameters
-        ----------
-        state : Parameter
-            Current fine-level state x.
-        proposal : Parameter
-            Proposed fine-level state z.
-
-        Returns
-        -------
-        float
-            Estimated log(N_z / N_x).
-        """
-        traj = self._surrogateMeasure.chain.trajectory
-        # Exclude the accepted proposal ψ_n from the ratio estimate. Its weight
-        # is deterministic given z = ψ_n, introducing a conditional bias that
-        # correlates with the proposal distance ‖z - x‖.
-        trimmed = traj[:-1] if len(traj) > 1 else traj
-        sub = trimmed[self._burnin::self._thinning]
-
-        if not sub:
-            return 0.
-
-        sw = self._surrogateMeasure.density.spectralWeights
-        samplesX = asarray(sub)
-        w = log_dot_product_weights(
-            self._surrogateMeasure.regularisation, samplesX,
-            state.coordinate, proposal.coordinate, sw
+        samples = self._retained_samples(
+            trajectory,
+            backend,
+            metadata,
+            state.coordinate.shape[-1],
+            "the state trajectory",
         )
 
-        if self._type == 'is':
-            return float(logsumexp(-w) - log(len(w)))
-
-        if self._type == 'cumulant':
-            if len(w) == 1:
-                return float(-w.mean())
-            return float(-w.mean() + 0.5 * w.var(ddof=1))
-
-        # --- Geometric bridge ---
-
-        # The auxiliary Π_z chain reuses the surrogate measure's configured
-        # subchain length. To use a different length for the bridge, configure
-        # the measure accordingly before constructing the estimator.
-        logEstX = float(logsumexp(-0.5 * w) - log(len(w)))
-
-        xLocation = self._surrogateMeasure.location
-        self._surrogateMeasure.location = proposal
-        self._surrogateMeasure.generate_realisation()
-
-        trajZ = self._surrogateMeasure.chain.trajectory
-        # Same trimming as for the Π_x trajectory: exclude the terminal state.
-        trimmedZ = trajZ[:-1] if len(trajZ) > 1 else trajZ
-        subZ = trimmedZ[self._burnin::self._thinning]
-
-        if not subZ:
-            # Safe to restore location without explicitly saving/restoring chain state.
-            # The surrogate measure's generate_realisation() internally calls run()
-            # with a fresh initial state derived from the new location, ensuring safe
-            # re-initialisation.
-            self._surrogateMeasure.location = xLocation
-            return logEstX
-
-        samplesZ = asarray(subZ)
-        wZ = log_dot_product_weights(
-            self._surrogateMeasure.regularisation, samplesZ,
-            state.coordinate, proposal.coordinate, sw
+        weights = log_dot_product_weights(
+            penaltyMetric, samples, state.coordinate, proposal.coordinate
         )
-        logEstZ = float(logsumexp(0.5 * wZ) - log(len(wZ)))
+        nSamples = weights.shape[0]
+        logSamples = backend.namespace.log(backend.asarray(
+            nSamples, dtype=metadata.dtype, device=metadata.device
+        ))
+        weightMean = backend.namespace.mean(weights, axis=0)
+        weightVariance = backend.namespace.sum(
+            (weights - weightMean) ** 2, axis=0
+        ) / (nSamples - 1) if nSamples > 1 else zero
 
-        # Safe to restore location without explicitly saving/restoring chain state.
-        # The surrogate measure's generate_realisation() internally calls run()
-        # with a fresh initial state derived from the new location, ensuring safe
-        # re-initialisation.
-        self._surrogateMeasure.location = xLocation
+        def result(estimate):
+            estimate = backend.namespace.where(coincident, zero, estimate)
+            if not returnDiagnostics:
+                return estimate
+            diagnostics = {
+                "logWeightMean": backend.namespace.where(
+                    coincident, zero, weightMean),
+                "logWeightVariance": backend.namespace.where(
+                    coincident, zero, weightVariance),
+            }
+            return estimate, diagnostics
 
-        return logEstX - logEstZ
+        if self._type == 'importance':
+            estimate = backend.namespace.logsumexp(-weights, axis=0) - logSamples
+            return result(estimate)
+
+        if self._type == 'gaussian':
+            estimate = -weightMean + 0.5 * weightVariance
+            return result(estimate)
+
+        if proposalTrajectory is None:
+            raise ValueError(
+                "bridge ratio estimation requires an explicit proposal "
+                "trajectory."
+            )
+        proposalSamples = self._retained_samples(
+            proposalTrajectory,
+            backend,
+            metadata,
+            proposal.coordinate.shape[-1],
+            "the proposal trajectory",
+        )
+        proposalWeights = log_dot_product_weights(
+            penaltyMetric, proposalSamples, state.coordinate, proposal.coordinate
+        )
+        logStateEstimate = (
+            backend.namespace.logsumexp(-0.5 * weights, axis=0) - logSamples
+        )
+        logProposalSamples = backend.namespace.log(backend.asarray(
+            proposalWeights.shape[0],
+            dtype=metadata.dtype,
+            device=metadata.device,
+        ))
+        logProposalEstimate = (
+            backend.namespace.logsumexp(0.5 * proposalWeights, axis=0)
+            - logProposalSamples
+        )
+        estimate = logStateEstimate - logProposalEstimate
+        return result(estimate)
+
+
+class RatioEstimator(NormalisingRatioEstimator):
+    """Legacy constructor retaining only a metric snapshot and estimator settings.
+
+    Trajectories are explicit arguments; an estimate never reads a sampler's
+    stored history. DART supplies its current metric on every call.
+    """
+
+    def __init__(self, surrogateMeasure, burnin, thinning, type='gaussian'):
+        super().__init__(burnin, thinning, type)
+        from styne.statistics.covariance import CovarianceMatrix
+        self._metric = getattr(surrogateMeasure, 'penaltyMetric', None)
+        if not isinstance(self._metric, (int, float, np.number, CovarianceMatrix)):
+            self._metric = surrogateMeasure.regularisation
+            weights = getattr(surrogateMeasure.density, 'spectralWeights', None)
+            if weights is not None:
+                from styne.statistics.covariance import DiagonalCovarianceMatrix
+                self._metric = DiagonalCovarianceMatrix(self._metric * weights ** 2)
+        length = getattr(surrogateMeasure, 'subchainLength', None)
+        if isinstance(length, int) and length > 0:
+            retained = self.retained_sample_count(length, burnin, thinning)
+            if retained < self.minimumSamples:
+                raise ValueError(f"{self.estimatorType} requires at least "
+                                 f"{self.minimumSamples} retained state(s); "
+                                 f"configuration retains {retained}.")
+
+    def log_ratio_estimate(self, state, proposal, trajectory, proposalTrajectory=None,
+                           *, penaltyMetric=None, returnDiagnostics=False):
+        return super().log_ratio_estimate(
+            state, proposal, trajectory, proposalTrajectory,
+            penaltyMetric=self._metric if penaltyMetric is None else penaltyMetric,
+            returnDiagnostics=returnDiagnostics,
+        )
+
+    def with_surrogate_measure(self, surrogateMeasure):
+        return type(self)(
+            surrogateMeasure, self.burnin, self.thinning, self.estimatorType
+        )

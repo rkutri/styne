@@ -1,4 +1,7 @@
-from styne.statistics.measure import ProbabilityMeasure
+from styne.statistics.measure import (
+    AbsolutelyContinuousProbabilityMeasure,
+    ProbabilityMeasure,
+)
 from abc import ABC, abstractmethod
 from typing import List, Optional
 from numpy.random import Generator
@@ -7,6 +10,26 @@ from styne.mcmc.transition import TransitionData
 from styne.parameter.parameter import Parameter
 from styne.parameter.vector import Vector
 from styne.utility.partition import Partition
+
+
+def log_reference_ratio(reference, current: Parameter, proposed: Parameter):
+    """Log density ratio of a reference measure, zero for the Lebesgue measure."""
+    if reference is None:
+        return 0.0
+    return (
+        reference.density.evaluate_log(proposed)
+        - reference.density.evaluate_log(current)
+    )
+
+
+def zero_correction(state: Parameter):
+    """Zero log correction with the batch shape of ``state``."""
+    metadata = state.backendMetadata
+    return state.backend.zeros(
+        state.coordinate.shape[:-1],
+        dtype=metadata.dtype,
+        device=metadata.device,
+    )
 
 
 class PartitionedProposalMixin:
@@ -40,10 +63,8 @@ class PartitionedProposalMixin:
         return self._pFinePrior.generate_realisation(rng=rng)
 
     def _merge(self, coarseCoord, fineCoord, template: Parameter) -> Parameter:
-        result = template.clone()
-        result.coordinate = self._pPartition.rule.merge(
-            [coarseCoord, fineCoord])
-        return result
+        coordinate = self._pPartition.rule.merge([coarseCoord, fineCoord])
+        return template.with_coordinate(coordinate)
 
 
 class ProposalMethod(ABC):
@@ -52,33 +73,68 @@ class ProposalMethod(ABC):
 
     Notes
     -----
-    Subclasses implement `generate_proposal`. `state` is a plain settable
-    property, the current point the next proposal is generated from.
+    Subclasses implement :meth:`propose`, which returns the proposed state
+    and its log acceptance correction log q_y(x) - log q_x(y), for proposal
+    densities q relative to :attr:`reference`, under the auxiliary key
+    ``logCorrection``. Every numerical input is explicit; proposal instances
+    retain only static configuration.
     """
 
-    def __init__(self):
-        self._state = None
-
     @property
-    def state(self):
-        return self._state
+    def reference(self) -> Optional[ProbabilityMeasure]:
+        """Measure the acceptance correction refers to, None for Lebesgue."""
+        return None
 
-    @state.setter
-    def state(self, state):
-        self._state = state
+    def condition(self, state: Parameter) -> "ProposalMethod":
+        """
+        Return this proposal given the current state ``state``.
+
+        A sampler conditions its proposal once before each transition. The
+        conditioned proposal may depend on the state only through the
+        coordinates it holds, so that the forward and the reverse move share
+        it. A proposal independent of the state returns itself, the default.
+        """
+        return self
+
+    def for_target(self, target, previous) -> "ProposalMethod":
+        """
+        Return this proposal for ``target`` in place of ``previous``.
+
+        A sampler calls this when its target changes. Whatever the proposal
+        took from ``previous``, such as its reference or gradient, it takes
+        from ``target`` instead, and anything given explicitly is kept. A
+        proposal that took nothing returns itself, the default.
+        """
+        return self
+
+    @staticmethod
+    def record(current: Parameter, proposed: Parameter, logCorrection,
+               **auxiliary):
+        """Proposal record carrying the log acceptance correction."""
+        return TransitionData(
+            current=current,
+            proposed=proposed,
+            auxiliary={"logCorrection": logCorrection, **auxiliary},
+        )
 
     @abstractmethod
-    def generate_proposal(self, rng: Generator) -> TransitionData:
+    def propose(
+            self, state: Parameter, rng: Generator
+    ) -> tuple[TransitionData, object]:
         """
-        Generate a proposal from the current `state`.
+        Generate a proposal from ``state`` using ``rng``.
 
         Parameters
         ----------
-        rng : Generator
+        state : Parameter
+            Current chain state.
+        rng : object
+            Backend-native random state.
 
         Returns
         -------
-        TransitionData
+        (TransitionData, object)
+            Proposal record and propagated random state.
         """
         ...
 
@@ -102,72 +158,67 @@ class BlockProposal(ProposalMethod):
             One proposal method per partition component, in the same order
             as the partition rule.
         """
-        super().__init__()
+        if len(proposalMethods) != partition.rule.numComponents:
+            raise ValueError("One proposal is required per partition component.")
         self._partition = partition
-        self._pMethods = proposalMethods
+        self._pMethods = list(proposalMethods)
 
     @property
     def components(self) -> List[ProposalMethod]:
         """The constituent proposal methods for each partition component."""
         return list(self._pMethods)
 
-    @ProposalMethod.state.setter
-    def state(self, state: Parameter):
+    def condition(self, state: Parameter):
+        proposals = [method.condition(state) for method in self._pMethods]
+        return type(self)(self._partition, proposals)
 
-        ProposalMethod.state.fset(self, state)
+    def for_target(self, target, previous):
+        return type(self)(self._partition, [
+            method.for_target(target, previous) for method in self._pMethods
+        ])
 
-        for idx, method in enumerate(self._pMethods):
-            method.state = Vector(self._partition.component(idx, state))
-
-    def generate_proposal(self, rng: Generator) -> TransitionData:
-        """
-        Generate a proposal by drawing independently from each component
-        proposal method and merging the results via the partition.
-
-        Parameters
-        ----------
-        rng : Generator
-
-        Returns
-        -------
-        TransitionData
-        """
-
-        components = [
-            m.generate_proposal(rng).proposal.coordinate for m in self._pMethods
-        ]
-
-        result = self._state.clone()
-        result.coordinate = self._partition.merge(components)
-
-        return TransitionData(self._state, result)
+    def propose(self, state: Parameter, rng: Generator):
+        coordinates = []
+        correction = zero_correction(state)
+        for index, method in enumerate(self._pMethods):
+            current = Vector(self._partition.rule.extract(index, state.coordinate))
+            transition, rng = method.propose(current, rng)
+            proposed = transition.proposed.parameter
+            correction = (
+                correction + transition.auxiliary["logCorrection"]
+                - log_reference_ratio(method.reference, current, proposed)
+            )
+            coordinates.append(proposed.coordinate)
+        proposed = state.with_coordinate(self._partition.rule.merge(coordinates))
+        return self.record(state, proposed, correction), rng
 
 
 class FixedProposal(ProposalMethod):
     """
-    State-independent proposal.
+    Independence proposal from a fixed measure.
+
+    Its draws are reversible with respect to the proposal measure, so the
+    correction is zero relative to that measure.
     """
 
-    def __init__(self, proposalMeasure: ProbabilityMeasure):
+    def __init__(self, proposalMeasure: AbsolutelyContinuousProbabilityMeasure):
 
-        if not isinstance(proposalMeasure, ProbabilityMeasure):
+        if not isinstance(
+                proposalMeasure, AbsolutelyContinuousProbabilityMeasure):
             raise TypeError(
-                "proposalMeasure must be a ProbabilityMeasure instance."
+                "proposalMeasure must be an "
+                "AbsolutelyContinuousProbabilityMeasure instance."
             )
 
         self._proposal = proposalMeasure
 
     @property
-    def state(self):
-        raise RuntimeError("FixedProposal has no state.")
+    def reference(self) -> AbsolutelyContinuousProbabilityMeasure:
+        return self._proposal
 
-    # state setter is a no-op
-    @ProposalMethod.state.setter
-    def state(self, state):
-        pass
-
-    def generate_proposal(self, rng: Generator) -> TransitionData:
-        return TransitionData(None, self._proposal.generate_realisation(rng=rng))
+    def propose(self, state, rng):
+        proposal, nextRng = self._proposal.sample(rng)
+        return self.record(state, proposal, zero_correction(state)), nextRng
 
 
 class PartitionedSurrogateProposal(PartitionedProposalMixin, ProposalMethod):
@@ -177,7 +228,6 @@ class PartitionedSurrogateProposal(PartitionedProposalMixin, ProposalMethod):
     """
 
     def __init__(self, partition, coarseProposal, fineKernel, finePrior):
-        ProposalMethod.__init__(self)
         self._init_partition(partition, finePrior)
         self._coarseProposal = coarseProposal
         self._fineKernel = fineKernel
@@ -190,27 +240,23 @@ class PartitionedSurrogateProposal(PartitionedProposalMixin, ProposalMethod):
     def density(self):
         return self._coarseProposal.density
 
-    @ProposalMethod.state.setter
-    def state(self, state):
-        ProposalMethod.state.fset(self, state)
-        self._coarseProposal.state = self._coarse_from(state)
-        self._fineKernel.state = self._fine_from(state)
-
-    def generate_proposal(self, rng):
-        coarseProposal = self._coarseProposal.generate_proposal(rng).proposal
-        fineProposal = self._fineKernel.generate_proposal(rng).proposal
+    def propose(self, state, rng):
+        coarse, fine = self._coarse_from(state), self._fine_from(state)
+        coarseTransition, rng = self._coarseProposal.propose(coarse, rng)
+        fineTransition, nextRng = self._fineKernel.propose(fine, rng)
+        coarseProposal = coarseTransition.proposed.parameter
+        fineProposal = fineTransition.proposed.parameter
+        # The blocks refer to different measures, so both corrections are
+        # taken relative to the Lebesgue measure.
+        logCorrection = (
+            coarseTransition.auxiliary["logCorrection"]
+            - log_reference_ratio(
+                self._coarseProposal.reference, coarse, coarseProposal
+            )
+            + fineTransition.auxiliary["logCorrection"]
+            - log_reference_ratio(self._fineKernel.reference, fine, fineProposal)
+        )
         fullProposal = self._merge(
-            coarseProposal.coordinate, fineProposal.coordinate, self._state)
-        return TransitionData(self._state, fullProposal)
-
-    def log_acceptance_correction(self, state, proposal):
-        coarseState = self._coarse_from(state)
-        coarseProposal = self._coarse_from(proposal)
-        fineState = self._fine_from(state)
-        fineProposal = self._fine_from(proposal)
-        finePriorDensity = self._pFinePrior.density
-        fineCorrection = -(finePriorDensity.evaluate_log(fineProposal)
-                           - finePriorDensity.evaluate_log(fineState))
-        coarseCorrection = self._coarseProposal.log_acceptance_correction(
-            coarseState, coarseProposal)
-        return coarseCorrection + fineCorrection
+            coarseProposal.coordinate, fineProposal.coordinate, state
+        )
+        return self.record(state, fullProposal, logCorrection), nextRng

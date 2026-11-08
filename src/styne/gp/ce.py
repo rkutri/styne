@@ -5,9 +5,7 @@ logger = logging.getLogger(__name__)
 
 from abc import ABC, abstractmethod
 from numpy import ndarray
-from numpy.linalg import norm
 from numpy.random import Generator
-from scipy.fft import fft2, ifft2, fftshift
 
 from styne.statistics.measure import ProbabilityMeasure
 
@@ -124,8 +122,20 @@ class CirculantEmbeddingEngine(ProbabilityMeasure, ABC):
     def _sample_field(self, eigenvalues: ndarray, rng: Generator) -> ndarray:
         """Draw a raw sample from the full extended field."""
 
-    def draw(self, rng: Generator) -> ndarray:
-        return self._sample_field(self._eigenvalues, rng)[:self._vertPerDim]
+    def sample(self, randomState) -> tuple[ndarray, object]:
+        """Draw with an explicit NumPy random state.
+
+        Circulant embedding is deliberately NumPy-only and rejects JAX and
+        PyTorch random states rather than silently transferring data.
+        """
+        if not isinstance(randomState, Generator):
+            raise TypeError(
+                "Circulant embedding supports only numpy.random.Generator "
+                "random states."
+            )
+        return self._sample_field(self._eigenvalues, randomState)[
+            :self._vertPerDim
+        ], randomState
 
 
 class CirculantEmbeddingEngine1D(CirculantEmbeddingEngine):
@@ -173,7 +183,7 @@ class CirculantEmbeddingEngine1D(CirculantEmbeddingEngine):
 
 class CirculantEmbeddingEngine2D(CirculantEmbeddingEngine):
     """
-    2D GP sampling via circulant embedding (`scipy.fft.fft2`). Returns a
+    2D GP sampling via circulant embedding (`numpy.fft.fft2`). Returns a
     single field.
 
     Parameters
@@ -203,26 +213,31 @@ class CirculantEmbeddingEngine2D(CirculantEmbeddingEngine):
             for j in range(nRed):
                 x = (i - (n_ext - 1)) * self._h
                 y = (j - (n_ext - 1)) * self._h
-                redCov[i, j] = cov_callable(norm([x, y]))
+                redCov[i, j] = cov_callable(np.sqrt(x * x + y * y))
 
         redCovTilde = np.zeros((2 * n_ext, 2 * n_ext))
         redCovTilde[1:2 * n_ext, 1:2 * n_ext] = redCov
-        redCovTilde = fftshift(redCovTilde)
+        redCovTilde = np.fft.fftshift(redCovTilde)
 
         N_sq = (2 * n_ext)**2
-        return (N_sq * ifft2(redCovTilde)).real
+        return (N_sq * np.fft.ifft2(redCovTilde)).real
 
     def _sample_field(self, eigenvalues: ndarray, rng: Generator) -> ndarray:
         nExt = eigenvalues.shape[0]
         coeff = np.sqrt(np.maximum(eigenvalues, 0.))
         xi = (rng.standard_normal((nExt, nExt))
               + 1.j * rng.standard_normal((nExt, nExt)))
-        z = fft2(coeff * xi) / np.sqrt(nExt**2)
+        z = np.fft.fft2(coeff * xi) / np.sqrt(nExt**2)
         return np.real(z)
 
-    def draw(self, rng: Generator) -> ndarray:
+    def sample(self, randomState) -> tuple[ndarray, object]:
+        if not isinstance(randomState, Generator):
+            raise TypeError(
+                "Circulant embedding supports only numpy.random.Generator "
+                "random states."
+            )
         n = self._vertPerDim
-        return self._sample_field(self._eigenvalues, rng)[:n, :n]
+        return self._sample_field(self._eigenvalues, randomState)[:n, :n], randomState
 
 
 class ApproximateCirculantEmbeddingEngine1D(CirculantEmbeddingEngine1D):

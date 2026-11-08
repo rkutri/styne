@@ -99,13 +99,13 @@ class TestBarkerAcceptance:
 # 2. Integration test: MRW on 2D standard Gaussian
 # ---------------------------------------------------------------------------
 
-def _run_mrw(acceptance, n_steps=5000, seed=42):
-    np.random.seed(seed)
+def run_mrw(acceptance, n_steps=5000, seed=42):
+    rng = np.random.default_rng(seed)
     target = StandardGaussian2D()
     propCov = IIDCovarianceMatrix(2, 0.5)
     diagnostics = AcceptanceRateDiagnostics()
     chain = MetropolisedRandomWalk(target, propCov, diagnostics,
-                                   acceptance=acceptance)
+                                   acceptance=acceptance, rng=rng)
 
     init = Vector(np.zeros(2))
     chain.run(n_steps, init)
@@ -117,29 +117,19 @@ def _run_mrw(acceptance, n_steps=5000, seed=42):
 
 class TestIntegration:
 
-    def test_standard_acceptance_rate(self):
-        _, rate = _run_mrw(StandardAcceptance())
+    @pytest.mark.parametrize('acceptanceType', [StandardAcceptance, BarkerAcceptance])
+    def test_mean_and_acceptance_rate(self, acceptanceType):
+        samples, rate = run_mrw(acceptanceType())
         assert rate > 0.0
-
-    def test_barker_acceptance_rate(self):
-        _, rate = _run_mrw(BarkerAcceptance())
-        assert rate > 0.0
-
-    def test_standard_mean(self):
-        samples, _ = _run_mrw(StandardAcceptance())
-        assert np.abs(samples.mean(axis=0)).max() < 0.5
-
-    def test_barker_mean(self):
-        samples, _ = _run_mrw(BarkerAcceptance())
         assert np.abs(samples.mean(axis=0)).max() < 0.5
 
     def test_post_hoc_replacement(self):
         """Verify that swapping acceptance post-construction works."""
-        np.random.seed(0)
+        rng = np.random.default_rng(0)
         target = StandardGaussian2D()
         propCov = IIDCovarianceMatrix(2, 0.5)
         diagnostics = AcceptanceRateDiagnostics()
-        chain = MetropolisedRandomWalk(target, propCov, diagnostics)
+        chain = MetropolisedRandomWalk(target, propCov, diagnostics, rng=rng)
 
         chain.acceptance = BarkerAcceptance()
         assert isinstance(chain.acceptance, BarkerAcceptance)
