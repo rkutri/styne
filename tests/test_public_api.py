@@ -52,7 +52,7 @@ EXPECTED_EXPORTS = {
         "HierarchicalBayesModelBuilder", "SGLMMHyperConditionalDensity",
         "SGLMMHyperConditional", "SGLMMLatentConditional",
         "MaternRangePCPrior", "MaternSigmaPCPrior", "JointMaternPCPrior",
-        "WelfordAccumulator",
+        "WelfordAccumulator", "FullCovarianceAccumulator",
     },
     "styne.mcmc": {
         "Adaptation", "NoAdaptation",
@@ -76,6 +76,7 @@ EXPECTED_EXPORTS = {
         "integrated_autocorrelation", "multichain_ess_per_iter",
         "RWTunerConfig", "LangevinTunerConfig", "MRWTuner", "MALATuner",
         "PCNTuner", "PMALATuner", "infer_init", "RobbinsMonroAdaptation",
+        "FullCovarianceAdaptation",
         "LogScalingWrapper",
         "ProductWrapper", "NotPositiveDefinite", "bisection", "NullProgress",
         "TqdmProgress", "make_reporter",

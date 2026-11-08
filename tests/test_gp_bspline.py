@@ -73,6 +73,7 @@ class TestBSpline1DGPMeasure:
         self.gp = GaussianProcess.bspline(cov1d(), self.bsp)
 
     def test_measure_dimension(self):
+        assert self.gp.measure.density.domainDimension == 6
         assert self.gp.measure.covariance.to_dense().shape == (6, 6)
 
     def test_measure_is_gaussian(self):
@@ -93,6 +94,7 @@ class TestBSpline2DGPMeasure:
         self.dim = 25
 
     def test_measure_dimension(self):
+        assert self.gp.measure.density.domainDimension == self.dim
         assert self.gp.measure.covariance.to_dense().shape == (self.dim, self.dim)
 
     def test_measure_is_gaussian(self):
@@ -124,7 +126,7 @@ class TestBSpline1DGPCorrectness:
             for _ in range(self.nSamples)
         ])
 
-    def test_zero_mean(self):
+    def test_sample_moments(self):
         coeffs = self._draw_coefficients()
         empiricalMean = coeffs.mean(axis=0)
         marginalStd = np.sqrt(
@@ -133,8 +135,6 @@ class TestBSpline1DGPCorrectness:
         stdErr = marginalStd / np.sqrt(self.nSamples)
         assert np.all(np.abs(empiricalMean) < 4. * stdErr)
 
-    def test_coeff_covariance(self):
-        coeffs = self._draw_coefficients()
         empiricalCov = np.cov(coeffs.T)
         trueCov = self.gp.measure.covariance.to_dense()
         frobTrue = np.linalg.norm(trueCov, 'fro')
@@ -175,7 +175,7 @@ class TestBSpline2DGPCorrectness:
             for _ in range(self.nSamples)
         ])
 
-    def test_zero_mean(self):
+    def test_sample_moments(self):
         coeffs = self._draw_coefficients()
         empiricalMean = coeffs.mean(axis=0)
         marginalStd = np.sqrt(
@@ -184,8 +184,6 @@ class TestBSpline2DGPCorrectness:
         stdErr = marginalStd / np.sqrt(self.nSamples)
         assert np.all(np.abs(empiricalMean) < 3. * stdErr)
 
-    def test_coeff_covariance(self):
-        coeffs = self._draw_coefficients()
         empiricalCov = np.cov(coeffs.T)
         trueCov = self.gp.measure.covariance.to_dense()
         frobTrue = np.linalg.norm(trueCov, 'fro')

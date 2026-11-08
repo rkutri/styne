@@ -54,21 +54,17 @@ class TestBarkerInvariantMeasure:
     MEAN_TOL = 0.15
     VAR_TOL = 0.20
 
-    @pytest.mark.parametrize("acceptance_cls",
+    @pytest.mark.parametrize("acceptanceType",
                              [StandardAcceptance, BarkerAcceptance])
-    def test_mean_matches_target(self, acceptance_cls):
-        samples, targetMean, _ = run_mrw_chain(acceptance_cls)
+    def test_moments_match_target(self, acceptanceType):
+        samples, targetMean, targetVar = run_mrw_chain(acceptanceType)
         assert abs(np.mean(samples) - targetMean) < self.MEAN_TOL, (
-            f"{acceptance_cls.__name__}: empirical mean {np.mean(samples):.3f} "
+            f"{acceptanceType.__name__}: empirical mean {np.mean(samples):.3f} "
             f"deviates from target {targetMean} by more than {self.MEAN_TOL}"
         )
 
-    @pytest.mark.parametrize("acceptance_cls",
-                             [StandardAcceptance, BarkerAcceptance])
-    def test_variance_matches_target(self, acceptance_cls):
-        samples, _, targetVar = run_mrw_chain(acceptance_cls)
         assert abs(np.var(samples) - targetVar) < self.VAR_TOL, (
-            f"{acceptance_cls.__name__}: empirical var {np.var(samples):.3f} "
+            f"{acceptanceType.__name__}: empirical var {np.var(samples):.3f} "
             f"deviates from target {targetVar} by more than {self.VAR_TOL}"
         )
 

@@ -360,11 +360,10 @@ class TestPCNInvariantMeasure:
         self.trajectory = np.array(sampler.chain.trajectory)
         self.muPost, self.covPost = self._analytical_posterior()
 
-    def test_posterior_mean(self):
+    def test_posterior_moments(self):
         samples = self.trajectory[self.BURNIN:]
         assert np.allclose(samples.mean(axis=0), self.muPost, atol=0.1)
 
-    def test_posterior_covariance(self):
         rawSamples = self.trajectory[self.BURNIN:]
         iat = integrated_autocorrelation(rawSamples, method='max')
         thinning = max(1, int(iat)) if np.isfinite(iat) else 1

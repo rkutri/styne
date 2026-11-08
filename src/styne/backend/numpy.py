@@ -193,6 +193,10 @@ class NumPyBackend(Backend):
     def eigh(self, matrix):
         return np.linalg.eigh(matrix)
 
+    @property
+    def factorisationErrors(self):
+        return (np.linalg.LinAlgError,)
+
     def solve(self, matrix, rightHandSide):
         return np.linalg.solve(matrix, rightHandSide)
 

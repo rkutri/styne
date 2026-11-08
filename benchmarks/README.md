@@ -4,6 +4,10 @@
 - `dartlocalisation.py` compares localised and unlocalised DART.
 - `dartvisualisation.py` plots the latest production CSVs.
 - `covariancescaling.py` compares cached covariance rescaling with a Git baseline.
+- `covariancepreparation.py` compares reconstruction from a raw factor with
+  retaining a covariance object during proposal preparation. Run it with
+  `python benchmarks/covariancepreparation.py`. It reports microseconds per
+  preparation at three dimensions; these are not whole-chain timings.
 
 Run `python benchmarks/covariancescaling.py --baseline b2e0cad` to report
 median rescaling time and Cholesky call counts for a 64-dimensional covariance.

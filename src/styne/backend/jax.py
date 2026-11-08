@@ -1,6 +1,9 @@
+from functools import wraps
+
 import jax
 import jax.numpy as jnp
 import jax.scipy as jsp
+from jax.experimental import checkify
 
 from styne.backend.interface import (
     ArrayNamespace,
@@ -83,6 +86,19 @@ def register_parameter_containers():
             auxiliary=children[4],
         ),
     )
+    from styne.statistics.covariance import (
+        DenseCovarianceMatrix, DiagonalCovarianceMatrix, IIDCovarianceMatrix,
+    )
+
+    for covarianceType in (
+            DenseCovarianceMatrix, DiagonalCovarianceMatrix, IIDCovarianceMatrix):
+        jax.tree_util.register_pytree_node(
+            covarianceType,
+            lambda covariance: covariance._tree_flatten(),
+            lambda backend, children, cls=covarianceType: cls._restore(
+                backend, *children
+            ),
+        )
 
 
 class JAXNamespace(ArrayNamespace):
@@ -293,10 +309,12 @@ class JAXBackend(Backend):
         return jax.vjp(function, *primals)
 
     def compile(self, function, **options):
-        return jax.jit(function, **options)
+        """Compile with covariance checks reported at the Python call boundary."""
+        return self._checked_result(jax.jit(checkify.checkify(function), **options))
 
     def vectorize(self, function, *, inAxes=0, outAxes=0):
-        return jax.vmap(function, in_axes=inAxes, out_axes=outAxes)
+        mapped = jax.vmap(function, in_axes=inAxes, out_axes=outAxes)
+        return self._checked_result(checkify.checkify(mapped))
 
     def map(self, function, values):
         return jax.lax.map(function, values)
@@ -322,9 +340,39 @@ class JAXBackend(Backend):
     def cond(
             self, predicate, trueFunction,
             falseFunction, operand):
-        return jax.lax.cond(
-            predicate, trueFunction, falseFunction, operand
-        )
+        def choose(predicate, operand):
+            return jax.lax.cond(predicate, trueFunction, falseFunction, operand)
+
+        if any(isinstance(value, jax.core.Tracer) for value in
+               jax.tree_util.tree_leaves((predicate, operand))):
+            return choose(predicate, operand)
+        return self._checked_result(checkify.checkify(choose))(predicate, operand)
+
+    def check_positive_definite(self, predicate, message):
+        if isinstance(predicate, jax.core.Tracer):
+            checkify.debug_check(predicate, f'NotPositiveDefinite: {message}')
+        else:
+            super().check_positive_definite(predicate, message)
+
+    @staticmethod
+    def _checked_result(function):
+        @wraps(function)
+        def checked(*args, **kwargs):
+            error, result = function(*args, **kwargs)
+            if any(isinstance(value, jax.core.Tracer) for value in
+                   jax.tree_util.tree_leaves(error)):
+                checkify.check_error(error)
+            else:
+                message = error.get()
+                if message is not None:
+                    # Preserve the exception type across the compiled boundary.
+                    marker = 'NotPositiveDefinite: '
+                    if marker in message:
+                        from styne.utility.exceptions import NotPositiveDefinite
+                        raise NotPositiveDefinite(message.replace(marker, '', 1))
+                    error.throw()
+            return result
+        return checked
 
     def cholesky(self, matrix):
         return jnp.linalg.cholesky(matrix)
@@ -367,7 +415,13 @@ class JAXBackend(Backend):
         return jnp.moveaxis(result, -1, axis)
 
     def scan(self, function, initialValue, inputs, *, length=None):
-        return jax.lax.scan(function, initialValue, inputs, length=length)
+        def run(initialValue, inputs):
+            return jax.lax.scan(function, initialValue, inputs, length=length)
+
+        if any(isinstance(value, jax.core.Tracer) for value in
+               jax.tree_util.tree_leaves((initialValue, inputs))):
+            return run(initialValue, inputs)
+        return self._checked_result(checkify.checkify(run))(initialValue, inputs)
 
     @staticmethod
     def _normalise_shape(shape):

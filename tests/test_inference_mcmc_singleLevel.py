@@ -1,153 +1,84 @@
-import pytest
-import tests.testSetup as setup
-
 import numpy as np
+import pytest
 
-from numpy.random import seed
+from styne.mcmc.method.mrw import MRWFactory
+from styne.mcmc.method.pcn import PCNFactory
+from styne.statistics.bayes import UnnormalisedPosterior
 from styne.statistics.covariance import IIDCovarianceMatrix, DiagonalCovarianceMatrix
 from styne.statistics.gaussian import Gaussian
 from styne.statistics.likelihood import RegressionLikelihood
 from styne.statistics.response import GaussianResponse
-from styne.mcmc.method.mrw import MRWFactory
-from styne.mcmc.method.pcn import PCNFactory
-from styne.statistics.bayes import UnnormalisedPosterior
+from tests.testSetup import (
+    LotkaVolterraParameter, LotkaVolterraSolver, generate_synthetic_data,
+)
 
 
-def check_mean(means, trueParam):
-
-    MTOL = 0.5
-
-    meanState = means[0]
-    posteriorMean = means[1]
-
-    assert np.allclose(
-        posteriorMean.coordinate, trueParam.coordinate, atol=MTOL)
-    assert np.allclose(
-        meanState.coordinate, trueParam.coordinate, atol=2. * MTOL)
-
-
-# define forward problem
-config = {
-    'T': 6.,
-    'alpha': 0.8,
-    'gamma': 0.4,
-    'nData': 5,
-    'dataDim': 2,
-    'solver': 'LSODA',
-    'rtol': 1e-4}
-design = np.array([
-    np.array([0.1, 0.9]),
-    np.array([0.5, 0.5]),
-    np.array([1., 0.5]),
-    np.array([0.5, 1.]),
-    np.array([2.5, 1.5])
-])
-
-PDIM = 2
-
-solver = setup.LotkaVolterraSolver(design, config)
-
-# define problem parameters
-groundTruth = setup.LotkaVolterraParameter.from_interpolation(
-    np.array([0.4, 0.6]))
-
-dataNoiseVariance = 0.05
-data = setup.generate_synthetic_data(groundTruth, solver, dataNoiseVariance)
-
-# start with a prior centred around the true parameter coefficient
-priorMean = setup.LotkaVolterraParameter.from_coefficient(np.zeros(2))
-
-priorMargVar = 0.02
-priorCovariance = IIDCovarianceMatrix(PDIM, priorMargVar)
-
-# set up prior: Gaussian(covariance, mean)
-prior = Gaussian(priorCovariance, priorMean)
-
-# define a noise model: Gaussian with no mean (set automatically by likelihood)
-noiseMVar = dataNoiseVariance
-noiseCov = IIDCovarianceMatrix(PDIM, noiseMVar)
-noiseModel = Gaussian(noiseCov)
-
-# define the statistical inverse problem
-likelihood = RegressionLikelihood(
-    data, solver, GaussianResponse(IIDCovarianceMatrix(10, noiseMVar)))
-statModel = UnnormalisedPosterior(prior, likelihood)
+@pytest.fixture
+def inverse_problem():
+    config = {
+        'T': 6.0, 'alpha': 0.8, 'gamma': 0.4, 'nData': 5,
+        'dataDim': 2, 'solver': 'LSODA', 'rtol': 1e-4,
+    }
+    design = np.array([[0.1, 0.9], [0.5, 0.5], [1.0, 0.5],
+                       [0.5, 1.0], [2.5, 1.5]])
+    solver = LotkaVolterraSolver(design, config)
+    truth = LotkaVolterraParameter.from_interpolation(np.array([0.4, 0.6]))
+    noiseVariance = 0.05
+    priorVariance = 0.02
+    data = generate_synthetic_data(
+        truth, solver, noiseVariance, rng=np.random.default_rng(16)
+    )
+    prior = Gaussian(
+        IIDCovarianceMatrix(2, priorVariance), LotkaVolterraParameter(np.zeros(2))
+    )
+    likelihood = RegressionLikelihood(
+        data, solver, GaussianResponse(IIDCovarianceMatrix(10, noiseVariance))
+    )
+    return (
+        UnnormalisedPosterior(prior, likelihood), solver, data,
+        noiseVariance, priorVariance,
+    )
 
 
-@pytest.mark.parametrize("mcmcProposal", ["iid", "indep"])
-def test_mrw(mcmcProposal):
-
-    seed(16)
-
-    chainBuilder = MRWFactory()
-
-    if (mcmcProposal == 'iid'):
-
-        proposalMargVar = 0.02
-        proposalCov = IIDCovarianceMatrix(PDIM, proposalMargVar)
-
-    elif (mcmcProposal == 'indep'):
-
-        proposalMargVar = np.array([0.02, 0.01])
-        proposalCov = DiagonalCovarianceMatrix(proposalMargVar)
-
+@pytest.mark.parametrize('method', ['iid', 'diagonal', 'pcn'])
+def test_ode_transition_matches_explicit_posterior(inverse_problem, method):
+    target, solver, data, noiseVariance, priorVariance = inverse_problem
+    if method == 'pcn':
+        builder = PCNFactory()
+        builder.beta = 0.2
     else:
-        raise Exception("Proposal " + mcmcProposal + " not implemented")
+        builder = MRWFactory()
+        builder.proposalCovariance = (
+            IIDCovarianceMatrix(2, 0.02) if method == 'iid'
+            else DiagonalCovarianceMatrix(np.array([0.02, 0.01]))
+        )
+    builder.target = target
+    rng = np.random.default_rng(17)
+    builder.rng = rng
+    sampler = builder.create()
+    current = sampler.initial_state(LotkaVolterraParameter(np.array([-0.6, -0.3])))
 
-    chainBuilder.proposalCovariance = proposalCov
-    chainBuilder.target = statModel
+    for _ in range(5):
+        nextState, transition, rng = sampler.step(current, rng)
+        likelihoods, posteriors = [], []
+        for evaluated in (transition.current, transition.proposed):
+            parameter = evaluated.parameter
+            residual = (data.measurement - solver(parameter)).ravel()
+            logLikelihood = -0.5 * np.dot(residual, residual) / noiseVariance
+            coordinate = parameter.coordinate
+            logPrior = -0.5 * np.dot(coordinate, coordinate) / priorVariance
+            assert evaluated.logDensity == pytest.approx(logLikelihood)
+            assert target.evaluate_log(parameter) == pytest.approx(
+                logLikelihood + logPrior
+            )
+            likelihoods.append(logLikelihood)
+            posteriors.append(logLikelihood + logPrior)
 
-    mcmc = chainBuilder.create()
-
-    # run mcmc
-    nSteps = 200
-    initState = setup.LotkaVolterraParameter.from_coefficient(
-        np.array([-0.6, -0.3]))
-    mcmc.run(nSteps, initState)
-
-    states = mcmc.chain.trajectory
-
-    burnIn = 200
-    thinningStep = 5
-
-    mcmcSamples = states[burnIn::thinningStep]
-    meanState = setup.LotkaVolterraParameter.from_coefficient(
-        np.mean(states, axis=0))
-    posteriorMean = setup.LotkaVolterraParameter.from_coefficient(
-        np.mean(mcmcSamples, axis=0))
-
-    check_mean([meanState, posteriorMean], groundTruth)
-
-
-def test_pcn():
-
-    seed(17)
-
-    chainBuilder = PCNFactory()
-    chainBuilder.beta = 0.2
-    chainBuilder.target = statModel
-
-    mcmc = chainBuilder.create()
-
-    # run mcmc
-    nSteps = 200
-    initState = setup.LotkaVolterraParameter.from_coefficient(
-        np.array([-0.6, -0.3]))
-    mcmc.run(nSteps, initState)
-
-    states = mcmc.chain.trajectory
-
-    burnIn = 50
-    thinningStep = 5
-
-    mcmcSamples = states[burnIn::thinningStep]
-    meanState = setup.LotkaVolterraParameter.from_coefficient(
-        np.mean(states, axis=0))
-    posteriorMean = setup.LotkaVolterraParameter.from_coefficient(
-        np.mean(mcmcSamples, axis=0))
-
-    check_mean([meanState, posteriorMean], groundTruth)
-
-
-if __name__ == "__main__":
-    pytest.main()
+        values = likelihoods if method == 'pcn' else posteriors
+        expected = min(0.0, values[1] - values[0])
+        assert transition.logAcceptanceProbability == pytest.approx(expected)
+        selected = transition.proposed if transition.outcome else transition.current
+        np.testing.assert_array_equal(
+            nextState.parameter.coordinate, selected.parameter.coordinate
+        )
+        current = nextState

@@ -1,4 +1,4 @@
-"""Robbins-Monro proposal-scale adaptation for Metropolis-Hastings."""
+"""Proposal-scale and full covariance adaptation for Metropolis-Hastings."""
 from typing import Any, NamedTuple
 
 import numpy as np
@@ -7,7 +7,8 @@ from styne.backend import infer_backend
 from styne.mcmc.adaptation import Adaptation
 from styne.mcmc.method.mrw import MRWProposal
 from styne.mcmc.method.pcn import PCNProposal
-from styne.statistics.covariance import IIDCovarianceMatrix
+from styne.statistics.covariance import DenseCovarianceMatrix, IIDCovarianceMatrix
+from styne.statistics.welford import FullCovarianceAccumulator
 
 
 class RobbinsMonroState(NamedTuple):
@@ -88,3 +89,70 @@ class RobbinsMonroAdaptation(Adaptation):
             logScale = namespace.where(active, logScale, state.logScale)
             stepCount = namespace.where(active, stepCount, state.stepCount)
         return RobbinsMonroState(logScale, stepCount, state.maxLogScale)
+
+
+class FullCovarianceAdaptationState(NamedTuple):
+    """Empirical moments and the retained proposal covariance."""
+
+    moments: Any
+    covariance: Any
+
+    @property
+    def cholFactor(self):
+        return self.covariance.to_cholesky()
+
+
+class FullCovarianceAdaptation(Adaptation):
+    """Learn one MRW chain's covariance, factorising only at scheduled updates.
+
+    Every retained position updates the moments, including rejection repeats.
+    After at least two observations, every 'interval'-th transition replaces
+    the proposal covariance by the sample covariance plus 'nugget * I'.
+    Adaptation continues until the sampler's optional 'freeze_adaptation'.
+    """
+
+    def __init__(self, interval=10, nugget=0.01):
+        if isinstance(interval, bool) or not isinstance(interval, int) or interval < 1:
+            raise ValueError("interval must be a positive integer.")
+        if not np.isfinite(nugget) or nugget <= 0:
+            raise ValueError("nugget must be finite and positive.")
+        self._interval = interval
+        self._nugget = nugget
+
+    def initial_state(self, parameter, proposalMethod):
+        if not isinstance(proposalMethod, MRWProposal):
+            raise TypeError("Full covariance adaptation requires an MRW proposal.")
+        moments = FullCovarianceAccumulator.initial_record(parameter.coordinate)
+        factor = proposalMethod.covariance.to_cholesky()
+        backend = infer_backend(parameter.coordinate, factor)
+        metadata = backend.metadata(parameter.coordinate)
+        factor = backend.asarray(factor, dtype=metadata.dtype, device=metadata.device)
+        covariance = DenseCovarianceMatrix.from_cholesky(factor)
+        return FullCovarianceAdaptationState(moments, covariance)
+
+    def prepare_proposal(self, proposalMethod, state):
+        return MRWProposal(state.covariance)
+
+    def update_state(self, state, nextState, transitionData):
+        moments = FullCovarianceAccumulator.update_record(
+            state.moments, nextState.parameter.coordinate,
+        )
+        backend = infer_backend(moments.m2)
+        metadata = backend.metadata(moments.m2)
+        due = (moments.nData >= 2) & (moments.nData % self._interval == 0)
+
+        def refactor(operand):
+            nData, m2, _ = operand
+            denominator = backend.asarray(
+                nData - 1,
+                dtype=metadata.dtype, device=metadata.device,
+            )
+            covariance = m2 / denominator
+            return DenseCovarianceMatrix(covariance, nugget=self._nugget)
+
+        # A conditional keeps Cholesky inside the scheduled branch under JAX.
+        covariance = backend.cond(
+            due, refactor, lambda operand: operand[2],
+            (moments.nData, moments.m2, state.covariance),
+        )
+        return FullCovarianceAdaptationState(moments, covariance)

@@ -25,14 +25,6 @@ class ExplicitForwardMap(ForwardMap):
 def test_forward_map_public_exports():
     assert styne.ForwardMap is ForwardMap
     assert ForwardMap is DeepForwardMap
-    assert styne.__all__ == [
-        "enable_logging",
-        "__version__",
-        "ForwardMap",
-        "DifferentiableForwardMap",
-        "Parameter",
-        "MetropolisHastings",
-    ]
 
 
 def test_prepare_replaces_interpolate():

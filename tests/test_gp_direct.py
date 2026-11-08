@@ -118,24 +118,18 @@ class TestDirectGPCorrectness:
     def test_measure_is_gaussian(self):
         assert isinstance(self.gp.measure, Gaussian)
 
-    def test_sampler_shape(self):
+    def test_sample_moments(self):
         samples = self._draw_samples()
         assert samples.shape == (self.nSamples, self.n)
 
-    def test_zero_mean(self):
-        samples = self._draw_samples()
         empiricalMean = samples.mean(axis=0)
         stdErr = np.sqrt(self.variance / self.nSamples)
         assert np.all(np.abs(empiricalMean) < 3. * stdErr)
 
-    def test_marginal_variance(self):
-        samples = self._draw_samples()
         empiricalVar = samples.var(axis=0)
         relErr = np.abs(empiricalVar - self.variance) / self.variance
         assert np.all(relErr < 0.3)
 
-    def test_sample_covariance(self):
-        samples = self._draw_samples()
         empiricalCov = np.cov(samples.T)
         trueCov = self.gp.expansion.shapeCovariance.to_dense()
         frobTrue = np.linalg.norm(trueCov, 'fro')

@@ -85,8 +85,7 @@ def test_mrw_moments(dim, kappa):
 
 @pytest.mark.parametrize("dim", [1, 2])
 @pytest.mark.parametrize("kappa", [1, 5])
-@pytest.mark.parametrize("progress", [False, True])
-def test_mrw_density(dim, kappa, progress, capsys):
+def test_mrw_density(dim, kappa):
 
     # setup target density
     tgtMean = Vector(np.zeros(dim))
@@ -108,15 +107,7 @@ def test_mrw_density(dim, kappa, progress, capsys):
     # run chain
     nSteps = dim * int(kappa) * int(3000)
     initState = Vector(np.ones(dim) * (-1.))
-    mcmc.run(nSteps, initState, progress=progress)
-    
-    captured = capsys.readouterr()
-    if progress:
-        assert len(captured.err) > 0, "Expected progress bar output in stderr"
-    else:
-        assert len(captured.err) == 0, (
-            "Expected no progress bar output when progress=False"
-        )
+    mcmc.run(nSteps, initState)
 
     states = np.array(mcmc.chain.trajectory)
 
@@ -152,3 +143,19 @@ def test_mrw_density(dim, kappa, progress, capsys):
     # compute relative error
     error = norm(densityEst - targetDensity) / norm(targetDensity)
     assert error < relativeTolerance
+
+
+def test_progress_preserves_trajectory(capsys):
+    trajectories = []
+    for progress in (False, True):
+        builder = MRWFactory()
+        builder.target = GaussianTargetDensity(Vector(np.zeros(2)), np.eye(2))
+        builder.proposalCovariance = IIDCovarianceMatrix(2, 0.5)
+        builder.rng = default_rng(1112)
+        sampler = builder.create()
+        sampler.run(10, Vector(np.zeros(2)), progress=progress)
+
+        assert bool(capsys.readouterr().err) is progress
+        trajectories.append(np.array(sampler.chain.trajectory))
+
+    np.testing.assert_array_equal(trajectories[0], trajectories[1])
