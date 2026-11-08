@@ -158,7 +158,7 @@ def test_surrogate_decomposition():
         density_obj.location = loc
         full_eval = density_obj.evaluate_log(y)
         surr_eval = density_obj.evaluate_log_surrogate(y)
-        reg_eval = density_obj._regGaussian.density.evaluate_log(y)
+        reg_eval = density_obj.log_localisation(y)
         from math import isclose
         assert isclose(full_eval - surr_eval, reg_eval, rel_tol=1e-10)
 

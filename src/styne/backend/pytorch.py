@@ -428,6 +428,9 @@ class PyTorchBackend(Backend):
     def cholesky(self, matrix):
         return torch.linalg.cholesky(matrix)
 
+    def eigh(self, matrix):
+        return torch.linalg.eigh(matrix)
+
     @property
     def factorisationErrors(self):
         return (torch.linalg.LinAlgError,)

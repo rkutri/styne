@@ -316,6 +316,27 @@ class JAXBackend(Backend):
         mapped = jax.vmap(function, in_axes=inAxes, out_axes=outAxes)
         return self._checked_result(checkify.checkify(mapped))
 
+    def map(self, function, values):
+        return jax.lax.map(function, values)
+
+    def split_random_state(self, randomState, count):
+        keys = jax.random.split(randomState, count + 1)
+        return keys[:-1], keys[-1]
+
+    def is_tracing(self, value):
+        return isinstance(value, jax.core.Tracer)
+
+    def zeros_like_output(self, function, *args):
+        shape = jax.eval_shape(function, *args)
+        return jax.tree_util.tree_map(
+            lambda leaf: jnp.zeros(leaf.shape, leaf.dtype), shape
+        )
+
+    def switch(self, index, branches, *operands):
+        if self.is_tracing(index):
+            return jax.lax.switch(index, branches, *operands)
+        return super().switch(index, branches, *operands)
+
     def cond(
             self, predicate, trueFunction,
             falseFunction, operand):
@@ -355,6 +376,9 @@ class JAXBackend(Backend):
 
     def cholesky(self, matrix):
         return jnp.linalg.cholesky(matrix)
+
+    def eigh(self, matrix):
+        return jnp.linalg.eigh(matrix)
 
     def solve(self, matrix, rightHandSide):
         return jnp.linalg.solve(matrix, rightHandSide)

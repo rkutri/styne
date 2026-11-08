@@ -89,6 +89,14 @@ class MCMCSampler(ABC):
         """Construct pure-transition state from an initial parameter."""
         return parameter
 
+    def state_at(self, current, saved):
+        """Move saved numerical history to the current position for composition."""
+        if isinstance(saved, Parameter):
+            return parameter_of(current)
+        raise NotImplementedError(
+            f"{type(self).__name__} must implement state_at for structured state."
+        )
+
     def step(self, currentState, rng):
         """Return next numerical state, transition data, and random state."""
         raise NotImplementedError

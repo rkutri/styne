@@ -43,6 +43,7 @@ EXPECTED_EXPORTS = {
         "RadonNikodym", "GaussianDensity", "Gaussian",
         "DiagonalCovarianceMatrix", "IIDCovarianceMatrix",
         "DenseCovarianceMatrix", "StationaryCovariance",
+        "PrecisionCovarianceMatrix", "SemidefiniteCovarianceMatrix",
         "ExponentialCovariance1D", "MaternCovariance1D",
         "MaternCovariance2D", "Data", "DiracMeasure", "Binomial", "Poisson",
         "GaussianResponse", "PoissonResponse", "BinomialResponse",
@@ -55,6 +56,7 @@ EXPECTED_EXPORTS = {
     },
     "styne.mcmc": {
         "Adaptation", "NoAdaptation",
+        "Mixture", "GaussianDARTProposal", "NormalisingRatioEstimator",
         "MetropolisHastings", "MCMCSampler", "Trajectory", "ProposalMethod", "MHFactory",
         "Annotator", "AcceptanceProbability", "ChainDiagnostics", "Chain",
         "GibbsChain", "EvaluatedState", "TransitionData", "DART",

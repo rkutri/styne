@@ -205,12 +205,31 @@ class Backend(ABC):
     def vectorize(self, function: Callable, *, inAxes=0, outAxes=0):
         self._unsupported("vectorisation")
 
+    def map(self, function: Callable, values):
+        self._unsupported("mapped transitions")
+
+    def split_random_state(self, randomState, count):
+        self._unsupported("independent random states")
+
+    def is_tracing(self, value):
+        return False
+
+    def zeros_like_output(self, function: Callable, *args):
+        self._unsupported("abstract output shapes")
+
+    def switch(self, index, branches, *operands):
+        """Select one scalar branch; vectorising dispatch may evaluate others."""
+        return branches[int(index)](*operands)
+
     def cond(
             self, predicate, trueFunction: Callable,
             falseFunction: Callable, operand):
         self._unsupported("control flow")
 
     def cholesky(self, matrix):
+        raise NotImplementedError
+
+    def eigh(self, matrix):
         raise NotImplementedError
 
     @property

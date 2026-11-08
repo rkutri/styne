@@ -3,6 +3,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from styne.parameter.parameter import Parameter
+from styne.statistics.interface import RadonNikodymInterface
 
 MISSING = object()
 
@@ -10,6 +11,17 @@ MISSING = object()
 def parameter_of(state):
     """The parameter of a numerical chain state."""
     return getattr(state, "parameter", state)
+
+
+def stored_log_density(density, state):
+    """Reuse a compatible cached target evaluation or evaluate at the position."""
+    value = getattr(state, "logDensity", None)
+    if value is not None:
+        return value
+    parameter = parameter_of(state)
+    if isinstance(density, RadonNikodymInterface):
+        return density.derivative.evaluate_log(parameter)
+    return density.evaluate_log(parameter)
 
 
 @dataclass(frozen=True)

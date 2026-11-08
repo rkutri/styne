@@ -53,6 +53,10 @@ class SurrogateTransitionMeasure(AbsolutelyContinuousProbabilityMeasure):
         return self._mcmc.chain
 
     @property
+    def rootLength(self) -> int:
+        return self._nChain
+
+    @property
     def subchainLength(self) -> int:
         return self._nChain
 

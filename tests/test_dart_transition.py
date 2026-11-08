@@ -87,7 +87,7 @@ def test_dart_correction_matches_tempered_surrogate_and_ratio_estimate(
     )
     proposed = transition.proposed.parameter
     logRatio = proposal.correction.log_ratio_estimate(
-        state, proposed, trajectory
+        state, proposed, trajectory, penaltyMetric=density.penaltyMetric
     )
     expected = -(
         density.evaluate_log_surrogate(proposed)

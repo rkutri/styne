@@ -18,7 +18,7 @@ class RadonNikodym(RadonNikodymInterface):
     Parameters
     ----------
     reference : AbsolutelyContinuousProbabilityMeasure
-        Reference measure.
+        Reference measure, or None for Lebesgue measure.
     derivative : DensityInterface
         The Radon-Nikodym derivative.
     """
@@ -28,7 +28,8 @@ class RadonNikodym(RadonNikodymInterface):
                  derivative: DensityInterface
                  ):
 
-        if not isinstance(reference, AbsolutelyContinuousProbabilityMeasure):
+        if reference is not None and not isinstance(
+                reference, AbsolutelyContinuousProbabilityMeasure):
             raise TypeError(
                 "reference must be an AbsolutelyContinuousProbabilityMeasure."
             )
@@ -43,6 +44,14 @@ class RadonNikodym(RadonNikodymInterface):
 
     def with_derivative(self, derivative):
         return type(self)(self._reference, derivative)
+
+    def rebased(self, reference):
+        """Express the same density relative to a different reference measure."""
+        from styne.utility.densityarithmetic import LogScalingWrapper, ProductWrapper
+        factors = [self._derivative, LogScalingWrapper(reference.density, -1.0)]
+        if self._reference is not None:
+            factors.append(self._reference.density)
+        return RadonNikodym(reference, ProductWrapper(factors))
 
     @property
     def domainType(self):
@@ -61,8 +70,10 @@ class RadonNikodym(RadonNikodymInterface):
         return self._reference
 
     def evaluate_log(self, parameter: Parameter):
-        return (self._derivative.evaluate_log(parameter)
-                + self._reference.density.evaluate_log(parameter))
+        value = self._derivative.evaluate_log(parameter)
+        if self._reference is None:
+            return value
+        return value + self._reference.density.evaluate_log(parameter)
 
     def evaluate_log_gradient(self, parameter: Parameter):
         """Sum of reference-density gradient and derivative gradient.
@@ -70,6 +81,8 @@ class RadonNikodym(RadonNikodymInterface):
         Both components must expose an ``evaluate_log_gradient`` method.
         Raises RuntimeError if either is non-differentiable.
         """
+        if self._reference is None:
+            return self._derivative.evaluate_log_gradient(parameter)
         ref_density = self._reference.density
 
         if not callable(getattr(ref_density, "evaluate_log_gradient", None)):

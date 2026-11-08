@@ -1,51 +1,56 @@
-import copy
 import numpy as np
 
 from styne.backend import infer_backend
+from styne.mcmc.localised import apply_metric
 from styne.parameter.parameter import Parameter
 
 
-def log_dot_product_weights(gamma, samples, x, z, spectralWeights=None):
-    """Raw IS log-weights for the regularisation ratio."""
+def log_dot_product_weights(penaltyMetric, samples, x, z, spectralWeights=None):
+    """Raw IS log-weights (v - (x + z)/2)^T B (x - z) of the ratio.
+
+    They are the penalty differences between the localisations at z and x,
+    where a number gamma as the penalty metric B stands for gamma I.
+    """
     backend = infer_backend(samples)
     mid = 0.5 * (x + z)
-    diff = x - z
+    difference = x - z
     if spectralWeights is not None:
-        diff = spectralWeights**2 * diff
-    return gamma * backend.namespace.sum((samples - mid) * diff, axis=-1)
+        difference = spectralWeights ** 2 * difference
+    return backend.namespace.sum(
+        (samples - mid) * apply_metric(penaltyMetric, difference), axis=-1
+    )
 
 
-class RatioEstimator:
+class NormalisingRatioEstimator:
     """
-    Normalising constant ratio estimator for DART.
+    Normalising-ratio estimator for DART.
 
-    Estimates log(N_z / N_x) from retained states of localised surrogate
-    trajectories. Importance sampling and geometric bridge estimation require
-    at least one state. The second-order cumulant approximation requires two
-    states because it estimates a sample variance.
+    Estimates log(N_z / N_x) from retained states of the root chains.
+    Importance sampling and geometric bridge estimation require at least one
+    state. The Gaussian estimator, a second-order cumulant approximation,
+    requires two states because it estimates a sample variance.
 
     Parameters
     ----------
-    surrogateMeasure : LocalisedSurrogateTransitionMeasure
-        Surrogate measure whose trajectories are used in estimation.
     burnin : int
         Number of leading non-terminal trajectory states to discard.
     thinning : int
         Keep every thinning-th state after burnin.
     type : str
-        One of 'is', 'bridge', or 'cumulant'. Defaults to 'cumulant'.
+        One of 'importance', 'bridge', or 'gaussian'. Defaults to 'gaussian'.
     """
 
     def __init__(
         self,
-        surrogateMeasure,
-        burnin: int,
-        thinning: int,
-        type: str = 'cumulant'
+        burnin: int = 0,
+        thinning: int = 1,
+        type: str = 'gaussian'
     ):
-        if type not in ('is', 'bridge', 'cumulant'):
+        type = {'is': 'importance', 'cumulant': 'gaussian'}.get(type, type)
+        if type not in ('importance', 'bridge', 'gaussian'):
             raise ValueError(
-                f"type must be 'is', 'bridge', or 'cumulant', got '{type}'."
+                "type must be 'importance', 'bridge', or 'gaussian', "
+                f"got '{type}'."
             )
         if not isinstance(burnin, int) or burnin < 0:
             raise ValueError(
@@ -56,16 +61,14 @@ class RatioEstimator:
                 f"thinning must be a positive integer. Got {thinning}."
             )
 
-        self._surrogateMeasure = surrogateMeasure
         self._burnin = burnin
         self._thinning = thinning
         self._type = type
-        self._validate_configured_trajectory()
 
     @staticmethod
     def minimum_samples(estimatorType):
         """Return the retained-state requirement for an estimator."""
-        return 2 if estimatorType == 'cumulant' else 1
+        return 2 if estimatorType in ('gaussian', 'cumulant') else 1
 
     @staticmethod
     def retained_sample_count(availableStates, burnin, thinning):
@@ -73,9 +76,27 @@ class RatioEstimator:
         remaining = max(0, availableStates - burnin)
         return (remaining + thinning - 1) // thinning
 
+    @staticmethod
+    def default_burnin(rootLength):
+        """States discarded from a root run of ``rootLength`` by default.
+
+        A quarter of the non-terminal states, rounded down, so a run of 20
+        discards five and a run of 10 discards two.
+        """
+        return rootLength // 4
+
     @property
     def estimatorType(self):
         return self._type
+
+    @property
+    def burnin(self) -> int:
+        """Leading non-terminal root states discarded before estimation."""
+        return self._burnin
+
+    @property
+    def thinning(self) -> int:
+        return self._thinning
 
     @property
     def minimumSamples(self):
@@ -84,29 +105,6 @@ class RatioEstimator:
     @property
     def requires_proposal_trajectory(self):
         return self._type == 'bridge'
-
-    def _validate_configured_trajectory(self):
-        subchainLength = getattr(
-            self._surrogateMeasure, "subchainLength", None
-        )
-        if not isinstance(subchainLength, int) or subchainLength == 0:
-            return
-        retained = self.retained_sample_count(
-            subchainLength, self._burnin, self._thinning
-        )
-        if retained < self.minimumSamples:
-            raise ValueError(
-                f"{self._type} ratio estimation requires at least "
-                f"{self.minimumSamples} retained state(s); configuration "
-                f"retains {retained}."
-            )
-
-    def with_surrogate_measure(self, surrogateMeasure):
-        """Return the estimator bound to ``surrogateMeasure``."""
-        result = copy.copy(self)
-        result._surrogateMeasure = surrogateMeasure
-        result._validate_configured_trajectory()
-        return result
 
     def _as_trajectory(self, trajectory, backend, metadata, dimension):
         if isinstance(trajectory, list):
@@ -145,8 +143,8 @@ class RatioEstimator:
             return None
 
     def log_ratio_estimate(
-        self, state: Parameter, proposal: Parameter, trajectory=None,
-        proposalTrajectory=None,
+        self, state: Parameter, proposal: Parameter, trajectory,
+        proposalTrajectory=None, *, penaltyMetric, returnDiagnostics=False,
     ):
         """Estimate log(N_z / N_x) from explicit retained trajectories."""
         backend = infer_backend(state.coordinate)
@@ -154,16 +152,17 @@ class RatioEstimator:
         zero = backend.asarray(
             0., dtype=metadata.dtype, device=metadata.device
         )
+        # Retained states run along the first axis and chains along the
+        # batch axes, so every reduction below keeps the chains apart.
         coincident = backend.namespace.all(
-            state.coordinate == proposal.coordinate
+            state.coordinate == proposal.coordinate, axis=-1
         )
-        if self._concrete_truth(coincident):
-            return zero
+        if self._concrete_truth(backend.namespace.all(coincident)):
+            estimate = backend.namespace.where(coincident, zero, zero)
+            diagnostics = {"logWeightMean": estimate,
+                           "logWeightVariance": estimate}
+            return (estimate, diagnostics) if returnDiagnostics else estimate
 
-        trajectory = (
-            self._surrogateMeasure.chain.trajectory
-            if trajectory is None else trajectory
-        )
         samples = self._retained_samples(
             trajectory,
             backend,
@@ -172,30 +171,37 @@ class RatioEstimator:
             "the state trajectory",
         )
 
-        spectralWeights = self._surrogateMeasure.density.spectralWeights
         weights = log_dot_product_weights(
-            self._surrogateMeasure.regularisation,
-            samples,
-            state.coordinate,
-            proposal.coordinate,
-            spectralWeights,
+            penaltyMetric, samples, state.coordinate, proposal.coordinate
         )
         nSamples = weights.shape[0]
         logSamples = backend.namespace.log(backend.asarray(
             nSamples, dtype=metadata.dtype, device=metadata.device
         ))
+        weightMean = backend.namespace.mean(weights, axis=0)
+        weightVariance = backend.namespace.sum(
+            (weights - weightMean) ** 2, axis=0
+        ) / (nSamples - 1) if nSamples > 1 else zero
 
-        if self._type == 'is':
-            estimate = backend.namespace.logsumexp(-weights) - logSamples
-            return backend.namespace.where(coincident, zero, estimate)
+        def result(estimate):
+            estimate = backend.namespace.where(coincident, zero, estimate)
+            if not returnDiagnostics:
+                return estimate
+            diagnostics = {
+                "logWeightMean": backend.namespace.where(
+                    coincident, zero, weightMean),
+                "logWeightVariance": backend.namespace.where(
+                    coincident, zero, weightVariance),
+            }
+            return estimate, diagnostics
 
-        if self._type == 'cumulant':
-            mean = backend.namespace.mean(weights)
-            variance = backend.namespace.sum(
-                (weights - mean) ** 2
-            ) / (nSamples - 1)
-            estimate = -mean + 0.5 * variance
-            return backend.namespace.where(coincident, zero, estimate)
+        if self._type == 'importance':
+            estimate = backend.namespace.logsumexp(-weights, axis=0) - logSamples
+            return result(estimate)
+
+        if self._type == 'gaussian':
+            estimate = -weightMean + 0.5 * weightVariance
+            return result(estimate)
 
         if proposalTrajectory is None:
             raise ValueError(
@@ -210,14 +216,10 @@ class RatioEstimator:
             "the proposal trajectory",
         )
         proposalWeights = log_dot_product_weights(
-            self._surrogateMeasure.regularisation,
-            proposalSamples,
-            state.coordinate,
-            proposal.coordinate,
-            spectralWeights,
+            penaltyMetric, proposalSamples, state.coordinate, proposal.coordinate
         )
         logStateEstimate = (
-            backend.namespace.logsumexp(-0.5 * weights) - logSamples
+            backend.namespace.logsumexp(-0.5 * weights, axis=0) - logSamples
         )
         logProposalSamples = backend.namespace.log(backend.asarray(
             proposalWeights.shape[0],
@@ -225,8 +227,47 @@ class RatioEstimator:
             device=metadata.device,
         ))
         logProposalEstimate = (
-            backend.namespace.logsumexp(0.5 * proposalWeights)
+            backend.namespace.logsumexp(0.5 * proposalWeights, axis=0)
             - logProposalSamples
         )
         estimate = logStateEstimate - logProposalEstimate
-        return backend.namespace.where(coincident, zero, estimate)
+        return result(estimate)
+
+
+class RatioEstimator(NormalisingRatioEstimator):
+    """Legacy constructor retaining only a metric snapshot and estimator settings.
+
+    Trajectories are explicit arguments; an estimate never reads a sampler's
+    stored history. DART supplies its current metric on every call.
+    """
+
+    def __init__(self, surrogateMeasure, burnin, thinning, type='gaussian'):
+        super().__init__(burnin, thinning, type)
+        from styne.statistics.covariance import CovarianceMatrix
+        self._metric = getattr(surrogateMeasure, 'penaltyMetric', None)
+        if not isinstance(self._metric, (int, float, np.number, CovarianceMatrix)):
+            self._metric = surrogateMeasure.regularisation
+            weights = getattr(surrogateMeasure.density, 'spectralWeights', None)
+            if weights is not None:
+                from styne.statistics.covariance import DiagonalCovarianceMatrix
+                self._metric = DiagonalCovarianceMatrix(self._metric * weights ** 2)
+        length = getattr(surrogateMeasure, 'subchainLength', None)
+        if isinstance(length, int) and length > 0:
+            retained = self.retained_sample_count(length, burnin, thinning)
+            if retained < self.minimumSamples:
+                raise ValueError(f"{self.estimatorType} requires at least "
+                                 f"{self.minimumSamples} retained state(s); "
+                                 f"configuration retains {retained}.")
+
+    def log_ratio_estimate(self, state, proposal, trajectory, proposalTrajectory=None,
+                           *, penaltyMetric=None, returnDiagnostics=False):
+        return super().log_ratio_estimate(
+            state, proposal, trajectory, proposalTrajectory,
+            penaltyMetric=self._metric if penaltyMetric is None else penaltyMetric,
+            returnDiagnostics=returnDiagnostics,
+        )
+
+    def with_surrogate_measure(self, surrogateMeasure):
+        return type(self)(
+            surrogateMeasure, self.burnin, self.thinning, self.estimatorType
+        )
